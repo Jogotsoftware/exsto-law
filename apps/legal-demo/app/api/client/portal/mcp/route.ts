@@ -14,6 +14,7 @@ import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
 import { clientIpFrom } from '@/lib/rateLimit'
 import { stampExecutedCopies, stampedBytesByDocIndex } from '@/lib/esignStamping'
+import { generateAndStoreEngagementExecutedCopy } from '@/lib/engagementExecutedCopy'
 
 export const runtime = 'nodejs'
 // RUNTIME-AUTORUN-2: a client delivery here (an upload/message that advances a gate) may
@@ -132,6 +133,23 @@ export async function POST(request: Request) {
           stampedBytesByDocIndex(stamped),
         ).catch((notifyErr) => {
           console.error('esign completion-copy notify failed:', notifyErr)
+        })
+      }
+    }
+
+    // ENGAGEMENT-DOC-1 — when the client accepts the firm's engagement agreement,
+    // their typed name is a signature: render + stamp + store the executed copy
+    // (downloadable afterward). Same app-layer-owns-Storage split as e-sign above.
+    // Best-effort: the acceptance is already recorded, so a render/store failure
+    // must never turn a successful acceptance into an error.
+    if (body.toolName === 'legal.client.engagement_accept') {
+      const signerName = typeof input.signedName === 'string' ? input.signedName.trim() : ''
+      if (signerName) {
+        await generateAndStoreEngagementExecutedCopy(ctx, clientContactId, {
+          signerName,
+          signedAtIso: new Date().toISOString(),
+        }).catch((copyErr) => {
+          console.error('engagement executed-copy failed:', copyErr)
         })
       }
     }

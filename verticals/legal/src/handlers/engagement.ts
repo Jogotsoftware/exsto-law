@@ -220,10 +220,14 @@ function engagementDecisionHandler(
     const signedName = typeof p.signed_name === 'string' ? p.signed_name.trim() : ''
     if (eventKindName === 'engagement.accepted') {
       if (!rate) throw new Error('The firm has no standard hourly rate configured yet.')
-      if (!terms) throw new Error('The firm has not published engagement terms yet.')
+      // The uploaded agreement document IS the terms — a firm with one does not
+      // also need published text terms. Only refuse when there is NOTHING to
+      // consent to (no agreement AND no text terms).
+      if (!terms && !agreement) {
+        throw new Error('The firm has not published engagement terms yet.')
+      }
       // When the firm's real agreement is configured, acceptance IS a signing:
-      // the typed name is the client's electronic signature on the merged
-      // document (founder decision 2026-07-21: document + text terms, both).
+      // the typed name is the client's electronic signature on that document.
       if (agreement && !signedName) {
         throw new Error('Type your full name to sign the engagement agreement.')
       }

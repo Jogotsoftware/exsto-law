@@ -26403,3 +26403,30 @@ details.li-brief-research summary:hover {
   font-family: 'Snell Roundhand', 'Segoe Script', cursive;
   font-size: 1.05rem;
 }
+
+/* ── ENGAGEMENT-DOC-1 — download the client's executed engagement agreement ── */
+.li-cp-signed-agreement {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--li-line, #e3e6ee);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--li-navy, #1b2a4a);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.li-cp-signed-agreement:hover {
+  border-color: var(--li-gold, #d8c084);
+  box-shadow: 0 1px 6px rgba(27, 42, 74, 0.08);
+}
+.li-cp-signed-agreement svg {
+  color: var(--li-gold, #b9932f);
+  flex-shrink: 0;
+}

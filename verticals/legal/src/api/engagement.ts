@@ -20,7 +20,11 @@ export interface EngagementConfig {
   rate: string | null
   termsText: string | null
   termsVersion: number | null
-  /** True when both a rate and published terms exist — the gate can be offered. */
+  /** True when the firm uploaded an engagement-agreement document (the client
+   *  signs THAT, and it — not the text terms — is what makes the gate offerable). */
+  hasAgreement: boolean
+  /** True when the gate can be offered: a rate plus SOMETHING to consent to —
+   *  either the uploaded agreement document or published text terms. */
   configured: boolean
 }
 
@@ -33,15 +37,20 @@ export interface EngagementStatus {
 }
 
 export async function getEngagementConfig(ctx: ActionContext): Promise<EngagementConfig> {
-  const [rate, terms] = await Promise.all([
+  const [rate, terms, agreement] = await Promise.all([
     getFirmDefaultRate(ctx),
     withActionContext(ctx, (client) => readEngagementTerms(client, ctx.tenantId)),
+    withActionContext(ctx, (client) => readEngagementTemplate(client, ctx.tenantId)),
   ])
+  const hasAgreement = Boolean(agreement)
   return {
     rate,
     termsText: terms?.text ?? null,
     termsVersion: terms?.version ?? null,
-    configured: Boolean(rate && terms),
+    hasAgreement,
+    // The uploaded agreement document is itself the terms the client signs — a
+    // firm that has one does NOT also need to publish separate text terms.
+    configured: Boolean(rate && (terms || hasAgreement)),
   }
 }
 
