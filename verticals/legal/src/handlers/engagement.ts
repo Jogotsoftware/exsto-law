@@ -49,6 +49,107 @@ export async function readEngagementTerms(
   return { text: v.text, version: Number(v.version) || 1, published_at: String(v.published_at) }
 }
 
+// ENGAGEMENT-DOC-1 (migration 0189) — the firm's engagement-agreement TEMPLATE:
+// the attorney's real engagement letter, parsed into a merge template. When set,
+// the portal gate renders the merged document for the client to sign IN ADDITION
+// to the text-terms acceptance (founder decision 2026-07-21: both, not either).
+export interface EngagementTemplateValue {
+  template_id: string
+  version: number
+  uploaded_at: string
+  source_filename: string | null
+  details: Record<string, unknown>
+}
+
+export async function readEngagementTemplate(
+  client: DbClient,
+  tenantId: string,
+): Promise<EngagementTemplateValue | null> {
+  const res = await client.query<{ value: EngagementTemplateValue | null }>(
+    `SELECT a.value
+       FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       JOIN entity e ON e.id = a.entity_id
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+      WHERE a.tenant_id = $1
+        AND akd.kind_name = 'engagement_template'
+        AND ekd.kind_name = 'firm_settings'
+        AND (a.valid_to IS NULL OR a.valid_to > now())
+      ORDER BY a.valid_from DESC
+      LIMIT 1`,
+    [tenantId],
+  )
+  const v = res.rows[0]?.value
+  if (!v || typeof v.template_id !== 'string' || !v.template_id) return null
+  return {
+    template_id: v.template_id,
+    version: Number(v.version) || 1,
+    uploaded_at: String(v.uploaded_at),
+    source_filename: v.source_filename ?? null,
+    details: v.details && typeof v.details === 'object' ? v.details : {},
+  }
+}
+
+registerActionHandler(
+  'legal.firm.set_engagement_template',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as {
+      template_id?: string | null
+      source_filename?: string
+      details?: Record<string, unknown>
+    }
+    const prior = await readEngagementTemplate(client, ctx.tenantId)
+    const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'engagement_template',
+    )
+    // Clearing is a real state (gate falls back to text terms only) — recorded
+    // as an explicit null-template value, never a delete.
+    if (!p.template_id) {
+      await insertAttribute(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        entityId: firmSettingsId,
+        attributeKindId: akId,
+        value: { template_id: null },
+        confidence: 1.0,
+        sourceType: 'human',
+        sourceRef: ctx.actorId,
+      })
+      return { firm_settings_id: firmSettingsId, template_id: null }
+    }
+    const tpl = await client.query(
+      `SELECT 1 FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       WHERE e.id = $1 AND e.tenant_id = $2
+         AND ekd.kind_name = 'template' AND e.status = 'active'`,
+      [p.template_id, ctx.tenantId],
+    )
+    if (tpl.rowCount === 0) throw new Error('Unknown or inactive template.')
+    const version = (prior?.version ?? 0) + 1
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: firmSettingsId,
+      attributeKindId: akId,
+      value: {
+        template_id: p.template_id,
+        version,
+        uploaded_at: new Date().toISOString(),
+        source_filename: p.source_filename ?? null,
+        details: p.details ?? {},
+      },
+      confidence: 1.0,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { firm_settings_id: firmSettingsId, template_id: p.template_id, version }
+  },
+)
+
 registerActionHandler('legal.firm.set_engagement_terms', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as { text?: string }
   const text = (p.text ?? '').trim()
@@ -81,6 +182,9 @@ registerActionHandler('legal.firm.set_engagement_terms', async (ctx, client, pay
 
 interface EngagementDecisionPayload {
   client_contact_id: string
+  // ENGAGEMENT-DOC-1 — the client's typed signature on the merged agreement.
+  // Required iff the firm has an engagement-agreement template configured.
+  signed_name?: string
 }
 
 async function assertActiveClientContact(
@@ -112,9 +216,17 @@ function engagementDecisionHandler(
     // to consent to, and a rate-less acceptance would be an empty receipt.
     const rate = await readFirmDefaultRate(client, ctx.tenantId)
     const terms = await readEngagementTerms(client, ctx.tenantId)
+    const agreement = await readEngagementTemplate(client, ctx.tenantId)
+    const signedName = typeof p.signed_name === 'string' ? p.signed_name.trim() : ''
     if (eventKindName === 'engagement.accepted') {
       if (!rate) throw new Error('The firm has no standard hourly rate configured yet.')
       if (!terms) throw new Error('The firm has not published engagement terms yet.')
+      // When the firm's real agreement is configured, acceptance IS a signing:
+      // the typed name is the client's electronic signature on the merged
+      // document (founder decision 2026-07-21: document + text terms, both).
+      if (agreement && !signedName) {
+        throw new Error('Type your full name to sign the engagement agreement.')
+      }
     }
 
     const consentEventId = await insertEvent(client, {
@@ -127,6 +239,9 @@ function engagementDecisionHandler(
         rate: rate ?? null,
         currency: 'USD',
         terms_version: terms?.version ?? null,
+        agreement_template_id: agreement?.template_id ?? null,
+        agreement_template_version: agreement?.version ?? null,
+        signed_name: signedName || null,
       },
       sourceType: 'human',
       sourceRef: `client_contact:${p.client_contact_id}`,

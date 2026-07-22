@@ -19,6 +19,7 @@ import { portalNavKinds, type PortalNavKind } from '@/lib/portalNav'
 import { Tabs } from '@/components/Tabs'
 import { useI18n } from '@/lib/i18n'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 
 // LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
@@ -317,7 +318,12 @@ export default function ClientPortalPage() {
   return (
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
       <div className="li-cp-shell li-cpnav-shell">
-        <PortalSideNav items={navItems} active={view.kind} onSelect={(kind) => setView({ kind })} />
+        <PortalSideNav
+          items={navItems}
+          active={view.kind}
+          onSelect={(kind) => setView({ kind })}
+          user={me ? { displayName: me.displayName, email: me.email } : null}
+        />
         <div className="li-cpnav-col">
           <header className="li-cpnav-header">
             <div className="li-cp-top">
@@ -367,17 +373,6 @@ export default function ClientPortalPage() {
                     <BellIcon size={19} />
                     {badge > 0 && <span className="li-top-bell-dot" aria-hidden="true" />}
                   </button>
-                  {me && (
-                    <span className="li-cp-who" title={me.email}>
-                      <span className="li-cp-avatar" aria-hidden>
-                        {firmInitials(me.displayName)}
-                      </span>
-                      <span className="li-cp-who-name">{me.displayName}</span>
-                    </span>
-                  )}
-                  <a href="/api/client/auth/logout" className="li-cp-signout">
-                    {t('portal.signout', undefined, 'Sign out')}
-                  </a>
                 </div>
               </div>
             </div>
@@ -890,6 +885,12 @@ function EngagementGateModal({
 }) {
   const { t } = useI18n()
   const [terms, setTerms] = useState<string | null>(null)
+  // ENGAGEMENT-DOC-1 — when the firm has uploaded its real engagement letter,
+  // the gate shows the FULL merged agreement and the typed name below is the
+  // client's electronic signature (required server-side). The text terms +
+  // fee-consent checkbox stay alongside (founder decision: both).
+  const [agreement, setAgreement] = useState<{ markdown: string } | null>(null)
+  const [signedName, setSignedName] = useState('')
   const [accepted, setAccepted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -898,17 +899,30 @@ function EngagementGateModal({
     callClientPortalMcp<{
       status: { accepted: boolean }
       config: { rate: string | null; termsText: string | null; configured: boolean }
+      agreement: { markdown: string } | null
     }>({ toolName: 'legal.client.engagement' })
-      .then((r) => setTerms(r.config.termsText))
+      .then((r) => {
+        setTerms(r.config.termsText)
+        setAgreement(r.agreement ?? null)
+      })
       .catch(() => setTerms(null))
   }, [])
 
   async function confirm() {
     if (!accepted || busy) return
+    if (agreement && !signedName.trim()) {
+      setError(
+        t('portal.gate.sign_required', undefined, 'Type your full name to sign the agreement.'),
+      )
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      await callClientPortalMcp({ toolName: 'legal.client.engagement_accept' })
+      await callClientPortalMcp({
+        toolName: 'legal.client.engagement_accept',
+        input: agreement ? { signedName: signedName.trim() } : {},
+      })
       onAccepted()
     } catch (e) {
       if (!(e instanceof PortalSessionExpiredError)) {
@@ -944,6 +958,26 @@ function EngagementGateModal({
             <p className="li-cp-muted">{t('portal.gate.unavailable')}</p>
           ) : (
             <>
+              {agreement && (
+                <div
+                  className="li-cp-agreement-doc"
+                  dangerouslySetInnerHTML={{ __html: renderDocumentHtml(agreement.markdown) }}
+                />
+              )}
+              {agreement && (
+                <label className="li-cp-sign-row">
+                  <span>
+                    {t('portal.gate.sign_label', undefined, 'Sign by typing your full name')}
+                  </span>
+                  <input
+                    className="li-cp-sign-input"
+                    value={signedName}
+                    onChange={(e) => setSignedName(e.target.value)}
+                    placeholder={t('portal.gate.sign_placeholder', undefined, 'Your full name')}
+                    autoComplete="name"
+                  />
+                </label>
+              )}
               {terms && <div className="li-cp-terms">{terms}</div>}
               <FeeConsentCard
                 quote={{

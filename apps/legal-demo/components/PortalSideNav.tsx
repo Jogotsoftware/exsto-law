@@ -11,7 +11,8 @@
 // rails can never drift apart visually. Portal differences only:
 //   - items are view-switching BUTTONS (the portal is a single-page view
 //     machine, not routed pages), supplied by the page via props;
-//   - no bottom user block — the portal header keeps user + sign-out;
+//   - the bottom user block shows the CLIENT (founder 2026-07-21: user +
+//     sign-out live here, exactly like the platform rail, not the top bar);
 //   - its own pin storage key, so attorney/portal pin states don't collide.
 // New CSS lives in the append-only li-cpnav-* family (globals.css tail); the
 // shared li-rail-* rules are reused untouched.
@@ -25,18 +26,34 @@ export interface PortalNavItem {
   Icon: (props: { size?: number }) => React.JSX.Element
 }
 
+export interface PortalNavUser {
+  displayName: string
+  email: string
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '·'
+  return (
+    (parts[0][0] ?? '') + (parts.length > 1 ? (parts[parts.length - 1][0] ?? '') : '')
+  ).toUpperCase()
+}
+
 const PIN_STORAGE_KEY = 'exsto.li.cpRailPinned'
 
 export function PortalSideNav({
   items,
   active,
   onSelect,
+  user,
 }: {
   items: PortalNavItem[]
   active: string
   onSelect: (kind: PortalNavKind) => void
+  user?: PortalNavUser | null
 }): React.JSX.Element {
   const { t } = useI18n()
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [canHover, setCanHover] = useState(true)
@@ -161,6 +178,35 @@ export function PortalSideNav({
             )
           })}
         </nav>
+
+        {user && (
+          <div className="li-rail-user">
+            <button
+              type="button"
+              className="li-rail-user-btn"
+              onClick={() => setUserMenuOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              aria-label={t('portal.nav.account', undefined, 'Account menu')}
+            >
+              <span className="li-rail-avatar">{initials(user.displayName)}</span>
+              <span className="li-rail-user-id li-rail-fade">
+                <span className="li-rail-user-name">{user.displayName}</span>
+                <span className="li-rail-user-role">
+                  {t('portal.nav.client_role', undefined, 'Client')}
+                </span>
+              </span>
+            </button>
+            {userMenuOpen && (
+              <div className="li-rail-pop" role="menu">
+                <div className="li-rail-pop-email">{user.email}</div>
+                <a href="/api/client/auth/logout" className="li-rail-pop-signout" role="menuitem">
+                  {t('portal.signout', undefined, 'Sign out')}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
       </aside>
     </>
   )
