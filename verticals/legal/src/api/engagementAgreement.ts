@@ -15,11 +15,15 @@ import { submitAction, withActionContext, type ActionContext } from '@exsto/subs
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { createTemplate } from './standaloneTemplates.js'
 import { setEngagementTemplate, getEngagementTemplate } from './engagement.js'
-import { readContactEngagementOverride } from '../handlers/engagement.js'
+import {
+  readContactEngagementOverride,
+  readMatterEngagementOverride,
+} from '../handlers/engagement.js'
 import { getStandaloneTemplate } from '../queries/templates.js'
 import { getContact } from '../queries/contacts.js'
 import { getTenantSettings } from './tenantSettings.js'
 import { renderTemplate, longDate } from './templateMerge.js'
+import { readFirmDefault, formatRateUsd } from './rates.js'
 import {
   DETAILS_DELIM,
   parseImportOutput,
@@ -189,6 +193,118 @@ export async function setContactEngagementLetter(
   return { templateId: eff.template_id }
 }
 
+// ENGAGEMENT-TEMPLATES-1 Phase 3 — the per-matter override (migration 0192). The
+// engagement letter chosen for a specific matter, or null to defer to the
+// per-contact override / firm default. Tolerant of the 0192 kind not existing.
+export async function getMatterEngagementOverride(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<string | null> {
+  return withActionContext(ctx, (client) =>
+    readMatterEngagementOverride(client, ctx.tenantId, matterEntityId),
+  )
+}
+
+// Attorney picks which engagement letter applies to a specific matter (templateId),
+// or clears it back to the contact override / firm default (null).
+export async function setMatterEngagementLetter(
+  ctx: ActionContext,
+  matterEntityId: string,
+  templateId: string | null,
+): Promise<{ templateId: string | null }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.matter.set_engagement_letter',
+    intentKind: 'adjustment',
+    payload: { matter_entity_id: matterEntityId, template_id: templateId },
+  })
+  const eff = res.effects[0] as { template_id: string | null }
+  return { templateId: eff.template_id }
+}
+
+// Resolve the matter-level override that applies to THIS client's gate. The gate
+// is per-contact and one-time, so we look across the contact's matters (same three
+// relationship paths the CRM uses): if any matter carries an engagement-letter
+// override, it sets the letter. Most recently created matter wins the tiebreak
+// when several do. Null when none — the caller falls back to the contact override
+// / firm default. Safe before 0192 applies (the kind join returns nothing → null).
+export async function resolveContactMatterOverride(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ template_id: string | null }>(
+      `WITH contact_matter AS (
+         SELECT r.target_entity_id AS matter_id
+           FROM relationship r
+           JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+          WHERE r.tenant_id = $1 AND r.source_entity_id = $2::uuid
+            AND rkd.kind_name = 'client_of' AND (r.valid_to IS NULL OR r.valid_to > now())
+         UNION
+         SELECT r.source_entity_id AS matter_id
+           FROM relationship r
+           JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+          WHERE r.tenant_id = $1 AND r.target_entity_id = $2::uuid
+            AND rkd.kind_name = 'matter_has_client' AND (r.valid_to IS NULL OR r.valid_to > now())
+         UNION
+         SELECT mo.source_entity_id AS matter_id
+           FROM relationship co
+           JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id AND cok.kind_name = 'contact_of'
+           JOIN relationship mo ON mo.target_entity_id = co.target_entity_id
+           JOIN relationship_kind_definition mok ON mok.id = mo.relationship_kind_id AND mok.kind_name = 'matter_of'
+          WHERE co.tenant_id = $1 AND co.source_entity_id = $2::uuid
+            AND (co.valid_to IS NULL OR co.valid_to > now())
+            AND (mo.valid_to IS NULL OR mo.valid_to > now())
+       ),
+       latest AS (
+         SELECT DISTINCT ON (a.entity_id)
+                a.entity_id, a.value #>> '{}' AS template_id, m.created_at
+           FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+           JOIN entity m ON m.id = a.entity_id
+          WHERE a.tenant_id = $1
+            AND akd.kind_name = 'matter_engagement_letter_override'
+            AND a.entity_id IN (SELECT matter_id FROM contact_matter)
+          ORDER BY a.entity_id, a.valid_from DESC
+       )
+       SELECT template_id FROM latest
+        WHERE template_id IS NOT NULL AND template_id <> ''
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [ctx.tenantId, clientContactId],
+    )
+    return res.rows[0]?.template_id?.trim() || null
+  })
+}
+
+// The client's effective hourly rate for the engagement letter's rate merge slots:
+// their client entity's explicit client_billable_rate if set (resolved via the
+// contact's client parent, contact_of → client), otherwise the firm default. Both
+// are decimal strings (ADR 0044) or null when unset.
+export async function resolveContactEffectiveRate(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<{ firmDefault: string | null; effective: string | null }> {
+  return withActionContext(ctx, async (client) => {
+    const firmDefault = await readFirmDefault(client, ctx.tenantId)
+    const own = await client.query<{ rate: string | null }>(
+      `SELECT a.value #>> '{}' AS rate
+         FROM relationship co
+         JOIN relationship_kind_definition cok
+           ON cok.id = co.relationship_kind_id AND cok.kind_name = 'contact_of'
+         JOIN attribute a ON a.entity_id = co.target_entity_id
+         JOIN attribute_kind_definition akd
+           ON akd.id = a.attribute_kind_id AND akd.kind_name = 'client_billable_rate'
+        WHERE co.tenant_id = $1 AND co.source_entity_id = $2::uuid
+          AND (co.valid_to IS NULL OR co.valid_to > now())
+        ORDER BY a.valid_from DESC
+        LIMIT 1`,
+      [ctx.tenantId, clientContactId],
+    )
+    const ownRate = own.rows[0]?.rate ?? null
+    return { firmDefault, effective: ownRate ?? firmDefault }
+  })
+}
+
 export async function getClientEngagementAgreement(
   ctx: ActionContext,
   clientContactId: string,
@@ -197,12 +313,17 @@ export async function getClientEngagementAgreement(
   // their per-contact override if set, else the firm default. Always falls back
   // to the default (founder). getContactEngagementOverride is tolerant of the
   // 0191 kind not existing yet (returns null → default).
-  const [override, pointer, contact, settings] = await Promise.all([
+  const [contactOverride, matterOverride, pointer, contact, settings, rate] = await Promise.all([
     getContactEngagementOverride(ctx, clientContactId),
+    resolveContactMatterOverride(ctx, clientContactId),
     getEngagementTemplate(ctx),
     getContact(ctx, clientContactId),
     getTenantSettings(ctx),
+    resolveContactEffectiveRate(ctx, clientContactId),
   ])
+  // Most-specific-wins: a matter override (a letter chosen for this client's
+  // matter) beats the per-contact override, which beats the firm default.
+  const override = matterOverride ?? contactOverride
   const defaultId = pointer?.template_id ?? null
   if (!override && !defaultId) return null
 
@@ -232,6 +353,12 @@ export async function getClientEngagementAgreement(
     firm_email: settings.firmEmail ?? undefined,
     firm_phone: settings.firmPhone ?? undefined,
     firm_address: settings.firmAddress ?? undefined,
+    // Rate merge slots (ENGAGEMENT-TEMPLATES-1 follow-up) — the letter shows the
+    // firm's LIVE rate instead of a literal that drifts. firm_hourly_rate is the
+    // firm default; client_hourly_rate is this client's effective rate (their own
+    // negotiated rate if set, else the firm default). Both currency-formatted.
+    firm_hourly_rate: formatRateUsd(rate.firmDefault),
+    client_hourly_rate: formatRateUsd(rate.effective),
   }
   const rendered = renderTemplate(template.body, data)
   // The contact has no stored street address — an address block that cannot

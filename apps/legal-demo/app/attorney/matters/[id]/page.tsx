@@ -275,6 +275,10 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           <h2 className="li-mat-card-title">Communications</h2>
           <DraftEmailControl matterEntityId={id} />
         </section>
+
+        {/* ENGAGEMENT-TEMPLATES-1 Phase 3 — which engagement letter this matter
+            uses (overrides the client's contact-level choice / firm default). */}
+        <MatterEngagementLetterCard matterEntityId={id} />
       </div>
 
       {!matter.workflow && openStep === 'intake' && (
@@ -680,6 +684,120 @@ function ExtractToNotesButton({ matterEntityId }: { matterEntityId: string }) {
         {busy ? 'Queuing…' : 'Extract to notes'}
       </button>
     </div>
+  )
+}
+
+// ── ENGAGEMENT-TEMPLATES-1 Phase 3 — per-matter engagement-letter override ──
+// The matter's engagement letter, chosen from the firm's library. Overrides the
+// client's contact-level choice AND the firm default at the portal gate (most-
+// specific-wins). Hidden when the firm has no engagement-letter library, or the
+// 0192 override kind isn't applied yet (the read fails cleanly → hide, no error).
+interface MatterEngLetterOption {
+  templateId: string
+  name: string
+  isDefault: boolean
+}
+
+function MatterEngagementLetterCard({
+  matterEntityId,
+}: {
+  matterEntityId: string
+}): React.ReactElement | null {
+  const [letters, setLetters] = useState<MatterEngLetterOption[]>([])
+  const [overrideId, setOverrideId] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{
+        overrideTemplateId: string | null
+        letters: MatterEngLetterOption[]
+      }>({
+        toolName: 'legal.matter.engagement_letter.get',
+        input: { matterEntityId },
+      })
+      setLetters(r.letters)
+      setOverrideId(r.overrideTemplateId)
+    } catch {
+      // The 0192 kind may not be applied yet — hide the card rather than error.
+      setLetters([])
+    } finally {
+      setLoaded(true)
+    }
+  }, [matterEntityId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function onChange(value: string): Promise<void> {
+    const templateId = value === '__default__' ? null : value
+    setSaving(true)
+    setMsg(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.set_engagement_letter',
+        input: { matterEntityId, templateId },
+      })
+      setOverrideId(templateId)
+      setMsg({
+        ok: true,
+        text: templateId
+          ? 'Saved — this matter uses the selected letter.'
+          : 'Cleared — this matter uses the client / firm default.',
+      })
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Nothing to choose from (no library, or the override kind isn't live yet).
+  if (loaded && letters.length === 0) return null
+
+  const defaultName = letters.find((l) => l.isDefault)?.name ?? 'Firm default'
+
+  return (
+    <section className="li-mat-card">
+      <h2 className="li-mat-card-title">Engagement Letter</h2>
+      <p className="text-muted text-sm" style={{ marginBottom: 'var(--space-3)' }}>
+        Which engagement letter applies to this matter. Leave on the default unless this matter
+        needs a specific one — it overrides the client&rsquo;s own choice and the firm default.
+      </p>
+      {!loaded ? (
+        <div className="text-muted text-sm">Loading…</div>
+      ) : (
+        <>
+          <select
+            className="li-set-input"
+            style={{ maxWidth: 420 }}
+            value={overrideId ?? '__default__'}
+            disabled={saving}
+            onChange={(e) => void onChange(e.target.value)}
+          >
+            <option value="__default__">Client / firm default ({defaultName})</option>
+            {letters
+              .filter((l) => !l.isDefault)
+              .map((l) => (
+                <option key={l.templateId} value={l.templateId}>
+                  {l.name}
+                </option>
+              ))}
+          </select>
+          {msg && (
+            <div
+              className={`alert ${msg.ok ? 'alert-success' : 'alert-error'}`}
+              style={{ marginTop: 'var(--space-3)' }}
+            >
+              {msg.text}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 

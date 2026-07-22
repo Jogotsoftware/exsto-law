@@ -88,6 +88,12 @@ export interface MergeDataOptions {
   // an honest [[MISSING: governing_jurisdiction]], same as every other curated
   // slot — never a guessed state.
   governingJurisdiction?: string
+  // Rate slots — already CURRENCY-FORMATTED by the caller (e.g. "$300.00"), which
+  // reads Contract K (rates.ts): firmHourlyRate = firm default; clientHourlyRate =
+  // this matter's client effective rate (own ?? firm default). Absent → the
+  // {{firm_hourly_rate}}/{{client_hourly_rate}} slots render an honest MISSING.
+  firmHourlyRate?: string
+  clientHourlyRate?: string
 }
 
 // Pull the first plausible value for a logical field out of the questionnaire
@@ -216,6 +222,12 @@ export function buildMergeData(
     fee_amount_formatted: options.feeAmountFormatted,
     fee_structure_human: options.feeStructureHuman,
 
+    // Rate block (from Contract K rates — currency-formatted by the caller). A
+    // firm that keeps its rate on the substrate can write "{{firm_hourly_rate}}"
+    // in an engagement/formation letter and it stays live instead of a literal.
+    firm_hourly_rate: options.firmHourlyRate,
+    client_hourly_rate: options.clientHourlyRate,
+
     // Clause-style slots — deterministic defaults (process, not client facts).
     scope_notes_clause: '',
     fee_terms_clause:
@@ -259,6 +271,8 @@ export const MERGE_SLOT_FIELDS: readonly string[] = [
   'firm_address',
   'fee_amount_formatted',
   'fee_structure_human',
+  'firm_hourly_rate',
+  'client_hourly_rate',
   'scope_notes_clause',
   'fee_terms_clause',
   'ambiguities_section',

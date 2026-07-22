@@ -36,6 +36,19 @@ function assertMoney(label: string, value: string): string {
   return v
 }
 
+/**
+ * Currency-format a decimal-string rate (ADR 0044) as US dollars, locale-fixed so
+ * the same rate always renders the same string (e.g. "300.00" → "$300.00"). Returns
+ * undefined for an unset/invalid value so a {{firm_hourly_rate}} merge slot renders
+ * an honest MISSING rather than a guess. The single place rate money becomes a
+ * merge-ready string, shared by the engagement letter and the matter-letter merge.
+ */
+export function formatRateUsd(decimal: string | null | undefined): string | undefined {
+  const s = (decimal ?? '').trim()
+  if (!MONEY_RE.test(s)) return undefined
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(s))
+}
+
 // ── Reads ────────────────────────────────────────────────────────────────────
 
 /** The firm-wide fallback hourly rate, or null if never set. */

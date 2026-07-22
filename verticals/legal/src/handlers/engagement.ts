@@ -155,6 +155,71 @@ registerActionHandler(
   },
 )
 
+// ENGAGEMENT-TEMPLATES-1 Phase 3 — the per-matter override reader (migration
+// 0192). Which engagement letter THIS matter uses, or null to defer to the
+// contact override / firm default. Tolerant of the kind not existing (0192 not
+// yet applied): a missing kind → null, so the gate falls back exactly as today.
+export async function readMatterEngagementOverride(
+  client: DbClient,
+  tenantId: string,
+  matterEntityId: string,
+): Promise<string | null> {
+  const v = await getLatestAttributeValue<string>(
+    client,
+    tenantId,
+    matterEntityId,
+    'matter_engagement_letter_override',
+  )
+  const id = typeof v === 'string' ? v.trim() : ''
+  return id || null
+}
+
+registerActionHandler(
+  'legal.matter.set_engagement_letter',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as { matter_entity_id?: string; template_id?: string | null }
+    if (!p.matter_entity_id) throw new Error('matter_entity_id is required.')
+    const matter = await client.query(
+      `SELECT 1 FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       WHERE e.id = $1 AND e.tenant_id = $2
+         AND ekd.kind_name = 'matter' AND e.status = 'active'`,
+      [p.matter_entity_id, ctx.tenantId],
+    )
+    if (matter.rowCount === 0) throw new Error('Unknown matter.')
+    const templateId = typeof p.template_id === 'string' ? p.template_id.trim() : ''
+    if (templateId) {
+      const tpl = await client.query(
+        `SELECT 1 FROM entity e
+         JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+         WHERE e.id = $1 AND e.tenant_id = $2
+           AND ekd.kind_name = 'template' AND e.status = 'active'`,
+        [templateId, ctx.tenantId],
+      )
+      if (tpl.rowCount === 0) throw new Error('Unknown or inactive template.')
+    }
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'matter_engagement_letter_override',
+    )
+    // Empty string = cleared (defer to contact override / firm default) — a real
+    // state, recorded append-only like every other value.
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.matter_entity_id,
+      attributeKindId: akId,
+      value: templateId,
+      confidence: 1.0,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { matter_entity_id: p.matter_entity_id, template_id: templateId || null }
+  },
+)
+
 registerActionHandler(
   'legal.firm.set_engagement_template',
   async (ctx, client, payload, actionId) => {
