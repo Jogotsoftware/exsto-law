@@ -373,10 +373,17 @@ function EngagementAgreementCard(): React.ReactElement {
       if (!parsed.ok || !parsedJson.text) {
         throw new Error(parsedJson.error ?? 'Could not read the file.')
       }
-      await callAttorneyMcp({
+      // The conversion is a full drafting-model pass (~80s on a multi-page
+      // letter), so it runs OFF the request on the worker — we enqueue and poll
+      // for the outcome instead of holding the request open (which 504'd).
+      const { requestId } = await callAttorneyMcp<{ requestId: string }>({
         toolName: 'legal.firm.import_engagement_agreement',
         input: { markdown: parsedJson.text, sourceFilename: file.name },
       })
+      const outcome = await pollImportResult(requestId)
+      if (outcome.status === 'failed') {
+        throw new Error(outcome.error ?? 'The engagement agreement could not be imported.')
+      }
       await refresh()
       setDone('Engagement agreement is live — clients now sign it in the portal.')
     } catch (e) {
@@ -384,6 +391,25 @@ function EngagementAgreementCard(): React.ReactElement {
     } finally {
       setBusy(null)
     }
+  }
+
+  // Poll the worker outcome. The model pass can take 1–2 min; poll every 3s up to
+  // 4 min, then surface a timeout the attorney can retry.
+  async function pollImportResult(
+    requestId: string,
+  ): Promise<{ status: 'completed' | 'failed'; error?: string }> {
+    const deadline = Date.now() + 4 * 60 * 1000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const { result } = await callAttorneyMcp<{
+        result: { status: 'completed' | 'failed'; error?: string } | null
+      }>({
+        toolName: 'legal.firm.import_engagement_agreement.result',
+        input: { requestId },
+      })
+      if (result) return result
+    }
+    return { status: 'failed', error: 'Timed out converting the letter — please try again.' }
   }
 
   async function onRemove(): Promise<void> {
@@ -476,6 +502,12 @@ function EngagementAgreementCard(): React.ReactElement {
               </button>
             )}
           </div>
+          {busy === 'upload' && (
+            <p className="li-set-hint" style={{ marginTop: 10 }}>
+              Reading your letter and building the merge template — this can take a minute or two.
+              You can leave this page; it keeps working.
+            </p>
+          )}
         </>
       )}
     </div>

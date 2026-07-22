@@ -12,7 +12,8 @@ import {
   setFirmDefaultRate,
   getEngagementTemplate,
   setEngagementTemplate,
-  importEngagementAgreement,
+  enqueueEngagementImport,
+  getEngagementImportResult,
   getEmailDraftingConfig,
   updateEmailDraftingConfig,
   getFirmProfile,
@@ -38,7 +39,8 @@ import {
   type TenantSettings,
   type UpdateEmailDraftingConfigInput,
   type UpdateTenantSettingsInput,
-  type EngagementAgreementImportResult,
+  type EnqueueEngagementImportResult,
+  type EngagementImportJobResult,
   type EngagementTemplateValue,
 } from '../../index.js'
 import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
@@ -275,17 +277,30 @@ registerTool({
   handler: async (ctx: ActionContext) => ({ agreement: await getEngagementTemplate(ctx) }),
 } satisfies Tool<Record<string, never>, { agreement: EngagementTemplateValue | null }>)
 
+// ENQUEUE-AND-RETURN (was synchronous — the model pass on a multi-page letter
+// ≈ 80s, which 504'd the gateway). Enqueues the import on the worker and returns a
+// requestId immediately; the settings card polls legal.firm.import_engagement_agreement.result.
 registerTool({
   name: 'legal.firm.import_engagement_agreement',
   description:
-    'Convert an uploaded engagement letter (parsed markdown) into the firm engagement-agreement merge template and set the firm pointer to it. Client-specific values become merge fields; the client acceptance block gets {{sign:client}}/{{date:client}} markers; rates/retainer are extracted into details. Replaces any prior agreement pointer (prior template stays in history).',
+    'Enqueue conversion of an uploaded engagement letter (parsed markdown) into the firm engagement-agreement merge template, OFF the request (the model pass is slow and would 504 the gateway). Client-specific values become merge fields; the client acceptance block gets {{sign:client}}/{{date:client}} markers; rates/retainer are extracted into details. Returns { jobId, requestId }; poll legal.firm.import_engagement_agreement.result with the requestId. On completion the firm pointer is set (replacing any prior agreement; the prior template stays in history).',
   mode: 'write',
   handler: async (ctx: ActionContext, input) =>
-    await importEngagementAgreement(ctx, {
+    await enqueueEngagementImport(ctx, {
       markdown: input.markdown,
       sourceFilename: input.sourceFilename,
     }),
-} satisfies Tool<{ markdown: string; sourceFilename?: string }, EngagementAgreementImportResult>)
+} satisfies Tool<{ markdown: string; sourceFilename?: string }, EnqueueEngagementImportResult>)
+
+registerTool({
+  name: 'legal.firm.import_engagement_agreement.result',
+  description:
+    'Poll the outcome of an engagement-agreement import by requestId: { status: "completed" | "failed", templateId?, version?, details?, error? }, or null while the worker is still running. The settings card polls this after enqueuing.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    result: await getEngagementImportResult(ctx, input.requestId),
+  }),
+} satisfies Tool<{ requestId: string }, { result: EngagementImportJobResult | null }>)
 
 registerTool({
   name: 'legal.firm.clear_engagement_agreement',
