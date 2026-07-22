@@ -11170,7 +11170,7 @@ input[type='number'] {
 .li-rev-thead,
 .li-rev-row {
   display: grid;
-  grid-template-columns: 44px 1.15fr 1.25fr 1.5fr 64px 1.15fr 96px;
+  grid-template-columns: 44px 1.15fr 1.25fr 1.5fr 64px 1.15fr 168px;
   align-items: center;
   gap: 16px;
   padding: 14px 22px;
@@ -26180,6 +26180,32 @@ details.li-brief-research summary:hover {
   box-shadow: 0 0 0 1.5px #c6a968;
 }
 
+/* --- Review queue: per-row actions (Brief + Review, Joe 2026-07-21) ------ */
+.li-rev-rowactions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.li-rev-rowbrief {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid var(--li-border);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-rev-rowbrief:hover {
+  border-color: #c6a968;
+  color: #8a6d2f;
+}
 /* ── ENGAGEMENT-DOC-1 — the merged agreement inside the engagement gate ────── */
 .li-cp-agreement-doc {
   max-height: 46vh;

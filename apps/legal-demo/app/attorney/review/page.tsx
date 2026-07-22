@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
+import { BriefButton } from '@/components/BriefButton'
 
 // Shared with the detail page: a step-through review session is the ordered list of
 // selected draft ids + where we are in it, kept in sessionStorage (per tab) and
@@ -340,13 +341,22 @@ export default function ReviewQueue() {
                 </span>
                 <span className="li-rev-ver">v{d.versionNumber}</span>
                 <span className="li-rev-when">{formatDateTime(d.recordedAt)}</span>
-                <button
-                  type="button"
-                  className="li-rev-result"
-                  onClick={() => openReview(d.documentVersionId)}
-                >
-                  Review
-                </button>
+                <span className="li-rev-rowactions">
+                  {/* lazy: one button per row must not fire N brief reads on load */}
+                  <BriefButton
+                    lazy
+                    scope={{ kind: 'matter', matterEntityId: d.matterEntityId }}
+                    className="li-rev-rowbrief"
+                    label="Brief"
+                  />
+                  <button
+                    type="button"
+                    className="li-rev-result"
+                    onClick={() => openReview(d.documentVersionId)}
+                  >
+                    Review
+                  </button>
+                </span>
               </div>
             ))}
           </div>

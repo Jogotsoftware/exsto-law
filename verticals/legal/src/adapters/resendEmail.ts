@@ -11,11 +11,18 @@
 // deliverNotification() path, which the Next app's lib is not. When Resend is
 // unconfigured the driver falls back to the attorney's Gmail (adapters/gmail.ts),
 // preserving prior behaviour.
+//
+// Type-only import: erased at compile time, so this does NOT pull the heavy
+// googleapis runtime from gmail.ts into the Resend path.
+import type { EmailAttachment } from './gmail.js'
+
 export interface ResendSendArgs {
   to: string
   subject: string
   text: string
   html?: string
+  // File attachments (e.g. the stamped executed PDF on e-sign completion).
+  attachments?: EmailAttachment[]
   // Reply-To header — lets client replies reach a human while the visible
   // sender stays noreply@. Omitted when null/undefined.
   replyTo?: string | null
@@ -45,6 +52,14 @@ export async function sendViaResend(args: ResendSendArgs): Promise<{ messageId: 
   }
   if (args.html) body.html = args.html
   if (args.replyTo) body.reply_to = args.replyTo
+  if (args.attachments?.length) {
+    // Resend attachment shape: { filename, content (base64), content_type }.
+    body.attachments = args.attachments.map((a) => ({
+      filename: a.filename,
+      content: a.contentBase64,
+      content_type: a.contentType,
+    }))
+  }
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: {

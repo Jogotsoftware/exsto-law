@@ -1,6 +1,7 @@
 import type { ActionContext } from '@exsto/substrate'
 import { getContact } from '../queries/contacts.js'
 import { queueNotification } from './notifications.js'
+import { restoreClientPortalAccess } from './portalAccess.js'
 import { signPortalInviteToken } from './portalInviteToken.js'
 
 // "Invite a client to the portal" — the attorney-initiated half of the
@@ -43,6 +44,11 @@ export async function inviteClientToPortal(
       error: 'This contact has no email on file. Add an email before inviting them to the portal.',
     }
   }
+
+  // A login-only portal delete leaves the mapped actor inactive and mint
+  // refuses it — re-inviting is the sanctioned way back in, so reactivate
+  // first. No-ops for never-provisioned or already-active accounts.
+  await restoreClientPortalAccess(ctx, contactEntityId)
 
   // Token carries only the contact + tenant + expiry; the tenant is taken from the
   // attorney's authorized context (ctx), never from any client input.

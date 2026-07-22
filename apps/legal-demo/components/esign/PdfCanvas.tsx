@@ -143,6 +143,15 @@ export function PdfCanvas({
 
   if (!doc || pages.length === 0) return null
 
+  // Fit-width needs a real measure before the first paint: rendering at the
+  // pre-measure floor only to re-render at the observed width moments later is
+  // exactly the superseded-render churn renderPageToCanvas has to untangle —
+  // and it flashes a mis-sized page. Mount the (empty) scroll pane so the
+  // ResizeObserver can measure it, then paint once at the right width.
+  if (zoom === 'fit' && containerWidth === 0) {
+    return <div ref={scrollRef} className="li-esp-scroll" data-testid="esp-canvas" />
+  }
+
   return (
     <div
       ref={scrollRef}

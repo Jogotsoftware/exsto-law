@@ -5,7 +5,7 @@ import { getEngagementConfig, getEngagementStatus } from '../api/engagement.js'
 import { getLatestAttributeValue } from '../handlers/common.js'
 import { readPortalAssistantEnabled } from '../handlers/engagement.js'
 import { listClientDocuments } from '../api/esign.js'
-import { loadClientContactEmail } from '../api/clientIdentity.js'
+import { loadClientContactEmail, resolvePortalUserType } from '../api/clientIdentity.js'
 import { listClientMatters, type ClientMatterListItem, type PortalLocale } from './clientPortal.js'
 import { listClientInvoices } from './clientBilling.js'
 import { listClientNotifications } from './portalNotifications.js'
@@ -199,8 +199,11 @@ export async function getPortalHomeSummary(
       .sort()[0] ?? null
 
   // WP-7: the assistant flag lives on the client PARENT entity (contact_of),
-  // same home as portal_scheduling_billable.
-  const assistantEnabled = await withActionContext(ctx, async (client) => {
+  // same home as portal_scheduling_billable. ANDed with the per-CONTACT portal
+  // tier (Users & Roles): a 'standard' portal user loses the assistant even
+  // when the firm flag is on; absent tier = self_serve (full access).
+  const userType = await resolvePortalUserType(ctx.tenantId, clientContactId)
+  const firmAssistantEnabled = await withActionContext(ctx, async (client) => {
     const parent = await client.query<{ id: string }>(
       `SELECT r.target_entity_id AS id
        FROM relationship r
@@ -215,6 +218,7 @@ export async function getPortalHomeSummary(
     if (!parentId) return false
     return readPortalAssistantEnabled(client, ctx.tenantId, parentId)
   })
+  const assistantEnabled = firmAssistantEnabled && userType === 'self_serve'
 
   return {
     firstName: fullName ? (fullName.trim().split(/\s+/)[0] ?? null) : null,

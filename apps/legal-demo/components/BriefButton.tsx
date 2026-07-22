@@ -39,12 +39,17 @@ export function BriefButton({
   scope,
   className,
   label,
+  lazy,
 }: {
   scope: BriefScope
   // Homes style this differently (li-brief-btn beside the matter Actions menu
   // vs li-crm-btn beside CRM's Email/Schedule/Edit) — default to li-brief-btn.
   className?: string
   label?: string
+  // List homes (the review queue renders one button PER ROW) skip the on-mount
+  // brief.get read — N rows must not fire N MCP reads on page load. The first
+  // click does the read, then opens or generates exactly like the eager path.
+  lazy?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const isMatter = scope.kind === 'matter'
@@ -65,7 +70,7 @@ export function BriefButton({
   // Read on mount so the button's own label is right before anyone opens
   // anything — this is a pure read (legal.matter.brief.get never generates).
   useEffect(() => {
-    if (!matterEntityId) return
+    if (!matterEntityId || lazy) return
     let cancelled = false
     callAttorneyMcp<BriefReadResult>({
       toolName: 'legal.matter.brief.get',
@@ -155,6 +160,26 @@ export function BriefButton({
   // calls setOpen itself, so landing a brief while the attorney is elsewhere
   // on the page still requires a click, same as before this fix.
   function handleClick() {
+    // Lazy home, state unknown: do the skipped mount read now, then route the
+    // click exactly like the eager path would have.
+    if (isMatter && lazy && matterState === null && !generating && matterEntityId) {
+      setGenerating(true)
+      callAttorneyMcp<BriefReadResult>({
+        toolName: 'legal.matter.brief.get',
+        input: { matterEntityId },
+      })
+        .then((r) => {
+          setGenerating(false)
+          setMatterState(r)
+          if (r.brief === null) startGenerate(false)
+          else setOpen(true)
+        })
+        .catch((e) => {
+          setGenerating(false)
+          setGenError(e instanceof Error ? e.message : String(e))
+        })
+      return
+    }
     if (hasNoBriefYet) {
       if (!generating) startGenerate(false)
       return

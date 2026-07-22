@@ -69,6 +69,22 @@ export const EMPTY_RECIPIENT: DraftRecipient = {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** New-recipient signing order: appended after every existing row when signing
+ *  order is ON (lands last, but stays reorderable like any row); collapsed to 1
+ *  (parallel) when OFF. Shared by addRecipient and addMyself so both rows land
+ *  the same way. */
+export function nextRecipientOrder(recipientCount: number, useSigningOrder: boolean): number {
+  return useSigningOrder ? recipientCount + 1 : 1
+}
+
+/** "Add myself" duplicate guard (case/whitespace-insensitive) — also drives the
+ *  composer's disabled-button state ("You're already a recipient"). */
+export function recipientHasEmail(recipients: DraftRecipient[], email: string): boolean {
+  const needle = email.trim().toLowerCase()
+  if (!needle) return false
+  return recipients.some((r) => r.email.trim().toLowerCase() === needle)
+}
+
 export interface EnvelopeDraftApi {
   draft: EnvelopeDraft
   /** ES-MULTIDOC-1 — append uploaded PDFs to the ordered set (Documents step). */
@@ -82,6 +98,9 @@ export interface EnvelopeDraftApi {
   setAttach: (next: { matterId: string | null; contactId: string | null }) => void
   setRecipient: (index: number, patch: Partial<DraftRecipient>) => void
   addRecipient: () => void
+  /** "Add myself" (founder request) — appends a countersigner row prefilled
+   *  with the attorney's own name/email; no-ops on a duplicate email. */
+  addMyself: (identity: { name: string; email: string }) => void
   removeRecipient: (index: number) => void
   moveRecipient: (from: number, to: number) => void
   setUseSigningOrder: (on: boolean) => void
@@ -188,9 +207,33 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
       ...d,
       recipients: [
         ...d.recipients,
-        { ...EMPTY_RECIPIENT, order: d.useSigningOrder ? d.recipients.length + 1 : 1 },
+        { ...EMPTY_RECIPIENT, order: nextRecipientOrder(d.recipients.length, d.useSigningOrder) },
       ],
     }))
+  }, [])
+
+  // "Add myself" (founder request) — appends a countersigner row prefilled with
+  // the signed-in attorney's own name/email, role needs_to_sign, lands last when
+  // signing order is ON (nextRecipientOrder), stays reorderable afterwards.
+  // No-ops if the email is already in the list — the composer disables the
+  // button using the same recipientHasEmail check, this is the defense-in-depth
+  // guard against a stale disabled state (e.g. a double click).
+  const addMyself = useCallback((identity: { name: string; email: string }) => {
+    setDraft((d) => {
+      if (recipientHasEmail(d.recipients, identity.email)) return d
+      return {
+        ...d,
+        recipients: [
+          ...d.recipients,
+          {
+            ...EMPTY_RECIPIENT,
+            name: identity.name.trim(),
+            email: identity.email.trim(),
+            order: nextRecipientOrder(d.recipients.length, d.useSigningOrder),
+          },
+        ],
+      }
+    })
   }, [])
 
   const removeRecipient = useCallback((index: number) => {
@@ -292,6 +335,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
     setAttach,
     setRecipient,
     addRecipient,
+    addMyself,
     removeRecipient,
     moveRecipient,
     setUseSigningOrder,
