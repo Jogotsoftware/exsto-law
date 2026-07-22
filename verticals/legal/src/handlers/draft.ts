@@ -62,6 +62,9 @@ interface PersistDraftArgs {
   // entity at v1. No matter_status flip either: a deliberate regenerate must not
   // yank the matter's stage mirror backwards (the workflow instance is authority).
   supersedesDocumentEntityId?: string | null
+  // BILINGUAL-DOCS-1 — a Spanish translation must not flip the matter back to
+  // in_review (it's produced after the matter advanced past English approval).
+  suppressMatterStatusFlip?: boolean
   // MACHINE-COMMS-1 (WP2) — the COMMUNICATION channel: an outbound email draft.
   // Same persistence shape (entity + versions + review queue), but a distinct
   // entity kind (communication_draft) and relationship (comm_draft_of), so the
@@ -273,6 +276,7 @@ async function persistDraftDocument(
     !isReviewMemo &&
     !isComm &&
     !supersedes &&
+    !p.suppressMatterStatusFlip &&
     currentStatus !== 'approved' &&
     currentStatus !== 'closed'
   ) {
@@ -360,6 +364,10 @@ interface DraftGeneratePayload {
   redline_reasoning_trace_id?: string | null
   // WP4 regenerate: write this draft as version n+1 on the named existing entity.
   supersedes_document_entity_id?: string | null
+  // BILINGUAL-DOCS-1: a Spanish translation is a side document produced AFTER the
+  // matter already advanced past its English approval — it must not yank the
+  // matter's status back to in_review. Set true only by runSpanishTranslation.
+  suppress_matter_status_flip?: boolean
   // MACHINE-COMMS-1 (WP2): 'communication' persists an EMAIL draft (see
   // PersistDraftArgs.channel). Anything else stays the document channel.
   channel?: string
@@ -416,6 +424,7 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     confidence: p.confidence,
     versionMetadata,
     supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
+    suppressMatterStatusFlip: p.suppress_matter_status_flip === true,
     channel: p.channel === 'communication' ? 'communication' : 'document',
     emailSubject: p.email_subject ?? null,
     emailToRole: p.email_to_role ?? null,

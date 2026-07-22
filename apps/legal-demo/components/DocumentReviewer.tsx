@@ -122,7 +122,11 @@ function statusChipClass(status: string): string {
 }
 
 function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ')
+  // BILINGUAL-DOCS-1: a '_es' copy shows as "… (Spanish)".
+  const es = kind.endsWith('_es')
+  const base = es ? kind.slice(0, -'_es'.length) : kind
+  const h = base.replace(/_/g, ' ')
+  return es ? `${h} (Spanish)` : h
 }
 function humanizeService(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())

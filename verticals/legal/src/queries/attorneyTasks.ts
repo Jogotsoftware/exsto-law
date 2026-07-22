@@ -32,11 +32,14 @@ export interface AttorneyTask {
   viewHref?: string | null
 }
 
-// Matches the review page's own humanizeKind (apps/legal-demo/app/attorney/review/page.tsx)
-// — plain string transform, kept in sync by hand since a client component can't
-// import this server-side module directly.
+// Plain document-kind → label transform for the Task Queue titles. BILINGUAL-DOCS-1:
+// a '_es' Spanish copy renders as "… (Spanish)" so a translated document is
+// clearly distinguished from its English source in the queue.
 export function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ')
+  const es = kind.endsWith('_es')
+  const base = es ? kind.slice(0, -'_es'.length) : kind
+  const h = base.replace(/_/g, ' ')
+  return es ? `${h} (Spanish)` : h
 }
 
 // ── Document review (legal.draft.list_pending) ──────────────────────────────

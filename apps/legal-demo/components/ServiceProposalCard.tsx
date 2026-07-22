@@ -26,6 +26,8 @@ export interface ServiceProposal {
   // BUILDER-CERT-1 (WP3) — booking mode: true = booking opens with a consultation
   // slot; false = intake-only (document-review). Forwarded on approve.
   appointmentRequired?: boolean
+  // BILINGUAL-DOCS-1 — offer this service in English + Spanish (default off).
+  offerSpanish?: boolean
   summary: string
   confidence: number
 }
@@ -283,6 +285,7 @@ export function ServiceProposalCard({
             description: current.description ?? '',
             generationMode: current.generationMode,
             appointmentRequired: current.appointmentRequired ?? true,
+            offerSpanish: current.offerSpanish ?? false,
           }}
           onSave={async (next) => {
             if (approveState === 'approved' && serviceKey) {
@@ -317,6 +320,7 @@ export function ServiceProposalCard({
                   route: next.route,
                   generationMode: next.generationMode,
                   appointmentRequired: next.appointmentRequired,
+                  offerSpanish: next.offerSpanish,
                 },
               })
             }
@@ -332,6 +336,7 @@ export function ServiceProposalCard({
               description: next.description || null,
               generationMode: next.generationMode,
               appointmentRequired: next.appointmentRequired,
+              offerSpanish: next.offerSpanish,
             }))
             onEdited?.(
               approveState === 'approved' && serviceKey
