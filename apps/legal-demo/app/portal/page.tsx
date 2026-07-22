@@ -190,6 +190,7 @@ interface HomeSummary {
     rate: string | null
     termsVersion: number | null
     configured: boolean
+    hasSignedAgreement: boolean
   }
   assistantEnabled: boolean
 }
@@ -687,6 +688,20 @@ function HomeView({
         </section>
       )}
 
+      {!locked && home.engagement.hasSignedAgreement && (
+        <a
+          className="li-cp-signed-agreement"
+          href="/api/client/portal/engagement/agreement"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <SigIcon />
+          <span>
+            {t('portal.agreement.download', undefined, 'View your signed engagement agreement')}
+          </span>
+        </a>
+      )}
+
       {home.attention.length > 0 && (
         <div className="li-cp-attn" aria-label={t('portal.attention.label')}>
           {home.attention.map((item, i) =>
@@ -978,19 +993,42 @@ function EngagementGateModal({
                   />
                 </label>
               )}
-              {terms && <div className="li-cp-terms">{terms}</div>}
-              <FeeConsentCard
-                quote={{
-                  basis: 'hourly-rate',
-                  amount: null,
-                  rate,
-                  currency: 'USD',
-                  description: t('portal.gate.desc'),
-                }}
-                accepted={accepted}
-                onAccept={setAccepted}
-                t={t}
-              />
+              {/* The uploaded agreement IS the terms — don't also show a
+                  separate text-terms block or the hourly fee card (whose rate can
+                  differ from the document's own rate schedule). A single "I have
+                  read and agree" adoption drives acceptance. */}
+              {agreement ? (
+                <label className="bk-checkbox bk-fee-accept">
+                  <input
+                    type="checkbox"
+                    checked={accepted}
+                    onChange={(e) => setAccepted(e.target.checked)}
+                  />
+                  <span>
+                    {t(
+                      'portal.gate.agree_agreement',
+                      undefined,
+                      'I have read and agree to this engagement agreement, and adopt the signature above.',
+                    )}
+                  </span>
+                </label>
+              ) : (
+                <>
+                  {terms && <div className="li-cp-terms">{terms}</div>}
+                  <FeeConsentCard
+                    quote={{
+                      basis: 'hourly-rate',
+                      amount: null,
+                      rate,
+                      currency: 'USD',
+                      description: t('portal.gate.desc'),
+                    }}
+                    accepted={accepted}
+                    onAccept={setAccepted}
+                    t={t}
+                  />
+                </>
+              )}
             </>
           )}
           {error && (

@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseImportOutput } from '../../verticals/legal/src/api/engagementImportParse.js'
 import { renderTemplate } from '../../verticals/legal/src/api/templateMerge.js'
+import { substituteClientSignature } from '../../verticals/legal/src/api/engagementExecutedCopy.js'
 
 describe('parseImportOutput', () => {
   it('splits body from the details JSON tail', () => {
@@ -52,5 +53,32 @@ describe('gate merge contract', () => {
     expect(r.markdown).toContain('{{sign:client}}')
     expect(r.markdown).toContain('{{date:client}}')
     expect(r.missingFields).toEqual([])
+  })
+})
+
+describe('substituteClientSignature (executed copy)', () => {
+  const md = [
+    'Accepted and Agreed:',
+    '',
+    'By: {{sign:client}}',
+    '{{client_name}}',
+    'Managing Member',
+    'Dated: {{date:client}}',
+  ].join('\n')
+
+  it('writes /s/ name and the date in-flow, leaving no markers', () => {
+    const out = substituteClientSignature(md, 'Gabriel Fuentes', '2026-07-22T00:00:00.000Z')
+    expect(out).toContain('By: /s/ Gabriel Fuentes')
+    expect(out).toContain('Dated: July 22, 2026')
+    expect(out).not.toMatch(/\{\{\s*(?:sign|date)\s*:\s*client\s*\}\}/i)
+    // The client_name merge token is NOT this function's job — left for the merge.
+    expect(out).toContain('{{client_name}}')
+  })
+
+  it('only touches the client signer key, never the firm/attorney block', () => {
+    const withFirm = 'By: {{sign:attorney}}\nJuan Carlos Pacheco\n\nBy: {{sign:client}}'
+    const out = substituteClientSignature(withFirm, 'Gabriel Fuentes', '2026-07-22T00:00:00.000Z')
+    expect(out).toContain('{{sign:attorney}}')
+    expect(out).toContain('/s/ Gabriel Fuentes')
   })
 })
