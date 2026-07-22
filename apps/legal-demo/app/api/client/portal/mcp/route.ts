@@ -4,16 +4,11 @@ import { findTool } from '@exsto/mcp-tools'
 // and import the AUTHED client-portal allowlist that gates this route.
 import '@exsto/legal/mcp'
 import { isClientPortalAuthedTool } from '@exsto/legal/mcp'
-import {
-  isClientContactActive,
-  loadExecutedStampPlan,
-  sendEnvelopeCompletionCopies,
-  type RecordSignatureResult,
-} from '@exsto/legal'
+import { isClientContactActive, type RecordSignatureResult } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
 import { clientIpFrom } from '@/lib/rateLimit'
-import { stampExecutedCopies, stampedBytesByDocIndex } from '@/lib/esignStamping'
+import { finalizeEnvelopeIfCompleted } from '@/lib/esignStamping'
 import { generateAndStoreEngagementExecutedCopy } from '@/lib/engagementExecutedCopy'
 
 export const runtime = 'nodejs'
@@ -114,27 +109,17 @@ export async function POST(request: Request) {
     // above) never did, so a portal-completed envelope never got its
     // `.executed.pdf` and every byte route that "prefers the executed copy"
     // silently fell back to the unsigned original. Run the SAME stamping
-    // loop here (apps/legal-demo/lib/esignStamping.ts — the app layer owns
-    // Storage bytes; the vertical never touches Storage, CI storage-guard),
-    // then email everyone the executed document. Both best-effort: the
-    // signature is already recorded, so a stamping/notify failure must never
-    // turn a successful signing into an error.
+    // step here (apps/legal-demo/lib/esignStamping.ts's
+    // finalizeEnvelopeIfCompleted — the app layer owns Storage bytes; the
+    // vertical never touches Storage, CI storage-guard), then email everyone
+    // the executed document. ESIGN-ATTORNEY-REVIEW-1: the SAME helper now
+    // also backs the attorney MCP route's legal.esign.sign_submit, so this
+    // stays the one completion step for every route that can finish an
+    // envelope. Best-effort: the signature is already recorded, so a
+    // stamping/notify failure must never turn a successful signing into an
+    // error.
     if (body.toolName === 'legal.esign.portal.sign') {
-      const signed = result as RecordSignatureResult
-      if (signed.completed) {
-        const plans = await loadExecutedStampPlan(ctx, signed.envelopeId).catch((planErr) => {
-          console.error('esign executed-copy plan load failed:', planErr)
-          return []
-        })
-        const stamped = await stampExecutedCopies(plans)
-        await sendEnvelopeCompletionCopies(
-          ctx,
-          signed.envelopeId,
-          stampedBytesByDocIndex(stamped),
-        ).catch((notifyErr) => {
-          console.error('esign completion-copy notify failed:', notifyErr)
-        })
-      }
+      await finalizeEnvelopeIfCompleted(ctx, result as RecordSignatureResult)
     }
 
     // ENGAGEMENT-DOC-1 — when the client accepts the firm's engagement agreement,

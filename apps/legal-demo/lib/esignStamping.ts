@@ -11,7 +11,14 @@
 // vertical-storage-guard.test.ts). `@exsto/legal`'s loadExecutedStampPlan(By
 // Token) resolves WHAT to stamp (substrate-only); this module does the
 // downloading/stamping/uploading.
-import { stampExecutedPdf, type ExecutedStampPlan } from '@exsto/legal'
+import {
+  stampExecutedPdf,
+  loadExecutedStampPlan,
+  sendEnvelopeCompletionCopies,
+  type ExecutedStampPlan,
+  type RecordSignatureResult,
+} from '@exsto/legal'
+import type { ActionContext } from '@exsto/substrate'
 import { downloadObject, uploadObject } from '@/lib/documentStorage'
 
 export interface StampedExecutedCopy {
@@ -56,4 +63,30 @@ export async function stampExecutedCopies(
  *  shape sendEnvelopeCompletionCopies wants for its `fileBytesByDocIndex`. */
 export function stampedBytesByDocIndex(stamped: StampedExecutedCopy[]): Map<number, Buffer> {
   return new Map(stamped.map((s) => [s.plan.docIndex, s.bytes]))
+}
+
+// ESIGN-ATTORNEY-REVIEW-1 — the full "stamp + email everyone the executed
+// copy" completion step, factored out of the client-portal MCP route
+// (app/api/client/portal/mcp/route.ts) so the attorney MCP route
+// (app/api/attorney/mcp/route.ts) can run the EXACT same steps when the
+// attorney's own countersignature completes an envelope, instead of
+// duplicating the stamp-plan/stamp/notify sequence. Best-effort throughout:
+// the signature is already recorded by the time this runs, so a
+// stamping/notify failure must never turn a successful signing into an error
+// for the caller.
+export async function finalizeEnvelopeIfCompleted(
+  ctx: ActionContext,
+  signed: RecordSignatureResult,
+): Promise<void> {
+  if (!signed.completed) return
+  const plans = await loadExecutedStampPlan(ctx, signed.envelopeId).catch((planErr) => {
+    console.error('esign executed-copy plan load failed:', planErr)
+    return []
+  })
+  const stamped = await stampExecutedCopies(plans)
+  await sendEnvelopeCompletionCopies(ctx, signed.envelopeId, stampedBytesByDocIndex(stamped)).catch(
+    (notifyErr) => {
+      console.error('esign completion-copy notify failed:', notifyErr)
+    },
+  )
 }

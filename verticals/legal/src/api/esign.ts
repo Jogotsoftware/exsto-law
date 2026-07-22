@@ -16,7 +16,7 @@ import { getDraftVersion } from '../queries/drafts.js'
 import { getMatter } from '../queries/matters.js'
 import { loadConnection } from '../adapters/connectionStore.js'
 import { ingestionContext } from './granolaIngestion.js'
-import { queueNotification, deliverNotification } from './notifications.js'
+import { queueNotification, deliverNotification, attorneyEmail } from './notifications.js'
 import { renderDraftPdf } from '../render/draftPdf.js'
 import { completionRecipients, normalizeRole } from '../esign/routing.js'
 import {
@@ -927,6 +927,10 @@ export async function getEnvelopeStatus(
 // ── Envelope list (attorney eSign surface, WP-N) ─────────────────────────────
 
 export interface EnvelopeListSigner {
+  // ESIGN-ATTORNEY-REVIEW-1 — the signer's own request id, so a caller (the
+  // attorney "awaiting your signature" view) can build a sign link without a
+  // second round trip. Every listEnvelopes signer row carries one.
+  requestId: string
   name: string | null
   email: string | null
   title: string | null
@@ -1016,6 +1020,7 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
          e_contact.name AS contact_name,
          to_char(e.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS sent_at,
          (SELECT coalesce(jsonb_agg(jsonb_build_object(
+             'requestId', req.source_entity_id,
              'name', ${rq('signer_name')},
              'email', ${rq('signer_email')},
              'title', ${rq('signer_title')},
@@ -1068,6 +1073,7 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
     )
     return res.rows.map((row) => {
       const signers = (row.signers ?? []).map((s) => ({
+        requestId: s.requestId,
         name: s.name,
         email: s.email,
         title: s.title,
@@ -1200,6 +1206,90 @@ export async function voidEnvelope(
   })
   const eff = (result.effects[0] ?? {}) as { voidedRequestIds?: string[] }
   return { envelopeId, status: 'voided', voidedRequestIds: eff.voidedRequestIds ?? [] }
+}
+
+// ── Awaiting the attorney's own signature (ESIGN-ATTORNEY-REVIEW-1) ─────────
+//
+// Now that an attorney can add themselves as a countersigner (#476), the
+// Review Queue needs to surface envelopes where it's THEIR turn to sign. This
+// reuses listEnvelopes rather than a bespoke query — one source of truth for
+// envelope/signer state, same as every other attorney esign surface.
+
+const TERMINAL_ENVELOPE_STATUSES = new Set(['completed', 'declined', 'voided'])
+const AWAITING_SIGNER_STATUSES = new Set(['delivered', 'opened'])
+
+function normalizeEmail(email: string | null | undefined): string {
+  return (email ?? '').trim().toLowerCase()
+}
+
+/** Pure email-match decision — the DB-free seam behind assertAttorneyOwnsRequest
+ *  (below) and isAwaitingAttorneySignature, unit-testable without a database. */
+export function isAttorneySignerMatch(
+  signerEmail: string | null | undefined,
+  attorneyEmailValue: string | null | undefined,
+): boolean {
+  const a = normalizeEmail(signerEmail)
+  const b = normalizeEmail(attorneyEmailValue)
+  return a !== '' && a === b
+}
+
+/** Pure filter: does this envelope currently need the attorney's OWN
+ *  signature? Active envelope (not completed/declined/voided) AND a signer
+ *  whose email matches the attorney's, whose turn is live (delivered/opened).
+ *  Exported for unit tests — no DB required. */
+export function isAwaitingAttorneySignature(
+  envelopeStatus: string,
+  signers: ReadonlyArray<Pick<EnvelopeListSigner, 'email' | 'status'>>,
+  attorneyEmailValue: string | null | undefined,
+): boolean {
+  if (TERMINAL_ENVELOPE_STATUSES.has(envelopeStatus)) return false
+  if (!attorneyEmailValue) return false
+  return signers.some(
+    (s) =>
+      AWAITING_SIGNER_STATUSES.has(s.status) && isAttorneySignerMatch(s.email, attorneyEmailValue),
+  )
+}
+
+export interface AwaitingAttorneySignature {
+  requestId: string
+  envelopeId: string
+  subject: string | null
+  matterNumber: string | null
+  matterEntityId: string | null
+  documentKind: string | null
+  sentAt: string | null
+}
+
+// Every envelope where it's currently the attorney's own turn to sign (they
+// were added as a countersigner — #476). Backs the Review Queue's "Awaiting
+// your signature" section. Single-attorney-firm assumption: the signer's
+// email is matched against the firm's one attorneyEmail(tenantId) — a
+// multi-user firm would need to match the ACTING actor's own account email
+// instead. Flagged as a follow-up; not built here (see PR description).
+export async function listSignaturesAwaitingAttorney(
+  ctx: ActionContext,
+): Promise<AwaitingAttorneySignature[]> {
+  const email = await attorneyEmail(ctx.tenantId)
+  if (!email) return []
+  const envelopes = await listEnvelopes(ctx)
+  const out: AwaitingAttorneySignature[] = []
+  for (const env of envelopes) {
+    if (!isAwaitingAttorneySignature(env.status, env.signers, email)) continue
+    const mySigner = env.signers.find(
+      (s) => AWAITING_SIGNER_STATUSES.has(s.status) && isAttorneySignerMatch(s.email, email),
+    )
+    if (!mySigner) continue
+    out.push({
+      requestId: mySigner.requestId,
+      envelopeId: env.envelopeId,
+      subject: env.subject,
+      matterNumber: env.matterNumber,
+      matterEntityId: env.matterEntityId,
+      documentKind: env.documentKind,
+      sentAt: env.sentAt,
+    })
+  }
+  return out
 }
 
 // ── Signable document + the signer's fields ──────────────────────────────────
@@ -1739,6 +1829,78 @@ export async function declineForClient(
 ): Promise<{ ok: boolean; envelopeId: string }> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
   const ctx = signingCtx(p.tenantId)
+  await declineRequest(ctx, input.requestId, envelopeId, input.reason, input.signerIp ?? null)
+  return { ok: true, envelopeId }
+}
+
+// ── Attorney-authed signing surface (own countersignature) ──────────────────
+//
+// ESIGN-ATTORNEY-REVIEW-1 — mirrors the client wrappers above
+// (assertClientOwnsRequest / loadSignableForClient / recordSignatureForClient /
+// declineForClient), but for the ATTORNEY signing their OWN countersignature
+// slot (added via #476) rather than a client signing theirs. `ctx` here is the
+// attorney's own tenant-scoped action context (resolveAttorneyCtx) — not the
+// shared signingCtx system actor the client/token paths use, since the
+// attorney is a real, identified actor and every action they take should be
+// attributed to them.
+//
+// Single-attorney-firm assumption (see listSignaturesAwaitingAttorney above):
+// ownership is proven by matching the request's signer_email to the firm's
+// ONE attorneyEmail(tenantId), not to the acting actor's own account email. A
+// multi-user firm needs the latter (match the acting actor's own connected
+// email) — flagged as a follow-up, not built here.
+
+async function assertAttorneyOwnsRequest(ctx: ActionContext, requestId: string): Promise<string> {
+  const envelopeId = await withActionContext(ctx, (c) =>
+    requestEnvelopeId(c, ctx.tenantId, requestId),
+  )
+  if (!envelopeId) throw new Error('You are not authorized to sign this document.')
+  const [signerEmail, myEmail] = await Promise.all([
+    withActionContext(ctx, (c) => latestAttr(c, ctx.tenantId, requestId, 'signer_email')),
+    attorneyEmail(ctx.tenantId),
+  ])
+  if (!isAttorneySignerMatch(signerEmail, myEmail)) {
+    throw new Error('You are not authorized to sign this document.')
+  }
+  return envelopeId
+}
+
+export async function loadSignableForAttorney(
+  ctx: ActionContext,
+  requestId: string,
+  ip?: string | null,
+): Promise<SignableDocument> {
+  const envelopeId = await assertAttorneyOwnsRequest(ctx, requestId)
+  await recordOpen(ctx, requestId, envelopeId, ip ?? null)
+  return buildSignable(ctx, requestId)
+}
+
+export async function recordSignatureForAttorney(
+  ctx: ActionContext,
+  requestId: string,
+  input: {
+    signatureName: string
+    signatureData?: string | null
+    consent: string
+    fieldValues?: Record<string, string>
+    signerIp?: string | null
+  },
+): Promise<RecordSignatureResult> {
+  const envelopeId = await assertAttorneyOwnsRequest(ctx, requestId)
+  return signRequest(ctx, requestId, envelopeId, {
+    signatureName: input.signatureName,
+    signatureData: input.signatureData ?? null,
+    consent: input.consent,
+    fieldValues: input.fieldValues,
+    signerIp: input.signerIp ?? null,
+  })
+}
+
+export async function declineForAttorney(
+  ctx: ActionContext,
+  input: { requestId: string; reason?: string; signerIp?: string | null },
+): Promise<{ ok: boolean; envelopeId: string }> {
+  const envelopeId = await assertAttorneyOwnsRequest(ctx, input.requestId)
   await declineRequest(ctx, input.requestId, envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId }
 }
