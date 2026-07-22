@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { resolveCanonicalMatterStatuses } from '../queries/matterWorkflowPosition.js'
 
 // How an upcoming meeting is categorized for the attorney's weekly calendar.
 //  - new_consultation: the matter's first consultation (a freshly-booked/opened
@@ -127,8 +128,15 @@ export async function listUpcomingBookings(
        LIMIT $2`,
       [ctx.tenantId, limit],
     )
+    // Overlay canonical (workflow-derived) status over the raw mirror so the
+    // booking-context heuristic reads the true stage, not a drifted value.
+    const canonical = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      res.rows.map((r) => r.matter_entity_id),
+    )
     return res.rows.map((r) => {
-      const status = r.status ?? ''
+      const status = canonical.get(r.matter_entity_id) ?? r.status ?? ''
       const bookedAt = r.booked_at.toISOString()
       return {
         matterEntityId: r.matter_entity_id,
@@ -210,8 +218,15 @@ export async function listMatterConsultations(
        ORDER BY (e.metadata->>'scheduled_at')::timestamptz ASC`,
       [ctx.tenantId, fromIso, toIso],
     )
+    // Overlay canonical (workflow-derived) status over the raw mirror so the
+    // booking-context heuristic reads the true stage, not a drifted value.
+    const canonical = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      res.rows.map((r) => r.matter_entity_id),
+    )
     return res.rows.map((r) => {
-      const status = r.status ?? ''
+      const status = canonical.get(r.matter_entity_id) ?? r.status ?? ''
       const bookedAt = r.booked_at.toISOString()
       return {
         matterEntityId: r.matter_entity_id,

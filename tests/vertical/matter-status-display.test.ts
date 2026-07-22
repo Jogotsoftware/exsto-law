@@ -5,7 +5,12 @@
 // list/home/detail now render: gate + catalog action → the attorney's vocabulary
 // (waiting on client/attorney, awaiting billing/payment, ready to close, cancelled).
 import { describe, it, expect } from 'vitest'
-import { deriveStageFromWorkflow, deriveStageFromLegacyStatus, type Lifecycle } from '@exsto/legal'
+import {
+  deriveStageFromWorkflow,
+  deriveStageFromLegacyStatus,
+  deriveCanonicalMatterStatus,
+  type Lifecycle,
+} from '@exsto/legal'
 
 // The single-member LLC operating-agreement graph (the live service), trimmed to the
 // fields the derivation reads. Mirrors workflow_definition.states in prod.
@@ -129,5 +134,52 @@ describe('deriveStageFromLegacyStatus — no running workflow instance', () => {
   })
   it('humanizes an unmapped legacy status instead of guessing', () => {
     expect(deriveStageFromLegacyStatus('some_legacy').label).toBe('Some legacy')
+  })
+})
+
+// The CANONICAL status feeds the CRM pipeline (statusToStage), the calendar
+// heuristic, and the email/AI-context prompt — all of which speak the LEGACY
+// matter_status vocabulary. It must therefore emit legacy words that carry the
+// matter's true PIPELINE progression, so a workflow-driven matter stops reading as
+// a 'prospect' (its raw state key matched none of statusToStage's cases).
+describe('deriveCanonicalMatterStatus — legacy vocabulary for existing readers', () => {
+  const cases: Array<[string, string]> = [
+    ['intake', 'intake_submitted'], // client to accept → prospect
+    ['review_send', 'drafting'], // attorney producing → engaged
+    ['consultation', 'consultation_completed'], // view_consultation step → consulted
+    ['esign_operating_agreement', 'engagement_signed'], // signing → active
+    ['approve_invoice', 'matter_active'], // billing → active
+    ['await_payment', 'matter_active'], // payment → active
+    ['complete', 'matter_closed'], // terminal → closed
+  ]
+  for (const [state, expected] of cases) {
+    it(`${state} → ${expected}`, () => {
+      expect(deriveCanonicalMatterStatus(LLC, state, 'active')).toBe(expected)
+    })
+  }
+
+  it('cancelled / completed instances read as matter_closed', () => {
+    expect(deriveCanonicalMatterStatus(LLC, 'esign_operating_agreement', 'cancelled')).toBe(
+      'matter_closed',
+    )
+    expect(deriveCanonicalMatterStatus(LLC, 'review_send', 'completed')).toBe('matter_closed')
+  })
+
+  it('the OLD graph (e-sign as manual_task + system esign.completed) still reads as signed', () => {
+    const oldGraph: Lifecycle = [
+      {
+        key: 'esign',
+        label: 'eSign',
+        action: { kind: 'manual_task' },
+        advances_to: [{ on: 'esign.completed', to: 'done', gate: 'system' }],
+      },
+    ]
+    // → statusToStage('engagement_signed') === 'active', not the 'prospect' the raw
+    // state key 'esign' would have produced.
+    expect(deriveCanonicalMatterStatus(oldGraph, 'esign', 'active')).toBe('engagement_signed')
+  })
+
+  it('an unknown current state is left untouched (no fabricated legacy value)', () => {
+    expect(deriveCanonicalMatterStatus(LLC, 'mystery_state', 'active')).toBe('mystery_state')
   })
 })

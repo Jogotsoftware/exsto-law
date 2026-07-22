@@ -109,3 +109,62 @@ export function deriveStageFromLegacyStatus(status: string): StageDisplay {
       return { category: 'unknown', label: humanize(status) }
   }
 }
+
+// The CANONICAL matter_status value for a matter, derived from its live workflow but
+// expressed in the LEGACY matter_status vocabulary — the words every existing reader
+// already understands (contacts `statusToStage`, the calendar booking-context sets,
+// the portal chip's completed/closed check). This lets those readers stay UNCHANGED:
+// callers just feed them this derived value instead of the raw `matter_status`
+// attribute, which drifts because multiple handlers write it in different
+// vocabularies and the last write wins nondeterministically.
+//
+// It captures pipeline PROGRESSION (unlike StageCategory, which is a who-are-we-
+// waiting-on axis), resolved config-first from the step's catalog action.kind, then
+// the outgoing edge's gate/event — so it works for any authored graph, including the
+// older bound versions where e-sign is a `manual_task` with a system `esign.completed`
+// edge (invariant 17: a matter runs the version it was opened against).
+export function deriveCanonicalMatterStatus(
+  graph: Lifecycle,
+  currentState: string,
+  wfStatus: string,
+): string {
+  // A cancelled or completed instance is done — closed for pipeline/CRM purposes.
+  if (wfStatus === 'cancelled' || wfStatus === 'completed') return 'matter_closed'
+
+  const stage = stageByKey(graph, currentState)
+  if (!stage) return currentState // unknown state — leave the raw value untouched
+  if (stage.terminal) return 'matter_closed'
+
+  switch (stage.action?.kind) {
+    case 'await_payment':
+    case 'approve_send_invoice':
+      return 'matter_active' // work delivered; billing/collection = an active matter
+    case 'esign':
+      return 'engagement_signed' // client signing the deliverable = active engagement
+    case 'generate_document':
+    case 'review_send_document':
+      return 'drafting' // attorney producing the work product = engaged
+    case 'view_consultation':
+      return 'consultation_completed'
+    case 'complete_matter':
+      return 'matter_closed'
+    case 'view_intake':
+      return 'intake_submitted'
+    default:
+      break
+  }
+
+  // Fallbacks by edge — covers steps with no (or a generic `manual_task`) action, e.g.
+  // the older graph where e-sign is a manual_task whose only edge is system on
+  // `esign.completed`.
+  const edges = stage.advances_to ?? []
+  const sysEdge = edges.find((e) => e.gate === 'system' || e.gate === 'automatic')
+  if (sysEdge) {
+    const on = (sysEdge.on ?? '').toLowerCase()
+    if (on.includes('paid') || on.includes('payment')) return 'matter_active'
+    if (on.includes('sign')) return 'engagement_signed'
+  }
+  if (edges.some((e) => e.gate === 'attorney')) return 'drafting' // attorney working = engaged
+  if (edges.some((e) => e.gate === 'client')) return 'intake_submitted' // early: client to act
+  return 'intake_submitted'
+}

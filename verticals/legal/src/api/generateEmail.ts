@@ -30,6 +30,7 @@ import {
   type EmailDraftingConfigDoc,
 } from './emailDraftingConfig.js'
 import { getMatter } from '../queries/matters.js'
+import { deriveCanonicalMatterStatus } from '../lifecycle/statusDisplay.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
 import { getBriefForTarget, type StoredBrief } from '../queries/briefs.js'
 import { getStandaloneTemplate } from '../queries/templates.js'
@@ -190,7 +191,14 @@ export async function composeEmailDraft(
   const matterFacts = {
     matter_number: matter.matterNumber,
     service_key: matter.serviceKey,
-    matter_status: matter.status,
+    // Canonical status from the live workflow (the raw mirror drifts).
+    matter_status: matter.workflow
+      ? deriveCanonicalMatterStatus(
+          matter.workflow.graph,
+          matter.workflow.currentState,
+          matter.workflow.status,
+        )
+      : matter.status,
     client_name: matter.clientName || null,
     intake_answers: matter.questionnaireResponses ?? {},
   }

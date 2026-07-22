@@ -1,11 +1,8 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import {
-  getWorkflowInstanceForMatter,
-  resolveBoundWorkflowById,
-  parseStatesToGraph,
-} from '../lifecycle/binding.js'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import type { Lifecycle } from '../lifecycle/types.js'
+import { loadMatterWorkflowPositions } from './matterWorkflowPosition.js'
 import {
   deriveStageFromWorkflow,
   deriveStageFromLegacyStatus,
@@ -175,40 +172,10 @@ async function loadMatterStages(
   tenantId: string,
   matterIds: string[],
 ): Promise<Map<string, StageDisplay>> {
+  const positions = await loadMatterWorkflowPositions(client, tenantId, matterIds)
   const out = new Map<string, StageDisplay>()
-  if (matterIds.length === 0) return out
-
-  const instances = await client.query<{
-    subject_entity_id: string
-    workflow_definition_id: string
-    current_state: string
-    status: string
-    states_override: unknown
-  }>(
-    `SELECT DISTINCT ON (subject_entity_id)
-            subject_entity_id, workflow_definition_id, current_state, status, states_override
-       FROM workflow_instance
-      WHERE tenant_id = $1 AND subject_entity_id = ANY($2)
-      ORDER BY subject_entity_id, started_at DESC`,
-    [tenantId, matterIds],
-  )
-  if (instances.rows.length === 0) return out
-
-  const defIds = Array.from(new Set(instances.rows.map((r) => r.workflow_definition_id)))
-  const defs = await client.query<{ id: string; states: unknown }>(
-    `SELECT id, states FROM workflow_definition WHERE tenant_id = $1 AND id = ANY($2)`,
-    [tenantId, defIds],
-  )
-  const graphByDef = new Map<string, Lifecycle>(
-    defs.rows.map((d) => [d.id, parseStatesToGraph(d.states)]),
-  )
-
-  for (const inst of instances.rows) {
-    const override = Array.isArray(inst.states_override)
-      ? (inst.states_override as Lifecycle)
-      : null
-    const graph = override ?? graphByDef.get(inst.workflow_definition_id) ?? []
-    out.set(inst.subject_entity_id, deriveStageFromWorkflow(graph, inst.current_state, inst.status))
+  for (const [matterId, p] of positions) {
+    out.set(matterId, deriveStageFromWorkflow(p.graph, p.currentState, p.wfStatus))
   }
   return out
 }
