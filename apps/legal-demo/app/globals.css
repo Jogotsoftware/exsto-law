@@ -20925,18 +20925,20 @@ a.li-uac-done-primary:hover {
 .li-brief-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: var(--li-card);
-  color: var(--li-navy);
-  border: 1px solid var(--li-border);
+  gap: 7px;
+  background: transparent;
+  color: var(--li-text-muted);
+  border: 1px solid transparent;
   border-radius: var(--li-radius-btn);
-  padding: 10px 15px;
+  padding: 9px 13px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
 .li-brief-btn:hover {
-  border-color: var(--li-navy);
+  background: var(--li-bg);
+  color: var(--li-navy);
+  border-color: var(--li-border);
 }
 
 .li-brief-loading {

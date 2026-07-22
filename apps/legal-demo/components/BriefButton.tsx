@@ -18,7 +18,7 @@
 // completely unchanged: no mount read, plain button, BriefModal keeps its own
 // original synchronous get-on-open / generate-on-click.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SparklesIcon } from '@/components/icons'
+import { FileTextIcon, SparklesIcon, UsersIcon } from '@/components/icons'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
   BriefModal,
@@ -209,7 +209,18 @@ export function BriefButton({
   return (
     <>
       <button type="button" className={buttonClass} onClick={handleClick} title={title}>
-        {generating ? <span className="spinner" /> : <SparklesIcon size={15} />}
+        {generating ? (
+          <span className="spinner" />
+        ) : hasNoBriefYet ? (
+          // Generating a brief: sparkles is the AI-synthesis action.
+          <SparklesIcon size={15} />
+        ) : isMatter ? (
+          // Opening an already-synthesized document.
+          <FileTextIcon size={15} />
+        ) : (
+          // Client scope: the brief spans the client's people, not one doc.
+          <UsersIcon size={15} />
+        )}
         {buttonLabel}
       </button>
       {open && (
