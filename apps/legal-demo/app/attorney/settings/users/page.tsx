@@ -1,14 +1,16 @@
 'use client'
 
-// Settings → Users & roles (WP-G). Split out of the old settings monolith —
-// same legal.user.* MCP tools (admin-gated server-side via requireAdmin),
-// restyled to the comp's avatar-row list with a header-level "Invite user"
-// action. Keeps the app's richer per-row role SELECT + Deactivate button
-// (the comp shows a bare kebab menu) — no capability dropped, just presented
-// inline instead of behind a hidden menu.
+// Settings → Users & roles (WP-G, split into two tabs 2026-07-21). Firm users
+// (actors with roles) and Portal users (client contacts with portal accounts)
+// are different populations with different controls, so they get separate tabs
+// — the old single list rendered portal actors as noise rows with meaningless
+// role dropdowns. Same legal.user.* MCP tools (admin-gated server-side via
+// requireAdmin); the portal tab adds legal.user.portal_list /
+// set_portal_user_type and the login-only delete route.
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { Tabs } from '@/components/Tabs'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 
 interface FirmUser {
@@ -33,6 +35,15 @@ interface WhoAmI {
   role: string | null
   rank: number
 }
+interface PortalUser {
+  contactEntityId: string
+  fullName: string
+  email: string
+  companyName: string | null
+  userType: 'standard' | 'self_serve'
+  portalStatus: string
+  provisionedAt: string
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -45,6 +56,8 @@ export default function UsersRolesPage(): React.ReactElement {
   const [me, setMe] = useState<WhoAmI | null>(null)
   const [users, setUsers] = useState<FirmUser[] | null>(null)
   const [roles, setRoles] = useState<FirmRole[]>([])
+  const [portalUsers, setPortalUsers] = useState<PortalUser[] | null>(null)
+  const [tab, setTab] = useState<'firm' | 'portal'>('firm')
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [showInvite, setShowInvite] = useState(false)
@@ -56,13 +69,18 @@ export default function UsersRolesPage(): React.ReactElement {
       setMe(who)
       if (!who.isAdmin) {
         setUsers([])
+        setPortalUsers([])
         return
       }
-      const r = await callAttorneyMcp<{ users: FirmUser[]; roles: FirmRole[] }>({
-        toolName: 'legal.user.list',
-      })
-      setUsers(r.users)
-      setRoles(r.roles)
+      const [firm, portal] = await Promise.all([
+        callAttorneyMcp<{ users: FirmUser[]; roles: FirmRole[] }>({
+          toolName: 'legal.user.list',
+        }),
+        callAttorneyMcp<{ users: PortalUser[] }>({ toolName: 'legal.user.portal_list' }),
+      ])
+      setUsers(firm.users)
+      setRoles(firm.roles)
+      setPortalUsers(portal.users)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -99,12 +117,76 @@ export default function UsersRolesPage(): React.ReactElement {
     }
   }
 
+  async function deleteFirmUser(actorId: string): Promise<void> {
+    if (
+      !confirm(
+        'Remove this user? They lose access and disappear from this list. Their history is preserved; re-inviting the same email restores them.',
+      )
+    )
+      return
+    setBusyId(actorId)
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.user.delete', input: { actorId } })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function changePortalType(
+    contactEntityId: string,
+    portalUserType: 'standard' | 'self_serve',
+  ): Promise<void> {
+    setBusyId(contactEntityId)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.user.set_portal_user_type',
+        input: { contactEntityId, portalUserType },
+      })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function deletePortalUser(contactEntityId: string): Promise<void> {
+    if (
+      !confirm(
+        'Remove this client’s portal login? They stay in your CRM; they can no longer sign in. Re-invite them from their contact page to restore access.',
+      )
+    )
+      return
+    setBusyId(contactEntityId)
+    setError(null)
+    try {
+      const res = await fetch(
+        `/api/attorney/contacts/${encodeURIComponent(contactEntityId)}/delete-portal-login`,
+        { method: 'POST' },
+      )
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Could not remove the portal login.')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const activeFirm = users?.filter((u) => u.status === 'active').length ?? 0
+
   return (
     <>
       <SettingsHeader
         title="Users & Roles"
         actions={
-          me?.isAdmin ? (
+          me?.isAdmin && tab === 'firm' ? (
             <button className="li-set-btn li-set-btn-primary" onClick={() => setShowInvite(true)}>
               + Invite user
             </button>
@@ -122,14 +204,25 @@ export default function UsersRolesPage(): React.ReactElement {
       {me?.isAdmin && (
         <div className="li-set-card li-set-card--medium li-set-card--flush">
           <div className="li-set-toolbar">
+            <Tabs
+              ariaLabel="User type"
+              tabs={[
+                { key: 'firm', label: 'Firm users', badge: users?.length ?? 0 },
+                { key: 'portal', label: 'Portal users', badge: portalUsers?.length ?? 0 },
+              ]}
+              active={tab}
+              onSelect={(k) => setTab(k as 'firm' | 'portal')}
+            />
             <span className="li-set-toolbar-count">
-              {users ? `${users.filter((u) => u.status === 'active').length} active` : ' '}
+              {tab === 'firm' ? (users ? `${activeFirm} active` : ' ') : ' '}
             </span>
           </div>
 
-          {users === null && <SettingsLoading />}
+          {tab === 'firm' && users === null && <SettingsLoading />}
+          {tab === 'portal' && portalUsers === null && <SettingsLoading />}
 
-          {users &&
+          {tab === 'firm' &&
+            users &&
             users.map((u) => {
               const isSelf = u.actorId === me.actorId
               // You can only manage someone strictly below your own rank — the
@@ -185,10 +278,78 @@ export default function UsersRolesPage(): React.ReactElement {
                         Deactivate
                       </button>
                     )}
+                    {manageable && (
+                      <button
+                        className="li-set-btn li-set-btn-danger li-set-btn-sm"
+                        disabled={busyId === u.actorId}
+                        onClick={() => deleteFirmUser(u.actorId)}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               )
             })}
+
+          {tab === 'portal' && portalUsers && portalUsers.length === 0 && (
+            <div className="li-set-user-row">
+              <div className="li-set-user-main">
+                <div className="li-set-user-email">
+                  No portal users yet. Invite a client from their CRM contact page.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'portal' &&
+            portalUsers &&
+            portalUsers.map((p) => (
+              <div
+                key={p.contactEntityId}
+                className="li-set-user-row"
+                style={{ opacity: p.portalStatus === 'active' ? 1 : 0.55 }}
+              >
+                <span className="li-set-user-avatar">{initials(p.fullName)}</span>
+                <div className="li-set-user-main">
+                  <div className="li-set-user-name">{p.fullName}</div>
+                  <div className="li-set-user-email">
+                    {p.email || '—'}
+                    {p.companyName ? ` · ${p.companyName}` : ''}
+                  </div>
+                </div>
+                <div className="li-set-user-controls">
+                  <select
+                    className="li-set-select"
+                    value={p.userType}
+                    disabled={busyId === p.contactEntityId || p.portalStatus !== 'active'}
+                    onChange={(e) =>
+                      changePortalType(
+                        p.contactEntityId,
+                        e.target.value as 'standard' | 'self_serve',
+                      )
+                    }
+                  >
+                    <option value="self_serve">Self Serve (full access)</option>
+                    <option value="standard">Standard (no AI)</option>
+                  </select>
+                  <span
+                    className={`li-set-role-pill${p.portalStatus !== 'active' ? ' is-inactive' : ''}`}
+                  >
+                    {p.portalStatus === 'active' ? 'active' : 'login removed'}
+                  </span>
+                  {p.portalStatus === 'active' && (
+                    <button
+                      className="li-set-btn li-set-btn-danger li-set-btn-sm"
+                      disabled={busyId === p.contactEntityId}
+                      onClick={() => deletePortalUser(p.contactEntityId)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
         </div>
       )}
 

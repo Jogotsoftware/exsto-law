@@ -6,6 +6,7 @@
 import {
   clientAssistantChatStream,
   isClientContactActive,
+  resolvePortalUserType,
   type ClientChatStreamEvent,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
@@ -34,6 +35,15 @@ export async function POST(request: Request) {
   }
   if (!(await isClientContactActive(tenantId, clientContactId))) {
     return Response.json({ error: 'Session no longer valid.' }, { status: 401 })
+  }
+  // Users & Roles portal tier: a 'standard' portal user has no AI assistant.
+  // Enforced HERE (not just the hidden nav item) and read per-request from the
+  // DB so an attorney's downgrade applies immediately, mid-session.
+  if ((await resolvePortalUserType(tenantId, clientContactId)) !== 'self_serve') {
+    return Response.json(
+      { error: "This feature isn't enabled for your account. Contact the firm." },
+      { status: 403 },
+    )
   }
 
   const body = (await request.json().catch(() => null)) as {

@@ -23,6 +23,9 @@ export function FieldProps({
   onDelete: (id: string) => void
 }) {
   const glyph = placementGlyph(placement.type)
+  // Date fields auto-fill with the signing date — the signer never types them,
+  // so "Required" is meaningless here. Swap the toggle for a short note.
+  const isDate = placement.type === 'date'
   return (
     <div className="li-esp-props">
       <div className="li-esp-props-head">
@@ -31,14 +34,18 @@ export function FieldProps({
         </span>
         {glyph.label} field
       </div>
-      <label className="li-esp-props-row li-esp-props-check">
-        <input
-          type="checkbox"
-          checked={placement.required}
-          onChange={(e) => onChange(placement.id, { required: e.target.checked })}
-        />
-        Required
-      </label>
+      {isDate ? (
+        <p className="li-esp-props-hint">Fills automatically when signed.</p>
+      ) : (
+        <label className="li-esp-props-row li-esp-props-check">
+          <input
+            type="checkbox"
+            checked={placement.required}
+            onChange={(e) => onChange(placement.id, { required: e.target.checked })}
+          />
+          Required
+        </label>
+      )}
       <label className="li-esp-props-row">
         <span className="li-esp-props-k">Label</span>
         <input
@@ -64,11 +71,6 @@ export function FieldProps({
           ))}
         </select>
       </label>
-      {placement.type === 'date' && (
-        <p className="li-esp-props-hint">
-          Auto-fills with the actual date this signer signs — nobody types it.
-        </p>
-      )}
       {placement.source === 'anchor' && (
         <p className="li-esp-props-hint">Pre-placed from the document template — adjust freely.</p>
       )}
