@@ -46,6 +46,7 @@ interface ServiceDefinition {
   generationMode: GenerationMode
   booking: ServiceBooking | null
   appointmentRequired: boolean
+  offerSpanish: boolean
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -66,6 +67,7 @@ interface FormState {
   bookingSendInvite: boolean
   bookingDuration: BookingDuration
   appointmentRequired: boolean
+  offerSpanish: boolean
 }
 
 const EMPTY: FormState = {
@@ -81,6 +83,7 @@ const EMPTY: FormState = {
   bookingSendInvite: true,
   bookingDuration: 30,
   appointmentRequired: true,
+  offerSpanish: false,
 }
 
 export default function ServiceSettingsPage() {
@@ -129,6 +132,7 @@ export default function ServiceSettingsPage() {
         // Defensive ?? true: a stale server bundle without the field must not
         // silently flip existing services to intake-only.
         appointmentRequired: r.service.appointmentRequired ?? true,
+        offerSpanish: r.service.offerSpanish ?? false,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -186,6 +190,7 @@ export default function ServiceSettingsPage() {
           form.bookingEnabled ||
           form.generationMode !== 'template_merge' ||
           !form.appointmentRequired ||
+          form.offerSpanish ||
           form.clientDisplayName.trim() ||
           form.clientDescription.trim() ||
           // WP-7: Spanish-only client copy must also trigger the follow-up write.
@@ -218,6 +223,7 @@ export default function ServiceSettingsPage() {
               generationMode: form.generationMode,
               booking,
               appointmentRequired: form.appointmentRequired,
+              offerSpanish: form.offerSpanish,
             },
           })
         }
@@ -258,6 +264,7 @@ export default function ServiceSettingsPage() {
           generationMode: form.generationMode,
           booking,
           appointmentRequired: form.appointmentRequired,
+          offerSpanish: form.offerSpanish,
         },
       })
       setSaved(true)
@@ -305,6 +312,7 @@ export default function ServiceSettingsPage() {
               description: form.description,
               generationMode: form.generationMode,
               appointmentRequired: form.appointmentRequired,
+              offerSpanish: form.offerSpanish,
             }}
             onChange={(next) =>
               setForm((f) =>
@@ -319,6 +327,7 @@ export default function ServiceSettingsPage() {
                       clientDescriptionEs: next.clientDescriptionEs,
                       description: next.description,
                       generationMode: next.generationMode,
+                      offerSpanish: next.offerSpanish,
                     }
                   : f,
               )

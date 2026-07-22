@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 
 // Matter tasks read layer (migration 0084). A `task` is an entity linked to its
 // matter by a `task_of` relationship; its fields are latest-wins attributes. A
@@ -227,6 +228,75 @@ export async function listDueTasks(
         title: r.title ?? '',
         status: asStatus(r.status),
         dueDate: r.due_date as string,
+      }))
+  })
+}
+
+// ── Firm-wide OPEN to-dos on the attorney, for the Task Queue ───────────────
+// TASK-QUEUE-2. An open ad-hoc to-do assigned to (or unassigned in) the
+// single-attorney firm. Unlike listDueTasks (date-windowed, for the calendar)
+// this is status-driven and carries the client name for the queue row.
+
+export interface AttorneyTodoTask {
+  taskId: string
+  matterEntityId: string
+  matterNumber: string
+  clientName: string | null
+  title: string
+  status: TaskStatus
+  dueDate: string | null
+  createdAt: string
+}
+
+type AttorneyTodoRow = DueTaskRow & { client_name: string | null }
+
+// Every active, still-open to-do that is the attorney's, firm-wide. Mirrors
+// listDueTasks's shape (same TASK_SELECT, LEFT JOIN to the owning matter) but:
+//   • the predicate is status IN ('open','in_progress','blocked') AND a todo
+//     kind AND (assigned to the primary attorney OR unassigned) — in a
+//     single-attorney firm an unassigned open todo is effectively his.
+//   • kind is COALESCE(kind,'todo') = 'todo' so it excludes only 'signature'
+//     tasks (already an E-Sign row) while still keeping pre-0113 todos that have
+//     no task_kind attribute (null), matching asKind's null → 'todo' default.
+//   • it adds the client name via client_of → full_name (listDueTasks omits it).
+// $actorId is the firm's primary Google attorney (resolveFirmPrimaryActor); when
+// none is connected the reader returns [] rather than crashing.
+export async function listOpenTasksForAttorney(ctx: ActionContext): Promise<AttorneyTodoTask[]> {
+  const actorId = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  // No connected primary attorney → nobody to attribute unassigned todos to;
+  // return empty rather than dumping every firm todo.
+  if (!actorId) return []
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<AttorneyTodoRow>(
+      `SELECT t.*, m.name AS matter_number,
+              (SELECT a2.value #>> '{}'
+                 FROM relationship r
+                 JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+                 JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+                 JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
+                 WHERE r.tenant_id = $1 AND r.target_entity_id = t.matter_id AND rkd.kind_name = 'client_of'
+                   AND (r.valid_to IS NULL OR r.valid_to > now())
+                 ORDER BY a2.valid_from DESC
+                 LIMIT 1) AS client_name
+         FROM (${TASK_SELECT}) t
+         LEFT JOIN entity m ON m.tenant_id = $1 AND m.id = t.matter_id
+        WHERE t.status IN ('open', 'in_progress', 'blocked')
+          AND COALESCE(t.kind, 'todo') = 'todo'
+          AND (t.assignee_actor_id = $2::uuid OR t.assignee_actor_id IS NULL)
+        ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC`,
+      [ctx.tenantId, actorId],
+    )
+    return res.rows
+      .filter((r) => r.matter_id) // a task always belongs to a matter; skip any orphan defensively
+      .map((r) => ({
+        taskId: r.task_id,
+        matterEntityId: r.matter_id as string,
+        matterNumber: r.matter_number ?? '',
+        clientName: r.client_name ?? null,
+        title: r.title ?? '',
+        status: asStatus(r.status),
+        dueDate: r.due_date,
+        createdAt: r.created_at.toISOString(),
       }))
   })
 }

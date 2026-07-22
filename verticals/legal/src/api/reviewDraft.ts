@@ -5,10 +5,18 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import { getDraftVersion } from '../queries/drafts.js'
+import { getMatter } from '../queries/matters.js'
 import { sendDraftLinkEmail, sendCommunicationDraft } from './email.js'
 import { longDate } from './templateMerge.js'
 import { isSystemToken } from './tokenClasses.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { enqueueSpanishTranslation } from './generateDraft.js'
+import { draftAlreadyExists } from './generateDocumentRuntime.js'
+import {
+  intakeWantsBilingual,
+  isSpanishDocumentKind,
+  spanishDocumentKind,
+} from './documentLanguage.js'
 
 export interface DraftReviewInput {
   documentVersionId: string
@@ -174,7 +182,42 @@ export async function approveDraft(
       )
     }
   }
+  // BILINGUAL-DOCS-1: approving an English document on a "both languages" matter
+  // spawns its Spanish translation as a separate reviewable draft. Runs AFTER the
+  // approve committed and never blocks it — a failure to enqueue is logged, not
+  // thrown (the English approval stands regardless).
+  if (effects.isCommunication !== true) {
+    try {
+      await maybeEnqueueSpanishTranslation(ctx, finalVersionId)
+    } catch (err) {
+      console.error('[approveDraft] Spanish translation enqueue failed (approval stands):', err)
+    }
+  }
   return { ...res, approvedDocumentVersionId: finalVersionId }
+}
+
+// Gate + enqueue the Spanish translation of a just-approved English document.
+// Skips unless: the client chose "English + Spanish" at intake, the approved doc
+// is not itself a Spanish translation, and a Spanish copy doesn't already exist
+// (so re-approving the same document never spawns duplicate translations).
+async function maybeEnqueueSpanishTranslation(
+  ctx: ActionContext,
+  approvedVersionId: string,
+): Promise<void> {
+  const approved = await getDraftVersion(ctx, approvedVersionId)
+  if (!approved || !approved.matterEntityId) return
+  if (isSpanishDocumentKind(approved.documentKind)) return
+
+  const matter = await getMatter(ctx, approved.matterEntityId)
+  if (!intakeWantsBilingual(matter?.questionnaireResponses)) return
+
+  const targetKind = spanishDocumentKind(approved.documentKind)
+  if (await draftAlreadyExists(ctx, approved.matterEntityId, targetKind)) return
+
+  await enqueueSpanishTranslation(ctx, {
+    matterEntityId: approved.matterEntityId,
+    sourceDocumentVersionId: approvedVersionId,
+  })
 }
 
 export interface ApproveDocumentResult {

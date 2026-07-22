@@ -11,10 +11,11 @@
 // it does not rewrite. Firm constants (rates, retainer, addresses) stay literal
 // text; only the counterparty identity becomes merge fields, using the canonical
 // MERGE_SLOT_FIELDS ids so buildMergeData fills them without new plumbing.
-import type { ActionContext } from '@exsto/substrate'
+import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { createTemplate } from './standaloneTemplates.js'
 import { setEngagementTemplate, getEngagementTemplate } from './engagement.js'
+import { readContactEngagementOverride } from '../handlers/engagement.js'
 import { getStandaloneTemplate } from '../queries/templates.js'
 import { getContact } from '../queries/contacts.js'
 import { getTenantSettings } from './tenantSettings.js'
@@ -160,17 +161,57 @@ export interface ClientEngagementAgreement {
   signerLabel: string | null
 }
 
+// ENGAGEMENT-TEMPLATES-1 Phase 2 — the per-contact engagement-letter override.
+// getContactEngagementOverride returns the template id THIS client signs instead
+// of the firm default, or null. Tolerant of the 0191 kind not existing yet.
+export async function getContactEngagementOverride(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<string | null> {
+  return withActionContext(ctx, (client) =>
+    readContactEngagementOverride(client, ctx.tenantId, clientContactId),
+  )
+}
+
+// Attorney picks which engagement letter a specific client signs (templateId), or
+// clears it back to the firm default (null).
+export async function setContactEngagementLetter(
+  ctx: ActionContext,
+  clientContactId: string,
+  templateId: string | null,
+): Promise<{ templateId: string | null }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.contact.set_engagement_letter',
+    intentKind: 'adjustment',
+    payload: { client_contact_id: clientContactId, template_id: templateId },
+  })
+  const eff = res.effects[0] as { template_id: string | null }
+  return { templateId: eff.template_id }
+}
+
 export async function getClientEngagementAgreement(
   ctx: ActionContext,
   clientContactId: string,
 ): Promise<ClientEngagementAgreement | null> {
-  const pointer = await getEngagementTemplate(ctx)
-  if (!pointer) return null
-  const [template, contact, settings] = await Promise.all([
-    getStandaloneTemplate(ctx, pointer.template_id),
+  // ENGAGEMENT-TEMPLATES-1 Phase 2 — resolve which letter THIS client signs:
+  // their per-contact override if set, else the firm default. Always falls back
+  // to the default (founder). getContactEngagementOverride is tolerant of the
+  // 0191 kind not existing yet (returns null → default).
+  const [override, pointer, contact, settings] = await Promise.all([
+    getContactEngagementOverride(ctx, clientContactId),
+    getEngagementTemplate(ctx),
     getContact(ctx, clientContactId),
     getTenantSettings(ctx),
   ])
+  const defaultId = pointer?.template_id ?? null
+  if (!override && !defaultId) return null
+
+  // Prefer the override; if it points at a retired/missing template, fall back to
+  // the firm default (never recurse).
+  let template = override ? await getStandaloneTemplate(ctx, override) : null
+  if (!template && defaultId && defaultId !== override) {
+    template = await getStandaloneTemplate(ctx, defaultId)
+  }
   if (!template || !contact) return null
 
   const now = new Date().toISOString()
@@ -200,12 +241,19 @@ export async function getClientEngagementAgreement(
     .filter((line) => line.trim() !== '[[MISSING: client_address]]')
     .join('\n')
 
-  const details = pointer.details as { signer_label?: unknown }
+  // signer_label lives on the firm-default pointer's parsed details; it only
+  // applies when the resolved template IS the default (an override letter has no
+  // stored details — its signer label falls back to null, filled by the letter's
+  // own text).
+  const usedDefault = template.templateEntityId === defaultId
+  const details = (usedDefault ? pointer?.details : undefined) as
+    | { signer_label?: unknown }
+    | undefined
   return {
     markdown,
-    templateId: pointer.template_id,
-    templateVersion: pointer.version,
+    templateId: template.templateEntityId,
+    templateVersion: pointer?.version ?? 1,
     missingFields: rendered.missingFields.filter((f) => f !== 'client_address'),
-    signerLabel: typeof details.signer_label === 'string' ? details.signer_label : null,
+    signerLabel: typeof details?.signer_label === 'string' ? details.signer_label : null,
   }
 }

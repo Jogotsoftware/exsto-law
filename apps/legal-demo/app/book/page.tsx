@@ -142,6 +142,9 @@ interface Service {
   // MACHINE-COMMS-1: true only when the service is active AND has an authored
   // lifecycle. Non-bookable services are never offered on this page.
   bookable: boolean
+  // BILINGUAL-DOCS-1: when true, the intake shows a language choice; picking
+  // "both" makes each approved document also get a Spanish copy.
+  offerSpanish?: boolean
 }
 
 type Step = 'service' | 'contact' | 'intake' | 'slot' | 'account' | 'done'
@@ -1240,6 +1243,43 @@ export default function BookPage() {
 
             {step === 'intake' && selectedService && (
               <>
+                {/* BILINGUAL-DOCS-1 — language choice, shown only when the
+                    attorney marked this service bilingual. Machine value
+                    'en' | 'both' under the reserved 'document_language' id
+                    (see verticals/legal documentLanguage.ts); absent = English. */}
+                {selectedService.offerSpanish && (
+                  <div className="bk-section bk-langchoice">
+                    <h3 className="bk-section-title">
+                      {lang === 'es' ? 'Idioma de sus documentos' : 'Language for your documents'}
+                    </h3>
+                    <div className="bk-fields">
+                      <label className="bk-field">
+                        <span className="bk-field-label">
+                          {lang === 'es'
+                            ? '¿En qué idioma desea sus documentos?'
+                            : 'Which language(s) would you like your documents in?'}
+                        </span>
+                        <select
+                          className="bk-input"
+                          value={String(intakeResponses['document_language'] ?? 'en')}
+                          onChange={(e) =>
+                            setIntakeResponses((prev) => ({
+                              ...prev,
+                              document_language: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="en">
+                            {lang === 'es' ? 'Solo inglés' : 'English only'}
+                          </option>
+                          <option value="both">
+                            {lang === 'es' ? 'Inglés y español' : 'English and Spanish'}
+                          </option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                )}
                 <div className="bk-sections">
                   {selectedService.intakeSchema.sections
                     // WP5: a section whose fields are ALL internal (attorney/system-

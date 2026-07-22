@@ -137,6 +137,12 @@ export interface ServiceDefinition {
   // Settings editor persists booking.enabled=false on every save, so that flag
   // cannot mean "no appointment" without breaking existing services.
   appointmentRequired: boolean
+  // BILINGUAL-DOCS-1 — when true, the attorney offers this service in English +
+  // Spanish: the public intake shows the client a language choice, and choosing
+  // "both" makes each approved English document spawn a Spanish translation as a
+  // separate reviewable document. Default false (English only) — opt-in per
+  // service, no behavior change for services that don't set it.
+  offerSpanish: boolean
   isActive: boolean
   // MACHINE-COMMS-1 (WP0) — booking honesty: a service is bookable ONLY when it is
   // active AND carries a non-empty authored lifecycle. matter.open fails loudly on
@@ -362,6 +368,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     generationMode: parseGenerationMode(r.transitions.generation_mode),
     booking: parseBooking(r.transitions.booking),
     appointmentRequired: parseAppointmentRequired(r.transitions.appointment_required),
+    offerSpanish: r.transitions.offer_spanish === true,
     isActive: r.status === 'active',
     bookable: r.status === 'active' && r.has_lifecycle === true,
     sortOrder: sortOrderOf(r),
@@ -529,6 +536,9 @@ export interface UpdateServiceMetadataInput {
   // Whether booking schedules a consultation slot. Omit to carry forward;
   // absent-in-storage reads as true (parseAppointmentRequired).
   appointmentRequired?: boolean
+  // BILINGUAL-DOCS-1: offer this service in English + Spanish. Omit to carry
+  // forward; absent-in-storage reads as false (English only).
+  offerSpanish?: boolean
 }
 
 // Create a new service (metadata only — questionnaire/prompt editors are a
@@ -592,6 +602,12 @@ export async function updateServiceMetadata(
       throw new Error('appointmentRequired must be a boolean.')
     }
     transitionsPatch.appointment_required = input.appointmentRequired
+  }
+  if (input.offerSpanish !== undefined) {
+    if (typeof input.offerSpanish !== 'boolean') {
+      throw new Error('offerSpanish must be a boolean.')
+    }
+    transitionsPatch.offer_spanish = input.offerSpanish
   }
 
   await submitAction(ctx, {

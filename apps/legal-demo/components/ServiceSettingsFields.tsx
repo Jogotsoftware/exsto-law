@@ -30,6 +30,8 @@ export interface ServiceSettingsValue {
   description: string
   generationMode: ServiceGenerationMode
   appointmentRequired: boolean
+  // BILINGUAL-DOCS-1 — offer this service in English + Spanish.
+  offerSpanish: boolean
 }
 
 export function ServiceSettingsFields({
@@ -215,6 +217,21 @@ export function ServiceSettingsFields({
             : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
         </small>
       </div>
+
+      {/* BILINGUAL-DOCS-1 — offer this service in English + Spanish. When on, the
+          intake asks the client which language(s) they want; choosing both makes
+          each approved document also get a Spanish copy for review. */}
+      <label className="svc-check" style={{ marginTop: 'var(--space-1)' }}>
+        <input
+          type="checkbox"
+          checked={value.offerSpanish}
+          onChange={(e) => update('offerSpanish', e.target.checked)}
+        />
+        <span>
+          Offer this service in English + Spanish (clients can request a Spanish copy of each
+          document)
+        </span>
+      </label>
     </>
   )
 }

@@ -23,7 +23,11 @@ interface DraftPayload {
 }
 
 function humanizeKind(k: string): string {
-  return k.replace(/_/g, ' ')
+  // BILINGUAL-DOCS-1: a '_es' copy shows as "… (Spanish)".
+  const es = k.endsWith('_es')
+  const base = es ? k.slice(0, -'_es'.length) : k
+  const h = base.replace(/_/g, ' ')
+  return es ? `${h} (Spanish)` : h
 }
 
 export default function PublicDraftPage({ params }: { params: Promise<{ versionId: string }> }) {

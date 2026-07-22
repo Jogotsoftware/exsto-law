@@ -11,6 +11,8 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
+import { getDraftVersion } from '../queries/drafts.js'
+import { isSpanishDocumentKind, spanishDocumentKind, baseDocumentKind } from './documentLanguage.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
 import { canonicalizeExecutionLines } from '../esign/executionBlock.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
@@ -494,6 +496,156 @@ export async function runDraftGeneration(
   })
 
   return generated
+}
+
+// ── BILINGUAL-DOCS-1 — Spanish translation of an approved document ───────────
+// When the client chose "English + Spanish" at intake, each English document the
+// attorney APPROVES spawns a Spanish translation as a SEPARATE reviewable
+// document (Joe 2026-07-22: translate the approved English; the Spanish goes
+// through its own review). Enqueued by approveDraft (api/reviewDraft.ts) after
+// the approve commits; the model call runs here, on the worker.
+//
+// The Spanish copy is a faithful translation of the EXACT approved English body —
+// not a fresh generation — so the two documents always say the same thing. Its
+// document_kind is the English kind + '_es', which is what keeps it a distinct
+// document (it will never supersede or be blocked by its English source).
+
+export async function enqueueSpanishTranslation(
+  ctx: ActionContext,
+  input: { matterEntityId: string; sourceDocumentVersionId: string },
+): Promise<{ jobId: string }> {
+  const jobId = await enqueueJob({
+    tenantId: ctx.tenantId,
+    jobKind: 'legal.draft.run',
+    payload: {
+      matter_entity_id: input.matterEntityId,
+      translate_to_es: true,
+      source_document_version_id: input.sourceDocumentVersionId,
+      requested_by: ctx.actorId,
+    },
+  })
+  return { jobId }
+}
+
+const SPANISH_TRANSLATION_INSTRUCTION =
+  'You are a professional legal translator. Translate the APPROVED English legal document below ' +
+  'into Spanish (es). Produce a faithful, complete, native-quality legal translation: keep every ' +
+  'section, heading, numbered clause, defined term, party name, date, dollar amount, and legal ' +
+  'meaning exactly as in the source — do not add, omit, reinterpret, or re-draft anything. Keep ' +
+  'proper nouns, statute/section citations, and dollar figures as they appear. Preserve the exact ' +
+  'Markdown structure (same headings, lists, tables, bold/italics, and any signature lines). ' +
+  'Output ONLY the translated Spanish document in Markdown — no preamble, no notes, no English.'
+
+// Worker-side: produce the Spanish translation of an approved English document as
+// a new pending-review draft. Reuses the drafting persist/trace/notify path so the
+// Spanish copy lands in the review queue exactly like any other draft.
+export async function runSpanishTranslation(
+  ctx: ActionContext,
+  input: { matterEntityId: string; sourceDocumentVersionId: string },
+): Promise<ActionResult | null> {
+  const agentCtx = await resolveTenantAgentCtx(ctx)
+  const source = await getDraftVersion(agentCtx, input.sourceDocumentVersionId)
+  if (!source) {
+    await emitTranslationFailed(agentCtx, input.matterEntityId, 'source document version not found')
+    return null
+  }
+  // Never translate a translation (defense in depth — the approve gate already
+  // skips _es docs).
+  if (isSpanishDocumentKind(source.documentKind)) return null
+  const englishBody = (source.bodyMarkdown ?? '').trim()
+  if (!englishBody) {
+    await emitTranslationFailed(agentCtx, input.matterEntityId, 'approved document has no body')
+    return null
+  }
+
+  const targetKind = spanishDocumentKind(baseDocumentKind(source.documentKind))
+  const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
+
+  // Formatting standard first (so the Spanish reads as polished as the English),
+  // then the translation instruction, then the exact approved English body.
+  const prompt = [
+    DOCUMENT_STYLE_INSTRUCTION,
+    SPANISH_TRANSLATION_INSTRUCTION,
+    '--- APPROVED ENGLISH DOCUMENT (source of truth) ---',
+    englishBody,
+  ].join('\n\n')
+
+  const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, task: 'draft_generate' })
+
+  const reasoningTraceId = await persistReasoningTrace(agentCtx, {
+    prompt,
+    evidence: result.reasoningTrace.evidence,
+    alternatives: result.reasoningTrace.alternatives_considered,
+    conclusion: `Spanish translation of approved ${source.documentKind} (version ${input.sourceDocumentVersionId}).`,
+    confidence: result.reasoningTrace.confidence,
+    modelIdentity: result.modelIdentity,
+    fullTrace: result.reasoningTrace,
+    promptId: `${targetKind}@translate`,
+    unresolvedTokens: findUnresolvedTokens(result.documentMarkdown),
+  })
+
+  const generated = await submitAction(agentCtx, {
+    actionKindName: 'draft.generate',
+    intentKind: 'enforcement',
+    reasoningTraceId,
+    payload: {
+      matter_entity_id: input.matterEntityId,
+      document_kind: targetKind,
+      document_markdown: result.documentMarkdown,
+      model_identity: result.modelIdentity,
+      reasoning_trace_id: reasoningTraceId,
+      jurisdiction: jurisdiction?.code ?? null,
+      confidence: clampConfidence(result.reasoningTrace.confidence),
+      // A fresh entity (no supersede) — the Spanish copy is its own document.
+      supersedes_document_entity_id: null,
+      // The matter already advanced past the English approval; the translation is
+      // a side document and must not drag the matter back to in_review.
+      suppress_matter_status_flip: true,
+      usage: {
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        cache_creation_tokens: result.usage.cacheCreationTokens,
+        cache_read_tokens: result.usage.cacheReadTokens,
+      },
+    },
+  })
+
+  const { queueNotification } = await import('./notifications.js')
+  const genEffects = (generated.effects[0] ?? {}) as { documentVersionId?: string }
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  await queueNotification(agentCtx, {
+    routeKindName: 'attorney_draft_completed',
+    variables: {
+      matter_entity_id: input.matterEntityId,
+      matter_number: source.matterNumber,
+      document_kind: targetKind,
+      document_kind_label: `${baseDocumentKind(source.documentKind).replace(/_/g, ' ')} (Spanish)`,
+      confidence: clampConfidence(result.reasoningTrace.confidence),
+      review_url:
+        baseUrl && genEffects.documentVersionId
+          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+          : null,
+    },
+  })
+
+  return generated
+}
+
+async function emitTranslationFailed(
+  ctx: ActionContext,
+  matterEntityId: string,
+  reason: string,
+): Promise<void> {
+  await submitAction(ctx, {
+    actionKindName: 'event.record',
+    intentKind: 'automatic_sync',
+    payload: {
+      event_kind_name: 'draft.failed',
+      primary_entity_id: matterEntityId,
+      data: { document_kind: 'spanish_translation', reason, retryable: false },
+      source_type: 'system',
+    },
+  })
 }
 
 // ── System facts injection (generation integrity) ───────────────────────────
