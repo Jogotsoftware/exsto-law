@@ -1,5 +1,6 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { deriveCrmBucket, type CrmBucket } from './contacts.js'
+import { resolveCanonicalMatterStatuses } from './matterWorkflowPosition.js'
 
 // Reads for the Clients CRM (beta sprint Obj 2/3). Client is the parent
 // (migration 0020): contacts attach via contact_of (contact→client), matters via
@@ -73,14 +74,17 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
       main_contact_name: string | null
       contact_count: string
       matter_count: string
-      matter_statuses: string[] | null
+      matter_status_pairs: Array<{ id: string; status: string | null }> | null
       created_at: Date
       last_activity_at: Date
     }>(
       `
        WITH matter_rollup AS (
+         -- (matter id, raw mirror status) pairs so the caller can overlay the
+         -- canonical workflow-derived status before the CRM bucket is computed.
          SELECT mo.target_entity_id AS client_id,
-                array_agg(ms.value #>> '{}') FILTER (WHERE ms.value IS NOT NULL) AS statuses,
+                jsonb_agg(jsonb_build_object('id', mo.source_entity_id, 'status', ms.value #>> '{}'))
+                  AS matter_status_pairs,
                 max(me.created_at) AS last_at
          FROM relationship mo
          JOIN relationship_kind_definition mok ON mok.id = mo.relationship_kind_id AND mok.kind_name = 'matter_of'
@@ -122,7 +126,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
             JOIN entity me ON me.id = r.source_entity_id AND me.tenant_id = $1 AND me.status = 'active'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id AND rkd.kind_name = 'matter_of'
               AND (r.valid_to IS NULL OR r.valid_to > now()))::text AS matter_count,
-         mr.statuses AS matter_statuses,
+         mr.matter_status_pairs AS matter_status_pairs,
          e.created_at,
          COALESCE(mr.last_at, e.created_at) AS last_activity_at
        FROM entity e
@@ -132,6 +136,19 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
        ORDER BY name NULLS LAST`,
       [ctx.tenantId],
     )
+    // Overlay each matter's canonical (workflow-derived) status over the raw mirror
+    // before deriving the CRM bucket — one batched resolve across all clients.
+    const allMatterIds = Array.from(
+      new Set(res.rows.flatMap((r) => (r.matter_status_pairs ?? []).map((p) => p.id))),
+    )
+    const canonical = await resolveCanonicalMatterStatuses(client, ctx.tenantId, allMatterIds)
+    const effectiveStatuses = (
+      pairs: Array<{ id: string; status: string | null }> | null,
+    ): string[] =>
+      (pairs ?? [])
+        .map((p) => canonical.get(p.id) ?? p.status)
+        .filter((s): s is string => s !== null && s !== undefined)
+
     return res.rows.map((r) => ({
       clientEntityId: r.client_entity_id,
       name: r.name ?? '',
@@ -142,7 +159,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
       mainContactName: r.main_contact_name,
       contactCount: Number(r.contact_count),
       matterCount: Number(r.matter_count),
-      crmBucket: deriveCrmBucket(r.matter_statuses ?? []),
+      crmBucket: deriveCrmBucket(effectiveStatuses(r.matter_status_pairs)),
       lastActivityAt: r.last_activity_at.toISOString(),
       createdAt: r.created_at.toISOString(),
     }))
@@ -225,6 +242,15 @@ export async function getClient(
       [ctx.tenantId, clientEntityId],
     )
 
+    // Overlay canonical (workflow-derived) status over the raw mirror per matter.
+    const canonical = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      mattersRes.rows.map((r) => r.matter_entity_id),
+    )
+    const effStatus = (r: { matter_entity_id: string; status: string | null }): string =>
+      canonical.get(r.matter_entity_id) ?? r.status ?? 'intake_submitted'
+
     const mainContactRow = contactsRes.rows.find((r) => r.contact_entity_id === mainContactId)
     return {
       clientEntityId: c.id,
@@ -237,7 +263,7 @@ export async function getClient(
       mainContactName: mainContactRow?.full_name ?? null,
       contactCount: contactsRes.rows.length,
       matterCount: mattersRes.rows.length,
-      crmBucket: deriveCrmBucket(mattersRes.rows.map((r) => r.status ?? 'inquiry')),
+      crmBucket: deriveCrmBucket(mattersRes.rows.map(effStatus)),
       lastActivityAt: (mattersRes.rows[0]?.created_at ?? c.created_at).toISOString(),
       createdAt: c.created_at.toISOString(),
       contacts: contactsRes.rows.map((r) => ({
@@ -251,7 +277,7 @@ export async function getClient(
         matterEntityId: r.matter_entity_id,
         matterNumber: r.matter_number,
         serviceKey: r.service_key ?? '',
-        status: r.status ?? 'intake_submitted',
+        status: effStatus(r),
         createdAt: r.created_at.toISOString(),
       })),
     }

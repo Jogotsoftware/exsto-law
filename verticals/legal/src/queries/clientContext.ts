@@ -14,6 +14,7 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { getClient } from './client.js'
 import { listNotesForEntity, type NoteSummary } from './notes.js'
+import { resolveCanonicalMatterStatuses } from './matterWorkflowPosition.js'
 
 export interface ClientContextMatter {
   matterEntityId: string
@@ -258,13 +259,19 @@ export async function getClientContext(
     }
 
     const clientNotes = await listNotesForEntity(ctx, clientEntityId)
+    // Overlay canonical (workflow-derived) status over the raw mirror per matter.
+    const canonicalStatuses = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      mattersRes.rows.map((m) => m.matter_id),
+    )
     const matters: ClientContextMatter[] = []
     for (const m of mattersRes.rows) {
       matters.push({
         matterEntityId: m.matter_id,
         matterNumber: m.matter_number,
         serviceKey: m.service_key ?? '',
-        matterStatus: m.matter_status ?? 'unknown',
+        matterStatus: canonicalStatuses.get(m.matter_id) ?? m.matter_status ?? 'unknown',
         archived: m.entity_status === 'archived',
         openedAt: m.created_at.toISOString().slice(0, 10),
         intakeFacts: capIntakeFacts(m.intake),

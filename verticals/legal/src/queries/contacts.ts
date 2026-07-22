@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { resolveCanonicalMatterStatuses } from './matterWorkflowPosition.js'
 
 // CRM lead pipeline stage, derived (not stored) from a contact's matter statuses
 // so it stays in sync without a separate field to maintain. A contact with any
@@ -103,7 +104,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       company_name: string | null
       attribution_source: string | null
       matter_count: string
-      matter_statuses: string[] | null
+      matter_status_pairs: Array<{ id: string; status: string | null }> | null
       first_seen_at: Date
       last_activity_at: Date
     }>(
@@ -136,9 +137,13 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
            AND (mo.valid_to IS NULL OR mo.valid_to > now())
        ),
        matter_rollup AS (
+         -- Carry (matter id, raw mirror status) PAIRS, not just the status array, so
+         -- the caller can overlay each matter's canonical workflow-derived status
+         -- before deriving lead stage / CRM bucket (the raw mirror drifts).
          SELECT cm.contact_id,
                 count(*) AS n,
-                array_agg(ms.value #>> '{}') FILTER (WHERE ms.value IS NOT NULL) AS statuses,
+                jsonb_agg(jsonb_build_object('id', cm.matter_id, 'status', ms.value #>> '{}'))
+                  AS matter_status_pairs,
                 max(me.created_at) AS last_at
          FROM contact_matter cm
          JOIN entity me ON me.id = cm.matter_id AND me.tenant_id = $1
@@ -211,7 +216,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
             ORDER BY a.valid_from DESC LIMIT 1)
          ) AS attribution_source,
          COALESCE(mr.n, 0)::text AS matter_count,
-         mr.statuses AS matter_statuses,
+         mr.matter_status_pairs AS matter_status_pairs,
          e.created_at AS first_seen_at,
          COALESCE(mr.last_at, e.created_at) AS last_activity_at
        FROM entity e
@@ -223,19 +228,36 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
        ORDER BY COALESCE(mr.last_at, e.created_at) DESC`,
       [ctx.tenantId],
     )
-    return res.rows.map((r) => ({
-      contactEntityId: r.contact_entity_id,
-      fullName: r.full_name ?? '',
-      email: r.email ?? '',
-      phone: r.phone,
-      companyName: r.company_name,
-      attributionSource: r.attribution_source,
-      matterCount: Number(r.matter_count),
-      leadStage: deriveLeadStage(r.matter_statuses ?? []),
-      crmBucket: deriveCrmBucket(r.matter_statuses ?? []),
-      firstSeenAt: r.first_seen_at.toISOString(),
-      lastActivityAt: r.last_activity_at.toISOString(),
-    }))
+    // Overlay each matter's canonical (workflow-derived) status over the raw mirror
+    // before deriving pipeline stage — one batched resolve across every contact's
+    // matters. A matter with no running workflow keeps its raw mirror value.
+    const allMatterIds = Array.from(
+      new Set(res.rows.flatMap((r) => (r.matter_status_pairs ?? []).map((p) => p.id))),
+    )
+    const canonical = await resolveCanonicalMatterStatuses(client, ctx.tenantId, allMatterIds)
+    const effectiveStatuses = (
+      pairs: Array<{ id: string; status: string | null }> | null,
+    ): string[] =>
+      (pairs ?? [])
+        .map((p) => canonical.get(p.id) ?? p.status)
+        .filter((s): s is string => s !== null && s !== undefined)
+
+    return res.rows.map((r) => {
+      const statuses = effectiveStatuses(r.matter_status_pairs)
+      return {
+        contactEntityId: r.contact_entity_id,
+        fullName: r.full_name ?? '',
+        email: r.email ?? '',
+        phone: r.phone,
+        companyName: r.company_name,
+        attributionSource: r.attribution_source,
+        matterCount: Number(r.matter_count),
+        leadStage: deriveLeadStage(statuses),
+        crmBucket: deriveCrmBucket(statuses),
+        firstSeenAt: r.first_seen_at.toISOString(),
+        lastActivityAt: r.last_activity_at.toISOString(),
+      }
+    })
   })
 }
 
@@ -311,6 +333,15 @@ export async function getContact(
       [ctx.tenantId, contactEntityId],
     )
 
+    // Overlay canonical (workflow-derived) status over the raw mirror per matter.
+    const canonical = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      matters.rows.map((r) => r.matter_entity_id),
+    )
+    const effStatus = (r: { matter_entity_id: string; status: string | null }): string =>
+      canonical.get(r.matter_entity_id) ?? r.status ?? 'inquiry'
+
     return {
       contactEntityId,
       // Coalesce the two attribute-name conventions (see listContacts) so the
@@ -321,15 +352,15 @@ export async function getContact(
       companyName: attrs['contact_company_name'] ?? attrs['company_name'] ?? null,
       attributionSource: attrs['contact_attribution_source'] ?? attrs['attribution_source'] ?? null,
       matterCount: matters.rows.length,
-      leadStage: deriveLeadStage(matters.rows.map((r) => r.status ?? 'inquiry')),
-      crmBucket: deriveCrmBucket(matters.rows.map((r) => r.status ?? 'inquiry')),
+      leadStage: deriveLeadStage(matters.rows.map(effStatus)),
+      crmBucket: deriveCrmBucket(matters.rows.map(effStatus)),
       firstSeenAt: baseCreatedAtIso,
       lastActivityAt: matters.rows[0]?.created_at ?? baseCreatedAtIso,
       matters: matters.rows.map((r) => ({
         matterEntityId: r.matter_entity_id,
         matterNumber: r.matter_number,
         serviceKey: r.service_key ?? '',
-        status: r.status ?? 'inquiry',
+        status: effStatus(r),
         summary: r.summary ?? '',
         createdAt: r.created_at,
       })),

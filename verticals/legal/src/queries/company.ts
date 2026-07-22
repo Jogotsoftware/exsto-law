@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { resolveCanonicalMatterStatuses } from './matterWorkflowPosition.js'
 
 // Reads for the CRM, organized around the COMPANY (migration 0067). A company is
 // the account: contacts attach via contact_of_company (contact→company), matters
@@ -165,6 +166,13 @@ export async function getCompany(
       [ctx.tenantId, companyEntityId],
     )
 
+    // Overlay canonical (workflow-derived) status over the raw mirror per matter.
+    const canonical = await resolveCanonicalMatterStatuses(
+      client,
+      ctx.tenantId,
+      mattersRes.rows.map((r) => r.matter_entity_id),
+    )
+
     const mainContactId = c.main_contact_id
     return {
       companyEntityId: c.id,
@@ -187,7 +195,7 @@ export async function getCompany(
         matterEntityId: r.matter_entity_id,
         matterNumber: r.matter_number,
         serviceKey: r.service_key ?? '',
-        status: r.status ?? 'intake_submitted',
+        status: canonical.get(r.matter_entity_id) ?? r.status ?? 'intake_submitted',
         createdAt: r.created_at.toISOString(),
       })),
     }
