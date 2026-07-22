@@ -81,6 +81,7 @@ interface RawEsignRole {
   recipientRole?: unknown
   bind?: unknown
   order?: unknown
+  presigned?: unknown
 }
 
 function isValidBind(v: unknown): boolean {
@@ -97,6 +98,7 @@ function normalizeEsignConfig(raw: unknown): {
     recipientRole: EsignRecipientRoleLiteral
     bind: string
     order: number
+    presigned?: boolean
   }>
 } {
   const o = (raw && typeof raw === 'object' ? raw : {}) as {
@@ -110,6 +112,7 @@ function normalizeEsignConfig(raw: unknown): {
     recipientRole: EsignRecipientRoleLiteral
     bind: string
     order: number
+    presigned?: boolean
   }> = []
   if (Array.isArray(o.roles)) {
     for (const entry of o.roles as RawEsignRole[]) {
@@ -126,7 +129,10 @@ function normalizeEsignConfig(raw: unknown): {
       const order =
         typeof entry.order === 'number' && Number.isFinite(entry.order) ? entry.order : 1
       const label = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : key
-      roles.push({ key, label, recipientRole, bind, order })
+      // PRESIGN-1 — pre-signing is the attorney auto-applying their OWN standing
+      // signature; honor it only for attorney_of_record (dropped elsewhere).
+      const presigned = entry.presigned === true && bind === 'attorney_of_record'
+      roles.push({ key, label, recipientRole, bind, order, ...(presigned ? { presigned } : {}) })
     }
   }
   const signable = o.signable === true

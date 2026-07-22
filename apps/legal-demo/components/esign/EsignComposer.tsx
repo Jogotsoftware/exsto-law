@@ -56,6 +56,9 @@ export interface WorkflowStepRecipientSeed {
   order: number
   key: string | null
   label?: string
+  /** PRESIGN-1: attorney role marked pre-signed in the template — signs
+   *  automatically at send. */
+  presigned?: boolean
 }
 
 export type ComposerSource =
@@ -513,6 +516,7 @@ export function EsignComposer({
           order: draft.useSigningOrder ? r.order || i + 1 : 1,
           role: r.role,
           key: signerKeyForRow.get(rowIndex),
+          ...(r.presigned ? { presigned: true } : {}),
         }
       })
 

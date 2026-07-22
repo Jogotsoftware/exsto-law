@@ -46,6 +46,10 @@ export interface ResolvedEsignRecipient {
   // Set when the recipient is a known CRM contact — lets the composer attach
   // the envelope (document_of_contact) and the typeahead show the match.
   contactEntityId: string | null
+  // PRESIGN-1 — this signer's standing signature is applied automatically at
+  // send (attorney_of_record role marked pre-signed in the template). The
+  // composer shows it as "signs automatically" and never asks for an email/turn.
+  presigned: boolean
 }
 
 export interface ResolvedIdentity {
@@ -220,6 +224,9 @@ export async function assembleRecipientRows(
       email,
       title,
       contactEntityId,
+      // Honor pre-sign only for the attorney bind (parse enforces this too;
+      // re-assert so a hand-built config can't smuggle it onto a client row).
+      presigned: role.presigned === true && role.bind === 'attorney_of_record',
     })
   }
   // Stable sort: ascending order, ties keep config order.

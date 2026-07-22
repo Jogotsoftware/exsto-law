@@ -126,6 +126,11 @@ export interface TemplateEsignRole {
   order: number
   /** ESIGN-FIELDS-1 — merge-field-sourced identity slots (override `bind`). */
   fields?: TemplateEsignRoleFields
+  /** PRESIGN-1 — the attorney's standing signature is applied AUTOMATICALLY at
+   *  send, so this signer never has to act and only the client(s) sign. Only
+   *  meaningful for the `attorney_of_record` bind (the firm's own signer); parse
+   *  drops it for any other bind. */
+  presigned?: boolean
 }
 
 // A merge-field token reference on a role, normalized to the token grammar
@@ -172,7 +177,19 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
   const order = typeof o.order === 'number' && Number.isFinite(o.order) ? o.order : 1
   const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim() : key
   const fields = parseTemplateEsignRoleFields(o.fields)
-  return { key, label, recipientRole, bind, order, ...(fields ? { fields } : {}) }
+  // PRESIGN-1 — pre-signing is the attorney applying THEIR OWN standing signature
+  // automatically; it is nonsensical (and unsafe) on any other bind, so honor the
+  // flag only for attorney_of_record and drop it everywhere else.
+  const presigned = o.presigned === true && bind === 'attorney_of_record'
+  return {
+    key,
+    label,
+    recipientRole,
+    bind,
+    order,
+    ...(fields ? { fields } : {}),
+    ...(presigned ? { presigned: true } : {}),
+  }
 }
 
 // ESIGN-FIELDS-1 — signable-document email coverage (§ warn+one-click) lives in

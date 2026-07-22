@@ -25,6 +25,9 @@ interface Input {
     order?: number
     key?: string
     role?: RecipientRole
+    /** PRESIGN-1: the attorney signer whose saved signature applies automatically
+     *  at send (resolved server-side; blocks if no signature is saved). */
+    presigned?: boolean
   }>
   subject?: string
   provider?: string

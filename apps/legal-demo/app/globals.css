@@ -26646,6 +26646,21 @@ details.li-brief-research summary:hover {
 }
 
 /* Per-signer identity slots (drop a {{token}} to bind name / email / title). */
+/* PRESIGN-1 — attorney "pre-sign automatically" toggle on the attorney row. */
+.li-tplsign-presign {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--li-text-soft, #5a6472);
+  cursor: pointer;
+}
+.li-tplsign-presign input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
 .li-tplsign-slots {
   display: flex;
   gap: 6px;

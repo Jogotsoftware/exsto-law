@@ -22,6 +22,10 @@ export interface DraftRecipient {
    *  ({{type:key}}) — seeded from the template's e-sign roles so the draft
    *  send binds fields to the right signer. Null for free-typed rows. */
   key?: string | null
+  /** PRESIGN-1: the attorney signer whose saved signature applies automatically
+   *  at send (seeded from a template role marked pre-signed). Shown as "signs
+   *  automatically"; never needs an email/turn. */
+  presigned?: boolean
 }
 
 /** ES-MULTIDOC-1 — one uploaded document in the envelope's ordered set. Its

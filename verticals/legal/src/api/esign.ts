@@ -80,6 +80,9 @@ export interface PrepareSigner {
   /** ESIGN-UNIFY-1 (ES-1, §9.2): needs_to_sign (default) | needs_to_view |
    *  receives_copy. Callers written before ES-1 omit it — unchanged behavior. */
   role?: RecipientRole
+  /** PRESIGN-1: the attorney signer whose standing signature applies at send.
+   *  The builder resolves the signature server-side and blocks if none is saved. */
+  presigned?: boolean
 }
 
 export interface SendForSignatureInput {
@@ -250,6 +253,7 @@ export async function sendForSignature(
       order: s.order ?? i + 1,
       channel: s.channel,
       role: s.role ?? null,
+      presigned: s.presigned ?? null,
     })),
     fields,
     placements: input.placements,

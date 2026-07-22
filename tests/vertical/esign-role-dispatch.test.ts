@@ -88,6 +88,35 @@ describe('planInitialDispatch — send-time matrix (role × order)', () => {
   })
 })
 
+describe('planInitialDispatch — PRESIGN-1 (pre-signed attorney)', () => {
+  it('a pre-signed recipient starts "signed" (applied at send), never delivered', () => {
+    expect(planInitialDispatch([{ role: 'needs_to_sign', order: 1, presigned: true }])).toEqual([
+      'signed',
+    ])
+  })
+
+  it('pre-signed attorney at order 1 → the client at order 2 is the first delivered turn', () => {
+    expect(
+      planInitialDispatch([
+        { role: 'needs_to_sign', order: 1, presigned: true }, // attorney (auto)
+        { role: 'needs_to_sign', order: 2 }, // client
+      ]),
+    ).toEqual(['signed', 'delivered'])
+  })
+
+  it('excludes the pre-signed signer from the first-group computation (client still delivered)', () => {
+    // Attorney presigned at the SAME order as the client — the client must still
+    // be delivered, not blocked behind a signer who already signed.
+    expect(
+      planInitialDispatch([
+        { role: 'needs_to_sign', order: 1, presigned: true },
+        { role: 'needs_to_sign', order: 1 },
+        { role: 'needs_to_view', order: 2 },
+      ]),
+    ).toEqual(['signed', 'delivered', 'delivered'])
+  })
+})
+
 describe('planNextDelivery — completion ignores viewers/copy recipients', () => {
   it('completes when every needs_to_sign request signed, viewer still open', () => {
     const plan = planNextDelivery([
