@@ -12,6 +12,7 @@ import {
 import { ChevronDownIcon, ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
 import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
+import { stageStyle, stageFilterLabel, STAGE_CATEGORIES, type Stage } from '@/lib/matterStage'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
 // "/attorney/share" link, which 404'd (no such route) — the link prospects use
@@ -58,6 +59,8 @@ interface MatterSummary {
   clientName: string
   practiceArea: string
   status: string
+  // The display STATUS — derived from the matter's live workflow, server-side.
+  stage: Stage
   summary: string
   createdAt: string
 }
@@ -97,66 +100,11 @@ function attentionKindMeta(kind: string): { label: string; fg: string; bg: strin
   )
 }
 
-// The matters TABLE's status filter groups + chip styling (li-dash-mstatus). Same
-// bucketing the old status-tab panel used, so the filter still covers every status
-// the app produces. Colors reuse the shared li- status-pair tokens (ADAPT — comp
-// hardcodes per-row demo colors; we derive them from real status instead).
-const STATUS_GROUPS: Array<{
-  key: string
-  label: string
-  chipLabel: string
-  matches: (s: string) => boolean
-  fg: string
-  bg: string
-}> = [
-  {
-    key: 'inquiry',
-    label: 'New inquiries',
-    chipLabel: 'New Inquiry',
-    matches: (s) =>
-      s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
-    // Neutral gray per the comp's matters table (stBadge); matches the matters
-    // list chip (attorney/matters/page.tsx) so the status reads the same everywhere.
-    fg: 'var(--li-neutral)',
-    bg: 'var(--li-neutral-bg)',
-  },
-  {
-    key: 'scheduled',
-    label: 'Consultation booked',
-    chipLabel: 'Consultation Booked',
-    matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
-    fg: 'var(--li-info)',
-    bg: 'var(--li-info-bg)',
-  },
-  {
-    key: 'drafting',
-    label: 'Drafting / review',
-    chipLabel: 'Drafting',
-    matches: (s) => s === 'drafting' || s === 'review_pending',
-    fg: 'var(--li-warn)',
-    bg: 'var(--li-warn-bg)',
-  },
-  {
-    key: 'active',
-    label: 'Active / signed',
-    chipLabel: 'Active',
-    matches: (s) => s === 'engagement_signed' || s === 'matter_active',
-    fg: 'var(--li-ok)',
-    bg: 'var(--li-ok-bg)',
-  },
-  {
-    key: 'closed',
-    label: 'Closed',
-    chipLabel: 'Closed',
-    matches: (s) => s === 'matter_closed',
-    fg: 'var(--li-muted)',
-    bg: 'var(--li-border-soft)',
-  },
-]
-
-function matterStatusGroup(status: string): (typeof STATUS_GROUPS)[number] {
-  return STATUS_GROUPS.find((g) => g.matches(status)) ?? STATUS_GROUPS[0]!
-}
+// The matters table's STATUS chip + filter now come from each matter's derived
+// `stage` (@/lib/matterStage), which reads the matter's live workflow — the same
+// shared helper the matters list uses, so a matter reads identically on both. The
+// old hardcoded status→bucket map lived here and collapsed every real workflow
+// state to "New Inquiry".
 
 function timeAgo(iso: string): string {
   const t = parseTimestamp(iso)?.getTime() ?? NaN
@@ -257,7 +205,7 @@ export default function AttorneyHome() {
 
   const dashMatters = useMemo(() => {
     const rows = (matters ?? []).filter(
-      (m) => !dashStatusFilter || matterStatusGroup(m.status).key === dashStatusFilter,
+      (m) => !dashStatusFilter || m.stage.category === dashStatusFilter,
     )
     const dir = dashSortDir === 'asc' ? 1 : -1
     return [...rows].sort((a, b) => {
@@ -344,9 +292,9 @@ export default function AttorneyHome() {
                 aria-label="Filter matters by status"
               >
                 <option value="">All statuses</option>
-                {STATUS_GROUPS.map((g) => (
-                  <option key={g.key} value={g.key}>
-                    {g.label}
+                {STAGE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {stageFilterLabel(c)}
                   </option>
                 ))}
               </select>
@@ -364,7 +312,7 @@ export default function AttorneyHome() {
           {matters && dashMatters.length > 0 && (
             <div className="li-dash-mbody">
               {dashMatters.map((m) => {
-                const group = matterStatusGroup(m.status)
+                const chip = stageStyle(m.stage.category)
                 return (
                   <Link
                     key={m.matterEntityId}
@@ -372,7 +320,7 @@ export default function AttorneyHome() {
                     className="li-dash-mrow"
                   >
                     <span className="li-dash-mclient">
-                      <span className="li-dash-dot" style={{ background: group.fg }} />
+                      <span className="li-dash-dot" style={{ background: chip.fg }} />
                       <span className="li-dash-mclient-text">
                         <span className="li-dash-mname">{m.clientName || m.matterNumber}</span>
                         <span className="li-dash-mnum">{m.matterNumber}</span>
@@ -381,10 +329,10 @@ export default function AttorneyHome() {
                     <span className="li-dash-mdate">{formatDateShort(m.createdAt)}</span>
                     <span
                       className="li-dash-mstatus"
-                      style={{ background: group.bg, color: group.fg }}
+                      style={{ background: chip.bg, color: chip.fg }}
                     >
-                      <span className="li-dash-mstatus-dot" style={{ background: group.fg }} />
-                      {group.chipLabel}
+                      <span className="li-dash-mstatus-dot" style={{ background: chip.fg }} />
+                      {m.stage.label}
                     </span>
                   </Link>
                 )

@@ -7,6 +7,13 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { PlusIcon, SearchIcon, ChevronDownIcon } from '@/components/icons'
 import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
+import {
+  stageStyle,
+  stageOrder,
+  stageFilterLabel,
+  STAGE_CATEGORIES,
+  type Stage,
+} from '@/lib/matterStage'
 
 interface MatterSummary {
   matterEntityId: string
@@ -14,67 +21,16 @@ interface MatterSummary {
   clientName: string
   practiceArea: string
   status: string
+  // The display STATUS — derived from the matter's live workflow, server-side.
+  stage: Stage
   summary: string
   createdAt: string
 }
 
-function humanizeStatus(status: string): string {
-  return status.replace(/_/g, ' ')
-}
-
-// Status→color buckets for the MATTER chip (li-mat-status), matching the Home
-// dashboard's matters table (attorney/page.tsx STATUS_GROUPS) so the same status
-// reads the same color everywhere. Duplicated rather than imported — each surface
-// in this redesign owns its own small helpers (see matters/[id]/page.tsx).
-const STATUS_GROUPS: Array<{
-  key: string
-  chipLabel: string
-  matches: (s: string) => boolean
-  fg: string
-  bg: string
-}> = [
-  {
-    key: 'inquiry',
-    chipLabel: 'New Inquiry',
-    matches: (s) =>
-      s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
-    // Comp's matters table (legal-instruments.dc.html stBadge) pairs "New inquiry"
-    // with a neutral gray, not the purple used for a genuine in-review status.
-    fg: 'var(--li-neutral)',
-    bg: 'var(--li-neutral-bg)',
-  },
-  {
-    key: 'scheduled',
-    chipLabel: 'Consultation Booked',
-    matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
-    fg: 'var(--li-info)',
-    bg: 'var(--li-info-bg)',
-  },
-  {
-    key: 'drafting',
-    chipLabel: 'Drafting',
-    matches: (s) => s === 'drafting' || s === 'review_pending',
-    fg: 'var(--li-warn)',
-    bg: 'var(--li-warn-bg)',
-  },
-  {
-    key: 'active',
-    chipLabel: 'Active',
-    matches: (s) => s === 'engagement_signed' || s === 'matter_active',
-    fg: 'var(--li-ok)',
-    bg: 'var(--li-ok-bg)',
-  },
-  {
-    key: 'closed',
-    chipLabel: 'Closed',
-    matches: (s) => s === 'matter_closed',
-    fg: 'var(--li-muted)',
-    bg: 'var(--li-border-soft)',
-  },
-]
-function matterStatusGroup(status: string): (typeof STATUS_GROUPS)[number] {
-  return STATUS_GROUPS.find((g) => g.matches(status)) ?? STATUS_GROUPS[0]!
-}
+// The STATUS chip (label + color) now comes from the matter's derived `stage`
+// (@/lib/matterStage), which reads the matter's live workflow. The old hardcoded
+// status→bucket map lived here and mislabelled every real workflow state as
+// "New Inquiry" — see the same shared helper on the Home dashboard.
 
 function formatDateShort(iso: string): string {
   const d = new Date(iso)
@@ -112,11 +68,11 @@ export default function MattersPage() {
     load()
   }, [load])
 
-  // Distinct filter options, derived from the loaded matters.
-  const statusOptions = useMemo(
-    () => Array.from(new Set((matters ?? []).map((m) => m.status).filter(Boolean))).sort(),
-    [matters],
-  )
+  // Status filter options: the stage categories actually present, in lifecycle order.
+  const statusOptions = useMemo(() => {
+    const present = new Set((matters ?? []).map((m) => m.stage.category))
+    return STAGE_CATEGORIES.filter((c) => present.has(c))
+  }, [matters])
   const serviceOptions = useMemo(
     () => Array.from(new Set((matters ?? []).map((m) => m.practiceArea).filter(Boolean))).sort(),
     [matters],
@@ -142,12 +98,12 @@ export default function MattersPage() {
     const rows = matters.filter((m) => {
       if (
         q &&
-        ![m.matterNumber, m.clientName, m.practiceArea, m.summary, m.status].some((f) =>
+        ![m.matterNumber, m.clientName, m.practiceArea, m.summary, m.stage.label].some((f) =>
           (f ?? '').toLowerCase().includes(q),
         )
       )
         return false
-      if (statusFilter && m.status !== statusFilter) return false
+      if (statusFilter && m.stage.category !== statusFilter) return false
       if (serviceFilter && m.practiceArea !== serviceFilter) return false
       if (clientFilter && m.clientName !== clientFilter) return false
       return true
@@ -156,6 +112,9 @@ export default function MattersPage() {
     return [...rows].sort((a, b) => {
       if (sortKey === 'createdAt') {
         return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir
+      }
+      if (sortKey === 'status') {
+        return (stageOrder(a.stage.category) - stageOrder(b.stage.category)) * dir
       }
       return (
         (a[sortKey] ?? '').localeCompare(b[sortKey] ?? '', undefined, { sensitivity: 'base' }) * dir
@@ -219,7 +178,7 @@ export default function MattersPage() {
             <option value="">Status</option>
             {statusOptions.map((s) => (
               <option key={s} value={s}>
-                {humanizeStatus(s)}
+                {stageFilterLabel(s)}
               </option>
             ))}
           </select>
@@ -294,7 +253,7 @@ export default function MattersPage() {
           </div>
           <div className="li-mat-tbody">
             {view.map((m) => {
-              const group = matterStatusGroup(m.status)
+              const chip = stageStyle(m.stage.category)
               return (
                 <Link
                   key={m.matterEntityId}
@@ -309,9 +268,9 @@ export default function MattersPage() {
                   <span className="li-mat-cell-service">
                     {serviceLabel(m.practiceArea, serviceNames)}
                   </span>
-                  <span className="li-mat-status" style={{ background: group.bg, color: group.fg }}>
-                    <span className="li-mat-status-dot" style={{ background: group.fg }} />
-                    {group.chipLabel}
+                  <span className="li-mat-status" style={{ background: chip.bg, color: chip.fg }}>
+                    <span className="li-mat-status-dot" style={{ background: chip.fg }} />
+                    {m.stage.label}
                   </span>
                   <span className="li-mat-cell-opened">{formatDateShort(m.createdAt)}</span>
                 </Link>
