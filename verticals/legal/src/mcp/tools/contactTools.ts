@@ -7,11 +7,15 @@ import {
   resolveContactMatterEntityIds,
   listDocumentsForMatters,
   getHistoryForMatters,
+  getContactEngagementOverride,
+  setContactEngagementLetter,
+  listEngagementLetters,
   type ContactSummary,
   type ContactDetail,
   type RevokePortalAccessResult,
   type PersonDocumentItem,
   type MatterHistory,
+  type EngagementLetterSummary,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -106,9 +110,41 @@ const activityTool: Tool<{ contactEntityId: string }, { history: MatterHistory }
   },
 }
 
+// ── ENGAGEMENT-TEMPLATES-1 Phase 2 — per-contact engagement-letter override ──
+// Which engagement letter this specific client signs, choosable from the firm's
+// library; empty = the firm default. Read returns the current override + the
+// library options so the CRM record can render one selector.
+const engagementGetTool: Tool<
+  { contactEntityId: string },
+  { overrideTemplateId: string | null; letters: EngagementLetterSummary[] }
+> = {
+  name: 'legal.contact.engagement_letter.get',
+  description:
+    "The contact's engagement-letter override (the template id they sign instead of the firm default, or null) plus the firm's engagement-letter library to choose from. Empty override = the client signs the firm default.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    overrideTemplateId: await getContactEngagementOverride(ctx, input.contactEntityId),
+    letters: await listEngagementLetters(ctx),
+  }),
+}
+
+const engagementSetTool: Tool<
+  { contactEntityId: string; templateId: string | null },
+  { templateId: string | null }
+> = {
+  name: 'legal.contact.set_engagement_letter',
+  description:
+    'Choose which engagement letter this specific client signs (a template id from the firm library), or pass null to clear it back to the firm default. Attorney-only.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    await setContactEngagementLetter(ctx, input.contactEntityId, input.templateId ?? null),
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(inviteTool)
 registerTool(revokeTool)
 registerTool(documentsTool)
 registerTool(activityTool)
+registerTool(engagementGetTool)
+registerTool(engagementSetTool)
