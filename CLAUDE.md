@@ -114,3 +114,20 @@ Then, two required steps whenever a change addresses a feedback item:
 Claim up front, then do both of the above when you ship — they're not interchangeable. To see what's still open, read the unresolved `assistant.turn` feedback rows.
 
 **Resolve any item you can verify is shipped — you do not have to be the session that shipped it.** There is no "resolution belongs to the shipping session" rule (it was removed 2026-07-06; it left verifiably-fixed items reading as open for weeks). If you confirm an item is addressed on `main` — a `Beta-Feedback:` trailer, a matching commit, or the behavior in the code/live app — resolve it through the action layer with a `summary`/`note` pointing at the PR. The only bar is verification, not authorship. Duplicates of the same fix all get resolved.
+
+## Shipping new functionality — keep the chatbot/builder awareness log current
+
+The AI assistant (attorney chat + client-portal chat) and the service builder only know what their own tool schemas, merge-token catalogs, and capability registry expose — they do **not** automatically learn about new functionality just because it landed on `main`. Left unchecked this drifts silently: `docs/design/assistant-actions/INVENTORY.md` (the FI-1 census, #457) is already stale in places days after being written, because ordinary feature PRs kept shipping without anyone checking whether the assistant/builder needed to be taught about them.
+
+**Before you merge a PR that adds any of the following, ask whether the assistant/builder needs to know about it:**
+
+- a new MCP tool / action-layer op (`verticals/legal/src/mcp/tools/*.ts`)
+- a new entity/attribute/relationship kind whose value a template or the attorney chat might reasonably reference (e.g. a new client-contact fact)
+- a new per-service or per-template configuration knob (a toggle, a signer/field binding, a language variant) that a service or template could plausibly need
+- a new capability/workflow-step type
+
+Concretely, check: does `buildAttorneyClientTools`/`buildClientPortalTools` (`api/assistantChat.ts`, `api/clientAssistantChat.ts`) need a new/updated `ClientTool`? Does the new fact belong in `MERGE_SLOT_FIELDS`/`SYSTEM_TOKENS` (`api/templateMerge.ts`, `api/tokenClasses.ts`) so a template can merge it? Does a chat-authoring tool's JSON schema (e.g. `propose_service`, `propose_template`) need a new field to let the AI set the new knob — remember `additionalProperties: false` means an unlisted field is silently unreachable from chat, not just undocumented? Does `seed-capabilities.ts` need a new capability entry so the builder can compose it?
+
+**If it's cheap (a Wave-1 shape — additive, low blast radius), wire it in the same PR.** If it needs more design (confirmation UX, security-sensitive, or genuinely undecided), don't block the feature PR on it — instead **append one dated bullet** to a new "Newly opened gaps" log at the bottom of `docs/design/assistant-actions/INVENTORY.md`, in the shape: `- YYYY-MM-DD (#PR): <what shipped> — <what's missing: ClientTool / merge token / capability entry> — <file:line pointer>.` This is the same discipline as the beta-feedback backlog above: log it once, at the moment you have full context, so the next session working the chatbot/builder has a queue to work from instead of re-auditing the whole codebase from scratch.
+
+Periodically (or when explicitly asked to check chatbot/builder coverage), a session should sweep the log, close entries that got wired up elsewhere, and fold anything that's grown into a real wave of work back into the INVENTORY.md gap map proper.

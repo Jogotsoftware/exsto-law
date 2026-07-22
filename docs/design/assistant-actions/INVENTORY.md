@@ -353,6 +353,45 @@ A `ClientTool` is `{ definition, name, run }` (`adapters/claude.ts:358`).
 card/launch) · a new test file + the `test:unit` list · (no migration — these wrap ops that already
 exist).
 
+## 6. Newly opened gaps (append-only log)
+
+Per the "Shipping new functionality" rule in root `CLAUDE.md`: append one dated bullet here when
+a PR ships something the assistant/builder should plausibly know about but wiring it was deferred.
+Don't rewrite this census to keep it current — just log the delta. A future sweep folds durable
+entries into the gap map in §3 and marks closed ones fixed.
+
+- **2026-07-21 (post-#457 audit, pre-2026-07-22 sweep):**
+  - `prepare_envelope` → `PrepareSignature` staleness (§4.1): **FIXED.** `PrepareSignature.tsx`/
+    `NewEnvelopeWizard.tsx` deleted; chat now opens `EsignComposer` (`UnifiedAssistantChat.tsx:20,3417`).
+  - Attorney Task Queue (#489/#491): `attorneyTaskQueueTools.ts` (`legal.attorney.task_queue`) has
+    no `ClientTool` in `buildAttorneyClientTools` and no mention in `skillContext.ts`/`assistantPrompt.ts`
+    — the assistant can't tell an attorney what's in their queue, unlike its `get_attention_feed` sibling.
+  - Engagement Letter Library (#487/#488/#493): `legal.firm.engagement_letters.*` (list/set_default/
+    remove/import, `settingsTools.ts`) has no attorney-chat wrapper — same shape as the pre-existing
+    firm-settings gap (§3 Wave 1 #1), now extended to this domain.
+  - Bilingual docs (#490, `offer_spanish`): not in `propose_service`'s input schema
+    (`serviceAuthoringTools.ts`) — the AI can't set it from conversation, only manually via the
+    `ServiceEditorModal` proposal card. Not modeled in `seed-capabilities.ts` either.
+  - eSign "upload a PDF, no matter" dead-end (§4.1, distinct from the fixed staleness above): still
+    open. `esignLaunchTools.ts` still only resolves `listMatterDraftVersions`; no `mode: 'blank'|'document'`
+    was added.
+  - `legal.user.delete` / `.portal_list` / `.set_portal_user_type` (USERS-SPLIT-1 follow-on): new,
+    unwired — consistent with the existing users/access Wave-2 call (security-sensitive, likely stays
+    admin-UI only).
+
+- **2026-07-22 (#494/#495/#496 sweep):**
+  - ESIGN-FIELDS-1 (#496, per-role signer field bindings, drag-and-drop): not reachable from chat.
+    `propose_template`'s schema (`intakeTemplateTools.ts:329-348`) sets `additionalProperties: false`
+    on each `esignConfig.roles[]` entry with no `fields` property documented — the AI cannot construct
+    this shape even though the backend parser (`parseTemplateEsignConfig`) now round-trips it.
+  - Client mailing/business address + preferred contact (#495, captured at sign-up): never added to
+    `MERGE_SLOT_FIELDS` (`templateMerge.ts:254`) — no `{{client_mailing_address}}` (etc.) merge token
+    exists, system or client-sourced. The code comment at `templates/page.tsx:90-93` ("client_address
+    is deliberately absent... triggers a questionnaire proposal") predates this and is now stale: the
+    platform captures address once automatically at sign-up and no longer needs a per-service
+    questionnaire re-ask for it.
+  - #494 (matter-status mirror fix): internal consistency fix only, no chat/builder surface — not a gap.
+
 ## Critical files
 
 `verticals/legal/src/api/assistantChat.ts` (attorney ClientTool assembly, `buildAttorneyClientTools`)
