@@ -261,6 +261,8 @@ export default function ContactDetailPage() {
         {confirmElement}
       </div>
 
+      <ContactEngagementLetterCard contactEntityId={id} />
+
       <div className="li-crm-panel">
         <div className="li-crm-panel-head">
           <h2 className="li-crm-panel-title">
@@ -297,5 +299,113 @@ export default function ContactDetailPage() {
         )}
       </div>
     </>
+  )
+}
+
+// ── ENGAGEMENT-TEMPLATES-1 Phase 2 — which engagement letter this client signs ──
+// A selector over the firm's engagement-letter library; "Firm default" clears the
+// override so the client signs whatever the firm default is. The portal gate
+// resolves override → default at sign time.
+interface EngLetterOption {
+  templateId: string
+  name: string
+  isDefault: boolean
+}
+
+function ContactEngagementLetterCard({
+  contactEntityId,
+}: {
+  contactEntityId: string
+}): React.ReactElement | null {
+  const [letters, setLetters] = useState<EngLetterOption[]>([])
+  const [overrideId, setOverrideId] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{
+        overrideTemplateId: string | null
+        letters: EngLetterOption[]
+      }>({
+        toolName: 'legal.contact.engagement_letter.get',
+        input: { contactEntityId },
+      })
+      setLetters(r.letters)
+      setOverrideId(r.overrideTemplateId)
+    } catch {
+      // The 0191 kind may not be applied yet — hide the card rather than error.
+      setLetters([])
+    } finally {
+      setLoaded(true)
+    }
+  }, [contactEntityId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function onChange(value: string): Promise<void> {
+    const templateId = value === '__default__' ? null : value
+    setSaving(true)
+    setMsg(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.contact.set_engagement_letter',
+        input: { contactEntityId, templateId },
+      })
+      setOverrideId(templateId)
+      setMsg({
+        ok: true,
+        text: templateId
+          ? 'Saved — this client signs the selected letter.'
+          : 'Cleared — this client signs the firm default.',
+      })
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Nothing to choose from (no library, or the override kind isn't live yet).
+  if (loaded && letters.length === 0) return null
+
+  const defaultName = letters.find((l) => l.isDefault)?.name ?? 'Firm default'
+
+  return (
+    <div className="li-crm-portal-card">
+      <h2 className="li-crm-panel-title">Engagement Letter</h2>
+      <p className="li-crm-portal-desc">
+        Which engagement letter this client signs in the portal. Leave on the firm default unless
+        this client needs a specific one.
+      </p>
+      {!loaded ? (
+        <div className="li-crm-panel-empty">Loading…</div>
+      ) : (
+        <>
+          <select
+            className="li-set-input"
+            style={{ maxWidth: 420 }}
+            value={overrideId ?? '__default__'}
+            disabled={saving}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            <option value="__default__">Firm default ({defaultName})</option>
+            {letters
+              .filter((l) => !l.isDefault)
+              .map((l) => (
+                <option key={l.templateId} value={l.templateId}>
+                  {l.name}
+                </option>
+              ))}
+          </select>
+          {msg && (
+            <div className={`alert ${msg.ok ? 'alert-success' : 'alert-error'}`}>{msg.text}</div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
