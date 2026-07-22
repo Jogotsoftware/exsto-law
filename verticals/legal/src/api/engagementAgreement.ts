@@ -24,6 +24,7 @@ import {
   parseImportOutput,
   type EngagementAgreementDetails,
 } from './engagementImportParse.js'
+import { ENGAGEMENT_LETTER_DOC_KIND, hasDefaultEngagementLetter } from './engagementLibrary.js'
 
 export interface EngagementAgreementImportResult {
   templateId: string
@@ -31,6 +32,8 @@ export interface EngagementAgreementImportResult {
   body: string
   details: EngagementAgreementDetails
   version: number
+  /** True when this letter became the firm default (the first one added). */
+  isDefault: boolean
 }
 
 export { parseImportOutput, type EngagementAgreementDetails }
@@ -64,9 +67,20 @@ function buildImportPrompt(letterMarkdown: string): string {
   ].join('\n')
 }
 
+// Derive a human template name from the uploaded filename ("Engagement
+// Letter_Mi Rey LLC_2026.pdf" → "Engagement Letter Mi Rey LLC 2026"), else a
+// generic default. The attorney renames it in the template editor.
+function engagementLetterName(sourceFilename?: string): string {
+  const stem = (sourceFilename ?? '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+  return stem || 'Engagement Agreement'
+}
+
 export async function importEngagementAgreement(
   ctx: ActionContext,
-  input: { markdown: string; sourceFilename?: string },
+  input: { markdown: string; sourceFilename?: string; name?: string },
 ): Promise<EngagementAgreementImportResult> {
   const letter = input.markdown.trim()
   if (!letter) throw new Error('The uploaded document contained no readable text.')
@@ -84,8 +98,11 @@ export async function importEngagementAgreement(
   }
 
   const template = await createTemplate(ctx, {
-    name: 'Engagement Agreement',
+    name: input.name?.trim() || engagementLetterName(input.sourceFilename),
     category: 'document',
+    // ENGAGEMENT-TEMPLATES-1 — tag it so the engagement-letter library can list
+    // it (it's an ordinary standalone template otherwise, editable in the editor).
+    docKind: ENGAGEMENT_LETTER_DOC_KIND,
     body,
     esignConfig: {
       signable: true,
@@ -104,18 +121,29 @@ export async function importEngagementAgreement(
     },
   })
 
-  const set = await setEngagementTemplate(ctx, {
-    templateId: template.templateEntityId,
-    sourceFilename: input.sourceFilename,
-    details: details as Record<string, unknown>,
-  })
+  // Library semantics: the FIRST engagement letter a firm adds becomes the
+  // default; later uploads just join the library (the attorney picks the default
+  // in settings) so a new upload never silently replaces the live agreement.
+  const alreadyHasDefault = await hasDefaultEngagementLetter(ctx)
+  let version = 1
+  let isDefault = false
+  if (!alreadyHasDefault) {
+    const set = await setEngagementTemplate(ctx, {
+      templateId: template.templateEntityId,
+      sourceFilename: input.sourceFilename,
+      details: details as Record<string, unknown>,
+    })
+    version = set.version ?? 1
+    isDefault = true
+  }
 
   return {
     templateId: template.templateEntityId,
     templateName: template.name,
     body,
     details,
-    version: set.version ?? 1,
+    version,
+    isDefault,
   }
 }
 

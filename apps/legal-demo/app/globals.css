@@ -26556,3 +26556,57 @@ details.li-brief-research summary:hover {
   color: var(--li-gold, #b9932f);
   flex-shrink: 0;
 }
+
+/* ── ENGAGEMENT-TEMPLATES-1 — engagement-letter library (Settings) ─────────── */
+.li-set-eng-seclabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--li-gold-deep, #9a7b2e);
+  margin-bottom: 12px;
+}
+.li-set-eng-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.li-set-eng-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.li-set-eng-row--default {
+  padding: 12px 14px;
+  border: 1px solid var(--li-gold, #d8c084);
+  border-radius: 10px;
+  background: rgba(216, 192, 132, 0.08);
+}
+.li-set-eng-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--li-navy, #1b2a4a);
+}
+.li-set-eng-badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--li-navy, #1b2a4a);
+  background: var(--li-gold, #d8c084);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.li-set-eng-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
