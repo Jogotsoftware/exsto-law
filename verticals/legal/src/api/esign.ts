@@ -1256,6 +1256,7 @@ export interface AwaitingAttorneySignature {
   subject: string | null
   matterNumber: string | null
   matterEntityId: string | null
+  contactEntityId: string | null
   documentKind: string | null
   sentAt: string | null
 }
@@ -1285,6 +1286,7 @@ export async function listSignaturesAwaitingAttorney(
       subject: env.subject,
       matterNumber: env.matterNumber,
       matterEntityId: env.matterEntityId,
+      contactEntityId: env.contactEntityId,
       documentKind: env.documentKind,
       sentAt: env.sentAt,
     })

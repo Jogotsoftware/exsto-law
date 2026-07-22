@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { PenLine } from 'lucide-react'
+import { PenLine, Eye, Mail } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
+import { EmailComposeModal } from '@/components/EmailComposeModal'
 
 // Shared with the detail page: a step-through review session is the ordered list of
 // selected draft ids + where we are in it, kept in sessionStorage (per tab) and
@@ -37,6 +38,7 @@ interface AwaitingSignature {
   subject: string | null
   matterNumber: string | null
   matterEntityId: string | null
+  contactEntityId: string | null
   documentKind: string | null
   sentAt: string | null
 }
@@ -71,6 +73,8 @@ export default function ReviewQueue() {
   const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [awaiting, setAwaiting] = useState<AwaitingSignature[]>([])
+  // The awaiting-signature row whose "Send email" modal is open (by requestId).
+  const [emailFor, setEmailFor] = useState<AwaitingSignature | null>(null)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
@@ -215,14 +219,42 @@ export default function ReviewQueue() {
                 <span className="li-rev-await-when">
                   {a.sentAt ? `Sent ${formatDateTime(a.sentAt)}` : ''}
                 </span>
-                <button
-                  type="button"
-                  className="li-rev-await-sign"
-                  onClick={() => openSign(a.requestId)}
-                >
-                  <PenLine size={15} aria-hidden />
-                  Sign
-                </button>
+                <div className="li-rev-await-actions">
+                  <button
+                    type="button"
+                    className="li-rev-await-act"
+                    onClick={() => router.push(`/attorney/esign/${a.envelopeId}`)}
+                    title="View the document"
+                  >
+                    <Eye size={15} aria-hidden />
+                    View
+                  </button>
+                  {a.matterEntityId && (
+                    <BriefButton
+                      lazy
+                      scope={{ kind: 'matter', matterEntityId: a.matterEntityId }}
+                      className="li-rev-await-act"
+                      label="Brief"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="li-rev-await-act"
+                    onClick={() => setEmailFor(a)}
+                    title="Send an email on this matter"
+                  >
+                    <Mail size={15} aria-hidden />
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    className="li-rev-await-sign"
+                    onClick={() => openSign(a.requestId)}
+                  >
+                    <PenLine size={15} aria-hidden />
+                    Sign
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -427,6 +459,18 @@ export default function ReviewQueue() {
             ))}
           </div>
         </>
+      )}
+
+      {emailFor && (
+        <EmailComposeModal
+          matterEntityId={emailFor.matterEntityId ?? undefined}
+          contactEntityId={emailFor.contactEntityId ?? undefined}
+          initialSubject=""
+          initialBodyMarkdown=""
+          pendingDocs={[]}
+          onSent={() => setEmailFor(null)}
+          onClose={() => setEmailFor(null)}
+        />
       )}
     </main>
   )

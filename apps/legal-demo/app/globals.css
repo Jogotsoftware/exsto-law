@@ -11115,6 +11115,34 @@ input[type='number'] {
 .li-rev-await-sign:hover {
   background: var(--li-navy-hover);
 }
+/* View · Brief · Email · Sign — a compact action cluster; Sign is the primary
+   (navy) and the others are quiet outline buttons. */
+.li-rev-await-actions {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.li-rev-await-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--li-card);
+  color: var(--li-fg);
+  border: 1px solid var(--li-border);
+  border-radius: 9px;
+  padding: 8px 13px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+.li-rev-await-act:hover {
+  background: var(--li-well, #eceff3);
+  border-color: var(--li-navy);
+}
 
 /* --- Queue: filter bar ---------------------------------------------------- */
 .li-rev-filters {
