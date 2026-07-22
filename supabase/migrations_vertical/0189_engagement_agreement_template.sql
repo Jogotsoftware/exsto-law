@@ -38,7 +38,7 @@ INSERT INTO action_kind_definition
   ('00000000-0000-0000-1013-000000003200', '00000000-0000-0000-0000-000000000001',
    'legal.firm.set_engagement_template', 'Set engagement agreement template',
    'Point the firm at the document template that is its engagement agreement (or clear the pointer). Attorney-only; the client portal gate renders the merged agreement from this template.',
-   'notify', 'reversible', NULL, false)
+   'notify', 'fully_reversible', NULL, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- ── Same kinds for EVERY OTHER existing tenant ────────────────────────────────
@@ -59,7 +59,7 @@ INSERT INTO action_kind_definition
   (id, tenant_id, kind_name, display_name, description, default_autonomy_tier, reversibility, reverse_action_kind_name, requires_reasoning_trace)
 SELECT gen_random_uuid(), t.tenant_id, 'legal.firm.set_engagement_template', 'Set engagement agreement template',
        'Point the firm at the document template that is its engagement agreement (or clear the pointer).',
-       'notify', 'reversible', NULL, false
+       'notify', 'fully_reversible', NULL, false
 FROM (SELECT DISTINCT tenant_id FROM entity_kind_definition
       WHERE kind_name = 'firm_settings' AND status = 'active'
         AND tenant_id <> '00000000-0000-0000-0000-000000000001') t
