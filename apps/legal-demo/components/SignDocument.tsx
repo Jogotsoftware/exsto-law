@@ -6,15 +6,16 @@
 // consent, and Sign / Decline. The caller supplies onSign/onDecline (portal MCP
 // vs /api/sign routes).
 //
-// ESIGN-UNIFY-1 ES-2 (§9.3): rebuilt on the overlay renderer. A FILE envelope
-// with coordinate placements renders the REAL PDF pages (PdfCanvas) with this
-// signer's field boxes at their true positions — tap a box to fill it (a
-// signature box jumps to the adopt capture below); `date` boxes read "(auto)"
-// and fill with the actual signing date at submit (the signer never types a
-// date); required text boxes gate the Sign button. Legacy envelopes (markdown
-// drafts, or files sent without placements) keep the exact pre-ES-2 flow. The
-// adopt-signature capture itself is extracted UNCHANGED to
-// components/esign/AdoptSignature.tsx and shared.
+// ESIGN-GUIDED-1 — a placement envelope (allPlacements.length > 0) now renders
+// a DocuSign-style GUIDED walk instead of the old canvas-plus-detached-form
+// split: the signer adopts their signature ONCE, up front (before the document
+// even renders), then a sticky top bar walks them field-by-field — click a
+// signature/initials box to stamp the adopted signature in place, click a text
+// box to type inline, click a checkbox to toggle it — with Start/Next/Finish
+// tracking progress. A legacy envelope with NO placements (markdown draft, or a
+// file sent without placements) keeps the exact pre-existing detached-list flow
+// below, untouched. The adopt-signature capture itself is UNCHANGED
+// (components/esign/AdoptSignature.tsx) and shared by both paths.
 import { useEffect, useMemo, useState } from 'react'
 import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
@@ -22,11 +23,23 @@ import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import {
+  guidedCtaLabel,
+  guidedFieldsOf,
+  guidedProgress,
+  guidedProgressLabel,
+  isGuidedField,
+  isPlacementFilled,
+  nextIncompleteField,
+  type FilledContext,
+} from '@/lib/esignGuidedSign'
+import {
   AdoptSignature,
   CONSENT_TEXT,
   type AdoptState,
   type SavedSignature,
 } from '@/components/esign/AdoptSignature'
+import type { GuidedFieldState } from '@/components/esign/FieldBox'
+import { GuidedSignBar } from '@/components/esign/GuidedSignBar'
 import { PdfCanvas } from '@/components/esign/PdfCanvas'
 import { usePdfDocument } from '@/components/esign/usePdfDocument'
 
@@ -132,6 +145,7 @@ export function SignDocument({
   // envelope — signing completes every document at once. So values aggregate
   // across ALL documents (placement ids are envelope-unique).
   const allPlacements = useMemo(() => docs.flatMap((d) => d.placements ?? []), [docs])
+  const hasPlacements = allPlacements.length > 0
   // Fields the signer actually fills here (the adopted signature covers {{sign:…}}).
   const inputFields = useMemo(
     () => docs.flatMap((d) => d.fields).filter((f) => f.type !== 'sign'),
@@ -158,8 +172,20 @@ export function SignDocument({
   const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // ESIGN-GUIDED-1 — the guided walk's own state. `stage` gates the up-front
+  // adopt screen vs the document; `appliedIds` are sign/initial placements the
+  // signer has clicked (per-field — the whole point is watching it happen one
+  // box at a time, not everything filling at once from the adopted name).
+  const [stage, setStage] = useState<'adopt' | 'signing'>('adopt')
+  const [appliedIds, setAppliedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [currentFieldId, setCurrentFieldId] = useState<string | null>(null)
+  const [started, setStarted] = useState(false)
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null)
+
   // §9.3 — what each overlay box shows right now: the send-time resolved value,
   // the signer's live input, the adopted signature, or the "(auto)" date copy.
+  // (Legacy path only — sign/initial fill the moment a signature is adopted,
+  // matching the old single-step Adopt & Sign flow.)
   const overlayValues = useMemo(() => {
     const out: Record<string, string | null> = {}
     for (const p of allPlacements) {
@@ -181,8 +207,80 @@ export function SignDocument({
     return out
   }, [allPlacements, adopt, fieldValues, doc.signerName])
 
-  // Required gate (§9.3): every required signer-fillable text box needs a value
-  // before Sign unlocks. Signature/initials ride the adopted name; date is auto.
+  // ESIGN-GUIDED-1 — the guided walk's field set (sign/initial/data fields the
+  // signer acts on; date/name/already-resolved never appear here), in reading
+  // order across every document in the envelope.
+  const guidedList = useMemo(() => guidedFieldsOf(allPlacements), [allPlacements])
+  const filledCtx: FilledContext = { fieldValues, appliedIds }
+  const progress = useMemo(
+    () => guidedProgress(guidedList, filledCtx),
+    [guidedList, fieldValues, appliedIds],
+  )
+  const allRequiredDone = progress.completed >= progress.total
+  const canContinueFromAdopt = Boolean(
+    adopt.signatureName.trim() && adopt.consent && adopt.signatureData,
+  )
+  const ctaLabel = guidedCtaLabel(started, allRequiredDone)
+  const todayStr = useMemo(
+    () =>
+      new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
+    [],
+  )
+
+  // Guided-mode display values: sign/initial fill ONLY once clicked (not the
+  // instant a signature is adopted — the founder brief's "watch it happen
+  // field by field"); date visibly fills the moment the FIRST signature/
+  // initial is applied (still purely presentational — the real signing date is
+  // stamped server-side, buildSignable never lets the signer type one).
+  const guidedValuesById = useMemo(() => {
+    const out: Record<string, string | null> = {}
+    for (const p of allPlacements) {
+      if (p.type === 'sign' || p.type === 'initial') {
+        out[p.id] = appliedIds.has(p.id)
+          ? p.type === 'initial'
+            ? initialsOf(adopt.signatureName)
+            : adopt.signatureName.trim()
+          : null
+      } else if (p.type === 'date') {
+        out[p.id] = appliedIds.size > 0 ? todayStr : null
+      } else if (p.type === 'name') {
+        out[p.id] = adopt.signatureName.trim() || doc.signerName || null
+      } else {
+        out[p.id] = p.value ?? fieldValues[p.id] ?? null
+      }
+    }
+    return out
+  }, [allPlacements, adopt, fieldValues, appliedIds, doc.signerName, todayStr])
+
+  // The actual signature/initials IMAGE to stamp in place once applied —
+  // exactly the image stampPdf.ts embeds into the executed PDF (both sign and
+  // initial placements draw the same adopted image, scaled to the box).
+  const guidedImagesById = useMemo(() => {
+    const out: Record<string, string | null> = {}
+    for (const p of allPlacements) {
+      if ((p.type === 'sign' || p.type === 'initial') && appliedIds.has(p.id)) {
+        out[p.id] = adopt.signatureData
+      }
+    }
+    return out
+  }, [allPlacements, adopt.signatureData, appliedIds])
+
+  const guidedStates = useMemo(() => {
+    const out: Record<string, GuidedFieldState> = {}
+    for (const p of allPlacements) {
+      const auto = !isGuidedField(p)
+      out[p.id] = {
+        auto,
+        complete: auto ? true : isPlacementFilled(p, filledCtx),
+        editing: editingFieldId === p.id,
+      }
+    }
+    return out
+  }, [allPlacements, fieldValues, appliedIds, editingFieldId])
+
+  // Required gate (§9.3, legacy path): every required signer-fillable text box
+  // needs a value before Sign unlocks. Signature/initials ride the adopted
+  // name; date is auto.
   const missingRequired = useMemo(
     () =>
       allPlacements.filter(
@@ -207,6 +305,15 @@ export function SignDocument({
           </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{doc.documentTitle}</h1>
         </div>
+      </div>
+    )
+  }
+
+  function signerLine() {
+    return (
+      <div className="li-cp-sign-for">
+        For signature{doc.signerName ? ` by ${doc.signerName}` : ''}
+        {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
       </div>
     )
   }
@@ -293,8 +400,8 @@ export function SignDocument({
     }
   }
 
-  // Tap-a-box (§9.3): a text-ish box focuses its input in the panel below; a
-  // signature/initials box jumps to the adopt capture.
+  // Tap-a-box (§9.3, legacy path only): a text-ish box focuses its input in
+  // the panel below; a signature/initials box jumps to the adopt capture.
   function activateBox(id: string) {
     const p = allPlacements.find((x) => x.id === id)
     if (!p) return
@@ -309,14 +416,170 @@ export function SignDocument({
     }
   }
 
+  function scrollToField(id: string) {
+    document
+      .getElementById(`esp-field-${id}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  // Move the guided "current" pointer to the next incomplete field after
+  // `afterId` (null = start from the beginning), using the FRESH filled state
+  // the caller just computed (not the stale render-scope closure).
+  function advanceGuided(
+    applied: ReadonlySet<string>,
+    values: Record<string, string>,
+    afterId: string | null,
+  ) {
+    const next = nextIncompleteField(
+      guidedList,
+      { fieldValues: values, appliedIds: applied },
+      afterId,
+    )
+    setCurrentFieldId(next ? next.id : null)
+    if (next) requestAnimationFrame(() => scrollToField(next.id))
+  }
+
+  // Click-to-sign (§ founder brief): sign/initial applies in place (toggle —
+  // clicking an already-applied box clears it); check toggles immediately;
+  // every other signer-fillable field opens its inline input. date/name and
+  // already-resolved placements are inert (guided.auto) and never reach here.
+  function activateGuided(id: string) {
+    const p = allPlacements.find((x) => x.id === id)
+    if (!p || !isGuidedField(p)) return
+    setStarted(true)
+
+    if (p.type === 'sign' || p.type === 'initial') {
+      const wasApplied = appliedIds.has(id)
+      const nextApplied = new Set(appliedIds)
+      if (wasApplied) nextApplied.delete(id)
+      else nextApplied.add(id)
+      setAppliedIds(nextApplied)
+      setEditingFieldId(null)
+      if (!wasApplied) advanceGuided(nextApplied, fieldValues, id)
+      else setCurrentFieldId(id)
+      return
+    }
+    if (p.type === 'check') {
+      const willCheck = fieldValues[id] !== 'true'
+      const nextValues = { ...fieldValues, [id]: willCheck ? 'true' : '' }
+      setFieldValues(nextValues)
+      if (willCheck) advanceGuided(appliedIds, nextValues, id)
+      else setCurrentFieldId(id)
+      return
+    }
+    // Text-ish: toggle the inline editor (open it, or close it on a re-click).
+    setEditingFieldId((cur) => (cur === id ? null : id))
+    setCurrentFieldId(id)
+  }
+
+  function changeEditingValue(id: string, value: string) {
+    setFieldValues((v) => ({ ...v, [id]: value }))
+  }
+
+  function commitEditing(id: string) {
+    setEditingFieldId(null)
+    const p = allPlacements.find((x) => x.id === id)
+    if (p && isPlacementFilled(p, { fieldValues, appliedIds })) {
+      advanceGuided(appliedIds, fieldValues, id)
+    } else {
+      setCurrentFieldId(id)
+    }
+  }
+
+  function onGuidedPrimary() {
+    if (allRequiredDone) {
+      void submit()
+      return
+    }
+    setStarted(true)
+    advanceGuided(appliedIds, fieldValues, currentFieldId)
+  }
+
+  if (hasPlacements) {
+    return (
+      <div className="public-draft li-cp-sign li-esp-guided">
+        {confirmElement}
+        <GuidedSignBar
+          title={doc.documentTitle}
+          stepLabel={
+            stage === 'adopt' ? 'Step 1 of 2 — Adopt your signature' : guidedProgressLabel(progress)
+          }
+          ctaLabel={stage === 'adopt' ? 'Continue to document' : ctaLabel}
+          onPrimary={stage === 'adopt' ? () => setStage('signing') : onGuidedPrimary}
+          primaryDisabled={(stage === 'adopt' && !canContinueFromAdopt) || busy !== null}
+          onDecline={decline}
+          declineDisabled={busy !== null}
+          onEditSignature={stage === 'signing' ? () => setStage('adopt') : undefined}
+          busy={busy}
+        />
+
+        {stage === 'adopt' ? (
+          <div className="li-esp-guided-adopt">
+            {head()}
+            {signerLine()}
+            <div className="li-esp-guided-intro">
+              <p>
+                Review {docs.length > 1 ? `${docs.length} documents` : 'the document'} below
+                {progress.total > 0
+                  ? ` and complete ${progress.total} required field${progress.total === 1 ? '' : 's'}`
+                  : ''}
+                . Adopt your signature once, here — every signature and initials field after this is
+                a single click.
+              </p>
+            </div>
+            <div className="li-cp-adopt">
+              <h3 className="li-cp-adopt-h">Adopt your signature</h3>
+              <AdoptSignature
+                initialName={doc.signerName ?? ''}
+                savedSignature={savedSignature}
+                onState={setAdopt}
+              />
+              {error && (
+                <div role="alert" className="alert alert-error">
+                  {error}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {head()}
+            {signerLine()}
+            <div className="li-esp-sign-docs">
+              {docs.map((d, i) => (
+                <SignerDoc
+                  key={i}
+                  view={d}
+                  fileUrl={fileUrlFor(d.docIndex)}
+                  overlayValues={guidedValuesById}
+                  imagesById={guidedImagesById}
+                  guidedStates={guidedStates}
+                  editingValue={editingFieldId ? (fieldValues[editingFieldId] ?? '') : undefined}
+                  onEditingChange={changeEditingValue}
+                  onEditingCommit={commitEditing}
+                  selectedId={currentFieldId}
+                  onActivate={activateGuided}
+                  showTitle={docs.length > 1}
+                  onError={setError}
+                />
+              ))}
+            </div>
+            {error && (
+              <div role="alert" className="alert alert-error">
+                {error}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="public-draft li-cp-sign">
       {confirmElement}
       {head()}
-      <div className="li-cp-sign-for">
-        For signature{doc.signerName ? ` by ${doc.signerName}` : ''}
-        {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
-      </div>
+      {signerLine()}
 
       {/* ES-MULTIDOC-1 — render EVERY document in order; a one-document envelope
           shows exactly one (no heading), reading as the pre-multidoc surface.
@@ -430,6 +693,12 @@ function SignerDoc({
   view,
   fileUrl,
   overlayValues,
+  imagesById,
+  guidedStates,
+  editingValue,
+  onEditingChange,
+  onEditingCommit,
+  selectedId,
   onActivate,
   showTitle,
   onError,
@@ -437,6 +706,13 @@ function SignerDoc({
   view: SignerDocView
   fileUrl: string | null
   overlayValues: Record<string, string | null>
+  /** ESIGN-GUIDED-1 (guided mode only — undefined on the legacy path). */
+  imagesById?: Record<string, string | null>
+  guidedStates?: Record<string, GuidedFieldState>
+  editingValue?: string
+  onEditingChange?: (id: string, value: string) => void
+  onEditingCommit?: (id: string) => void
+  selectedId?: string | null
   onActivate: (id: string) => void
   showTitle: boolean
   onError: (message: string) => void
@@ -482,8 +758,14 @@ function SignerDoc({
               zoom="fit"
               placements={placements}
               toneBySigner={Object.fromEntries(placements.map((p) => [p.signerKey, SIGNER_TONE]))}
+              selectedId={selectedId}
               readOnly
               valuesById={overlayValues}
+              imagesById={imagesById}
+              guidedStates={guidedStates}
+              editingValue={editingValue}
+              onEditingChange={onEditingChange}
+              onEditingCommit={onEditingCommit}
               onActivate={onActivate}
             />
           )}

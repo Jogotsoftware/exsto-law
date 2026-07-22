@@ -63,3 +63,23 @@ export function placementGlyph(type: PlacementFieldType): PlacementGlyph {
 
 /** The HTML5 DnD payload type for palette-chip → canvas drops. */
 export const FIELD_DRAG_MIME = 'application/x-esign-field'
+
+// ESIGN-GUIDED-1 — the floating DocuSign-style tab copy pointing at the
+// guided walk's current field (FieldBox, readOnly + selected + interactive).
+const GUIDED_ACTION_LABELS: Record<PlacementFieldType, string> = {
+  sign: 'Sign here',
+  initial: 'Initial here',
+  date: 'Date signed',
+  name: 'Name',
+  email: 'Click to fill',
+  company: 'Click to fill',
+  title: 'Click to fill',
+  phone: 'Click to fill',
+  address: 'Click to fill',
+  text: 'Click to fill',
+  check: 'Click to check',
+}
+
+export function guidedActionLabel(type: PlacementFieldType): string {
+  return GUIDED_ACTION_LABELS[type]
+}
