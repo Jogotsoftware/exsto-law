@@ -1257,6 +1257,10 @@ export interface AwaitingAttorneySignature {
   matterNumber: string | null
   matterEntityId: string | null
   contactEntityId: string | null
+  // TASK-QUEUE-1: the signer's contact name — listEnvelopes already selects it
+  // (contact_name), threaded through exactly like contactEntityId. The Task
+  // Queue's e-sign rows need a client name; the raw shape had none.
+  contactName: string | null
   documentKind: string | null
   sentAt: string | null
 }
@@ -1287,6 +1291,7 @@ export async function listSignaturesAwaitingAttorney(
       matterNumber: env.matterNumber,
       matterEntityId: env.matterEntityId,
       contactEntityId: env.contactEntityId,
+      contactName: env.contactName,
       documentKind: env.documentKind,
       sentAt: env.sentAt,
     })
