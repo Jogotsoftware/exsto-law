@@ -41,6 +41,9 @@ export async function POST(request: Request) {
     clientEmail?: unknown
     clientPhone?: unknown
     clientCompanyName?: unknown
+    clientMailingAddress?: unknown
+    clientBusinessAddress?: unknown
+    clientPreferredContactMethod?: unknown
     serviceKey?: unknown
     intakeResponses?: unknown
     captchaToken?: unknown
@@ -107,6 +110,18 @@ export async function POST(request: Request) {
       clientEmail: typeof body.clientEmail === 'string' ? body.clientEmail : '',
       clientPhone: typeof body.clientPhone === 'string' ? body.clientPhone : null,
       clientCompanyName: typeof body.clientCompanyName === 'string' ? body.clientCompanyName : null,
+      clientMailingAddress:
+        body.clientMailingAddress && typeof body.clientMailingAddress === 'object'
+          ? body.clientMailingAddress
+          : null,
+      clientBusinessAddress:
+        body.clientBusinessAddress && typeof body.clientBusinessAddress === 'object'
+          ? body.clientBusinessAddress
+          : null,
+      clientPreferredContactMethod:
+        typeof body.clientPreferredContactMethod === 'string'
+          ? body.clientPreferredContactMethod
+          : null,
       serviceKey: typeof body.serviceKey === 'string' ? body.serviceKey : '',
       intakeResponses:
         body.intakeResponses && typeof body.intakeResponses === 'object'

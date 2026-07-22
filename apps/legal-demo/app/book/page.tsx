@@ -147,7 +147,9 @@ interface Service {
   offerSpanish?: boolean
 }
 
-type Step = 'service' | 'contact' | 'intake' | 'slot' | 'account' | 'done'
+type Step = 'service' | 'contact' | 'details' | 'intake' | 'slot' | 'account' | 'done'
+
+type PreferredContactMethod = 'email' | 'phone' | 'text'
 
 interface MemberRow {
   // Client-only stable identity for React keys. Stripped before sending to
@@ -177,6 +179,7 @@ const REFRESH_MS = 60_000
 const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: string }> = [
   { key: 'service', labelKey: 'progress.service' },
   { key: 'contact', labelKey: 'progress.contact' },
+  { key: 'details', labelKey: 'progress.details' },
   { key: 'intake', labelKey: 'progress.intake' },
   { key: 'slot', labelKey: 'progress.time' },
   { key: 'account', labelKey: 'progress.account' },
@@ -278,6 +281,26 @@ export default function BookPage() {
     phone: '',
     companyName: '',
     attributionSource: '',
+  })
+  // Sign-up "details" step (PORTAL signup part 2): client-level facts captured
+  // after contact and written onto the client_contact. Anonymous flow only —
+  // signed-in clients (who skip the contact step) already have a profile on file.
+  // businessName seeds from the contact step's Company field; when "this is a
+  // business" is on it becomes the authoritative company_name on submit.
+  const [details, setDetails] = useState<{
+    mailingAddress: StructuredAddress | null
+    isBusiness: boolean
+    businessName: string
+    businessAddress: StructuredAddress | null
+    businessSameAsMailing: boolean
+    preferredContact: PreferredContactMethod
+  }>({
+    mailingAddress: null,
+    isBusiness: false,
+    businessName: '',
+    businessAddress: null,
+    businessSameAsMailing: false,
+    preferredContact: 'email',
   })
   const [services, setServices] = useState<Service[] | null>(null)
   // MULTI-TENANT-1: the resolved firm's identity for branding — never a literal.
@@ -543,6 +566,39 @@ export default function BookPage() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) return setError(t('error.email'))
     if (!contact.phone || !isValidPhoneNumber(contact.phone)) return setError(t('error.phone'))
     if (!contact.attributionSource.trim()) return setError(t('error.source'))
+    // Seed the details step's business identity from the Company field the
+    // contact step just collected (only the first time, so a Back-and-forth
+    // never clobbers what they typed on the details step itself).
+    setDetails((prev) =>
+      prev.businessName.trim() || prev.isBusiness
+        ? prev
+        : {
+            ...prev,
+            businessName: contact.companyName.trim(),
+            isBusiness: contact.companyName.trim().length > 0,
+          },
+    )
+    // "Something else" is a lightweight triage request — no matter, no account,
+    // no portal — so it skips the profile-details step and goes straight to its
+    // single free-text question.
+    setStep(selectedServiceKey === SOMETHING_ELSE_KEY ? 'intake' : 'details')
+  }
+
+  function advanceFromDetails() {
+    setError(null)
+    if (!details.mailingAddress?.formatted_address?.trim()) {
+      return setError(t('error.mailing_address', undefined, 'Please enter your mailing address.'))
+    }
+    if (details.isBusiness) {
+      if (!details.businessName.trim()) {
+        return setError(t('error.business_name', undefined, 'Please enter the business name.'))
+      }
+      if (!details.businessSameAsMailing && !details.businessAddress?.formatted_address?.trim()) {
+        return setError(
+          t('error.business_address', undefined, 'Please enter the business address.'),
+        )
+      }
+    }
     setStep('intake')
   }
 
@@ -672,7 +728,7 @@ export default function BookPage() {
           clientFullName: contact.fullName.trim(),
           clientEmail: contact.email.trim(),
           clientPhone: contact.phone || null,
-          clientCompanyName: contact.companyName.trim() || null,
+          ...buildClientDetails(),
           serviceKey: selectedServiceKey,
           intakeResponses,
         }),
@@ -721,6 +777,26 @@ export default function BookPage() {
     await refreshPortalMe()
     setStep(needsSlot ? 'slot' : 'intake')
     await submitBooking()
+  }
+
+  // Sign-up "details" → the client-level fields that ride the stage/finalize
+  // request bodies. Company name is the business name when the client marked
+  // themselves a business, otherwise the plain Company field from the contact
+  // step. Business address mirrors the mailing address when "same as" is on.
+  // Only the anonymous flow reaches this (signed-in clients skip contact +
+  // details), so contact/details state is always populated here.
+  function buildClientDetails() {
+    const isBiz = details.isBusiness
+    return {
+      clientCompanyName: (isBiz ? details.businessName.trim() : contact.companyName.trim()) || null,
+      clientMailingAddress: details.mailingAddress,
+      clientBusinessAddress: isBiz
+        ? details.businessSameAsMailing
+          ? details.mailingAddress
+          : details.businessAddress
+        : null,
+      clientPreferredContactMethod: details.preferredContact,
+    }
   }
 
   // The intake answers + staged upload tokens the submit sends, shared by both
@@ -873,7 +949,7 @@ export default function BookPage() {
           clientFullName: contact.fullName.trim(),
           clientEmail: contact.email.trim(),
           clientPhone: contact.phone || undefined,
-          clientCompanyName: contact.companyName.trim() || undefined,
+          ...buildClientDetails(),
           attributionSource: contact.attributionSource.trim(),
           ...payload,
           password,
@@ -1060,33 +1136,37 @@ export default function BookPage() {
       ? t('header.service')
       : step === 'contact'
         ? t('contact.heading')
-        : step === 'intake'
-          ? t('intake.heading')
-          : step === 'account'
-            ? accountMode === 'signin'
-              ? t('account.heading_signin', undefined, 'Sign in to your account')
-              : t('account.heading', undefined, 'Create your account')
-            : t('slot.heading')
+        : step === 'details'
+          ? t('details.heading', undefined, 'A few more details')
+          : step === 'intake'
+            ? t('intake.heading')
+            : step === 'account'
+              ? accountMode === 'signin'
+                ? t('account.heading_signin', undefined, 'Sign in to your account')
+                : t('account.heading', undefined, 'Create your account')
+              : t('slot.heading')
   const stepSubtitle =
     step === 'service'
       ? t('service.subtitle')
       : step === 'contact'
         ? t('contact.subtitle')
-        : step === 'intake'
-          ? t('intake.subtitle')
-          : step === 'account'
-            ? accountMode === 'signin'
-              ? t(
-                  'account.subtitle_signin',
-                  undefined,
-                  'Your request will be linked to your existing portal account.',
-                )
-              : t(
-                  'account.subtitle',
-                  undefined,
-                  'Everything about your matter will live in your secure portal.',
-                )
-            : t('slot.subtitle')
+        : step === 'details'
+          ? t('details.subtitle', undefined, 'This helps us prepare your documents correctly.')
+          : step === 'intake'
+            ? t('intake.subtitle')
+            : step === 'account'
+              ? accountMode === 'signin'
+                ? t(
+                    'account.subtitle_signin',
+                    undefined,
+                    'Your request will be linked to your existing portal account.',
+                  )
+                : t(
+                    'account.subtitle',
+                    undefined,
+                    'Everything about your matter will live in your secure portal.',
+                  )
+              : t('slot.subtitle')
 
   return (
     <main className="bk-shell">
@@ -1098,10 +1178,13 @@ export default function BookPage() {
           steps={PROGRESS_STEPS.filter(
             (s) =>
               (needsSlot || s.key !== 'slot') &&
-              // Signed-in clients skip the contact step and the account gate.
-              (!signedIn || (s.key !== 'contact' && s.key !== 'account')) &&
-              // "Something else" (item 3) is a triage request — no account gate.
-              (selectedServiceKey !== SOMETHING_ELSE_KEY || s.key !== 'account'),
+              // Signed-in clients skip the contact step, the profile-details
+              // step, and the account gate — the firm already has their profile.
+              (!signedIn || (s.key !== 'contact' && s.key !== 'details' && s.key !== 'account')) &&
+              // "Something else" (item 3) is a triage request — no details step
+              // and no account gate.
+              (selectedServiceKey !== SOMETHING_ELSE_KEY ||
+                (s.key !== 'account' && s.key !== 'details')),
           )}
         />
 
@@ -1241,6 +1324,141 @@ export default function BookPage() {
               </>
             )}
 
+            {step === 'details' && (
+              <>
+                <div className="bk-sections">
+                  <div className="bk-section">
+                    <h3 className="bk-section-title">
+                      {t('details.section_you', undefined, 'Your details')}
+                    </h3>
+                    <div className="bk-fields">
+                      <div className="bk-field bk-field-wide">
+                        <AddressAutocomplete
+                          label={t('details.mailing_address', undefined, 'Mailing address')}
+                          required
+                          value={details.mailingAddress}
+                          onChange={(addr) =>
+                            setDetails((p) => ({
+                              ...p,
+                              mailingAddress: addr,
+                              // Keep a "same as mailing" business address in lockstep.
+                              businessAddress: p.businessSameAsMailing ? addr : p.businessAddress,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="bk-field">
+                        <label htmlFor="pref-contact" className="bk-label">
+                          {t('details.preferred_contact', undefined, 'Preferred contact method')}
+                        </label>
+                        <select
+                          id="pref-contact"
+                          className="bk-input bk-select"
+                          value={details.preferredContact}
+                          onChange={(e) =>
+                            setDetails((p) => ({
+                              ...p,
+                              preferredContact: e.target.value as PreferredContactMethod,
+                            }))
+                          }
+                        >
+                          <option value="email">
+                            {t('details.contact_email', undefined, 'Email')}
+                          </option>
+                          <option value="phone">
+                            {t('details.contact_phone', undefined, 'Phone call')}
+                          </option>
+                          <option value="text">
+                            {t('details.contact_text', undefined, 'Text message')}
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bk-section">
+                    <label className="bk-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={details.isBusiness}
+                        onChange={(e) =>
+                          setDetails((p) => ({ ...p, isBusiness: e.target.checked }))
+                        }
+                      />
+                      <span>{t('details.is_business', undefined, 'This is for a business')}</span>
+                    </label>
+                    {details.isBusiness && (
+                      <div className="bk-fields" style={{ marginTop: 'var(--space-3)' }}>
+                        <div className="bk-field">
+                          <label htmlFor="biz-name" className="bk-label">
+                            <Building2Icon size={15} />
+                            {t('details.business_name', undefined, 'Business name')}
+                            <em className="bk-req">*</em>
+                          </label>
+                          <input
+                            id="biz-name"
+                            className="bk-input"
+                            value={details.businessName}
+                            onChange={(e) =>
+                              setDetails((p) => ({ ...p, businessName: e.target.value }))
+                            }
+                            autoComplete="organization"
+                          />
+                        </div>
+                        <label className="bk-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={details.businessSameAsMailing}
+                            onChange={(e) =>
+                              setDetails((p) => ({
+                                ...p,
+                                businessSameAsMailing: e.target.checked,
+                                businessAddress: e.target.checked
+                                  ? p.mailingAddress
+                                  : p.businessAddress,
+                              }))
+                            }
+                          />
+                          <span>
+                            {t(
+                              'details.business_same',
+                              undefined,
+                              'Business address is the same as my mailing address',
+                            )}
+                          </span>
+                        </label>
+                        {!details.businessSameAsMailing && (
+                          <div className="bk-field bk-field-wide">
+                            <AddressAutocomplete
+                              label={t('details.business_address', undefined, 'Business address')}
+                              required
+                              value={details.businessAddress}
+                              onChange={(addr) =>
+                                setDetails((p) => ({ ...p, businessAddress: addr }))
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="bk-actions">
+                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('contact')}>
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-grow"
+                    onClick={advanceFromDetails}
+                  >
+                    {t('common.continue')}
+                    <ArrowRightIcon size={18} />
+                  </button>
+                </div>
+              </>
+            )}
+
             {step === 'intake' && selectedService && (
               <>
                 {/* BILINGUAL-DOCS-1 — language choice, shown only when the
@@ -1354,7 +1572,15 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-ghost"
                     disabled={busy === 'submit'}
-                    onClick={() => setStep(signedIn ? 'service' : 'contact')}
+                    onClick={() =>
+                      setStep(
+                        signedIn
+                          ? 'service'
+                          : selectedServiceKey === SOMETHING_ELSE_KEY
+                            ? 'contact'
+                            : 'details',
+                      )
+                    }
                   >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
