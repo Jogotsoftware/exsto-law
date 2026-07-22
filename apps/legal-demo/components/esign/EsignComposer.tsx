@@ -24,11 +24,12 @@ import {
   PlusIcon,
   ShieldCheckIcon,
   UploadIcon,
+  UserIcon,
   XIcon,
 } from '@/components/icons'
 import { MatterContactPicker } from './MatterContactPicker'
 import type { ContactOption, MatterOption } from './matterContactFilter'
-import { useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
+import { recipientHasEmail, useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
 import { workflowStepRecipientRows } from '@/lib/esignComposeSource'
 // ES-2 (§4) — the placement surface + the real preview, all client-safe pure
 // imports (the esign subpath ships no server code).
@@ -140,6 +141,13 @@ export function EsignComposer({
   const [result, setResult] = useState<SendResult | null>(null)
   const [matters, setMatters] = useState<MatterOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
+  // "Add myself" (founder request) — the signed-in attorney's own name + email,
+  // resolved once so the Recipients step can offer a one-click countersigner
+  // row; see the identity-fetch effect below for where these come from.
+  const [attorneyIdentity, setAttorneyIdentity] = useState<{ name: string; email: string } | null>(
+    null,
+  )
+  const [identityLoading, setIdentityLoading] = useState(true)
   const [suggestFor, setSuggestFor] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -162,6 +170,7 @@ export function EsignComposer({
     setAttach,
     setRecipient,
     addRecipient,
+    addMyself,
     removeRecipient,
     moveRecipient,
     setUseSigningOrder,
@@ -222,6 +231,41 @@ export function EsignComposer({
     callAttorneyMcp<{ contacts: ContactOption[] }>({ toolName: 'legal.contact.list' })
       .then((r) => setContacts(r.contacts))
       .catch(() => setContacts([]))
+  }, [])
+
+  // "Add myself" identity — name from firm settings (legal.settings.get; this is
+  // a single-attorney firm, so attorneyName IS the signed-in attorney), email
+  // from the actor's own account (legal.settings.attorney_signature.get's
+  // attorneyEmail — the same seam the public sign page probes to gate saved-
+  // signature prefill, §P15). A convenience lookup, never a blocker: any
+  // failure or a missing account email degrades to null, which hides the
+  // button entirely rather than offering one that can't work.
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      callAttorneyMcp<{ settings: { attorneyName: string | null } }>({
+        toolName: 'legal.settings.get',
+      }),
+      callAttorneyMcp<{ attorneyEmail: string | null }>({
+        toolName: 'legal.settings.attorney_signature.get',
+      }),
+    ])
+      .then(([settingsRes, sigRes]) => {
+        if (cancelled) return
+        const email = sigRes.attorneyEmail?.trim()
+        setAttorneyIdentity(
+          email ? { name: settingsRes.settings.attorneyName?.trim() || '', email } : null,
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setAttorneyIdentity(null)
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // ES-MULTIDOC-1 — resolve bytes + marker map for EVERY document in the set.
@@ -311,6 +355,12 @@ export function EsignComposer({
     (r) => !contactByEmail.has(r.email.trim().toLowerCase()),
   )
   const signingRecipients = filledRecipients.filter((r) => r.role === 'needs_to_sign')
+
+  // "Add myself" — disable once the attorney's own email is already a row
+  // (typed manually, or added earlier this session).
+  const alreadySelfRecipient = attorneyIdentity
+    ? recipientHasEmail(draft.recipients, attorneyIdentity.email)
+    : false
 
   // CRM typeahead for the active recipient row: match name OR email, show the
   // email beside the name (same-name disambiguation, §9.1). Top 6.
@@ -742,6 +792,18 @@ export function EsignComposer({
                   />
                   Set signing order
                 </label>
+                {(identityLoading || attorneyIdentity) && (
+                  <button
+                    type="button"
+                    className="li-esign-btn li-esign-btn--sm"
+                    onClick={() => attorneyIdentity && addMyself(attorneyIdentity)}
+                    disabled={identityLoading || alreadySelfRecipient}
+                    title={alreadySelfRecipient ? "You're already a recipient" : undefined}
+                  >
+                    <UserIcon size={14} />
+                    Add myself
+                  </button>
+                )}
                 <button
                   type="button"
                   className="li-esign-btn li-esign-btn--sm"
