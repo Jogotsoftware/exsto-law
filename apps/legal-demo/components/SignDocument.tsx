@@ -340,13 +340,42 @@ export function SignDocument({
   }
 
   if (doc.alreadyResolved) {
+    const declined = doc.signerStatus === 'declined'
+    // esign-executed-copy-complete (visibility) — a signer/client who returns
+    // here after everyone has finished used to see ONLY this status text, with
+    // no way to actually open the document they signed, even though the file
+    // route (fileUrl/fileUrlForDoc) already streams the executed copy once it
+    // exists. File (PDF) documents get a direct link here; markdown-draft
+    // documents have no equivalent streaming route on this surface, so they
+    // keep relying on the completion email / matter record.
+    const fileDocs = declined ? [] : docs.filter((d) => d.isFile)
     return (
       <div className="public-draft">
         {head()}
         <div className="alert">
-          This request has already been {doc.signerStatus === 'declined' ? 'declined' : 'completed'}
-          . No further action is needed.
+          This request has already been {declined ? 'declined' : 'completed'}. No further action is
+          needed.
         </div>
+        {fileDocs.length > 0 && (
+          <div className="li-cp-sign-file" style={{ marginTop: 'var(--space-2)' }}>
+            {fileDocs.map((d) => {
+              const url = fileUrlFor(d.docIndex)
+              return url ? (
+                <a
+                  key={d.docIndex}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="li-cp-linkbtn"
+                >
+                  {fileDocs.length > 1
+                    ? `View ${d.fileName ?? d.documentTitle}`
+                    : 'View signed document'}
+                </a>
+              ) : null
+            })}
+          </div>
+        )}
       </div>
     )
   }

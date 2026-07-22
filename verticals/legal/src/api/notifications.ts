@@ -8,9 +8,15 @@
 //
 // Sends are enqueued (legal.notify worker job) so booking/drafting paths never
 // block on the Gmail API; the runtime's retry/backoff covers transient failures.
+// One exception: deliverNotification is exported so a caller that already
+// holds bytes in memory (e.g. sendEnvelopeCompletionCopies, esign.ts, after
+// Item 1's PDF stamping) can send an ATTACHMENT-bearing notification directly,
+// synchronously, without enqueuing — the worker_job queue's JSONB payload is
+// the wrong place for multi-MB PDF bytes. Same driver/audit-action seam
+// either way; only the enqueue step is skipped.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
-import { sendEmail } from '../adapters/gmail.js'
+import { sendEmail, type EmailAttachment } from '../adapters/gmail.js'
 import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { renderNotificationTemplate } from './notificationTemplates.js'
 import { renderEmailHtml } from '../email/index.js'
@@ -65,7 +71,16 @@ export async function attorneyEmail(tenantId: string): Promise<string | null> {
 
 type ChannelDriver = (
   ctx: ActionContext,
-  args: { to: string; subject: string; bodyText: string; bodyHtml?: string },
+  args: {
+    to: string
+    subject: string
+    bodyText: string
+    bodyHtml?: string
+    // esign-executed-copy-complete — optional file attachments (e.g. the
+    // stamped executed PDF). Only the email driver honors these; a future sms
+    // driver would ignore/reject them.
+    attachments?: EmailAttachment[]
+  },
 ) => Promise<{ providerMessageId: string | null }>
 
 const DRIVERS: Record<string, ChannelDriver> = {
@@ -80,6 +95,7 @@ const DRIVERS: Record<string, ChannelDriver> = {
         subject: args.subject,
         body: args.bodyText,
         html: args.bodyHtml,
+        attachments: args.attachments,
       },
       actorId,
     )
@@ -93,6 +109,12 @@ export interface NotifyInput {
   routeKindName: string
   to?: string // resolved from the route's recipients role when omitted
   variables: Record<string, unknown>
+  // esign-executed-copy-complete — file attachments for THIS send (e.g. the
+  // stamped executed PDF). Deliberately NOT threaded through queueNotification
+  // (the worker_job payload is a JSONB row; base64-inflating a multi-MB PDF
+  // into it would bloat the queue table) — only deliverNotification, called
+  // DIRECTLY (not enqueued) by callers that already hold the bytes in memory.
+  attachments?: EmailAttachment[]
 }
 
 // Queue a notification (preferred entry — never blocks the caller's request).
@@ -141,7 +163,13 @@ export async function deliverNotification(ctx: ActionContext, input: NotifyInput
     outText = signed.body
     outHtml = signed.html
   }
-  const sent = await driver(ctx, { to, subject, bodyText: outText, bodyHtml: outHtml })
+  const sent = await driver(ctx, {
+    to,
+    subject,
+    bodyText: outText,
+    bodyHtml: outHtml,
+    attachments: input.attachments,
+  })
 
   await submitAction(ctx, {
     actionKindName: 'notification.send',

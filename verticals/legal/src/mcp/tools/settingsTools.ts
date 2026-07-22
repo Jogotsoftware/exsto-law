@@ -10,6 +10,10 @@ import {
   getOwnPublicSlug,
   getFirmDefaultRate,
   setFirmDefaultRate,
+  getEngagementTemplate,
+  setEngagementTemplate,
+  enqueueEngagementImport,
+  getEngagementImportResult,
   getEmailDraftingConfig,
   updateEmailDraftingConfig,
   getFirmProfile,
@@ -35,6 +39,9 @@ import {
   type TenantSettings,
   type UpdateEmailDraftingConfigInput,
   type UpdateTenantSettingsInput,
+  type EnqueueEngagementImportResult,
+  type EngagementImportJobResult,
+  type EngagementTemplateValue,
 } from '../../index.js'
 import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
 import type { ActionContext } from '@exsto/substrate'
@@ -255,3 +262,50 @@ registerTool({
     return { ok: true }
   },
 } satisfies Tool<Record<string, never>, { ok: true }>)
+
+// ── ENGAGEMENT-DOC-1 — the firm's engagement-agreement template ──────────────
+// Upload flow: the settings page parses the PDF via /api/attorney/templates/import
+// (stateless), then hands the markdown here — this tool runs the AI conversion,
+// creates the template (client signs; firm block pre-signed), and points the firm
+// at it. The portal gate reads the pointer through legal.client.engagement.
+
+registerTool({
+  name: 'legal.firm.get_engagement_agreement',
+  description:
+    "Get the firm's engagement-agreement template pointer: {template_id, version, uploaded_at, source_filename, details} or null when no agreement has been uploaded (the portal gate then shows text terms only).",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ agreement: await getEngagementTemplate(ctx) }),
+} satisfies Tool<Record<string, never>, { agreement: EngagementTemplateValue | null }>)
+
+// ENQUEUE-AND-RETURN (was synchronous — the model pass on a multi-page letter
+// ≈ 80s, which 504'd the gateway). Enqueues the import on the worker and returns a
+// requestId immediately; the settings card polls legal.firm.import_engagement_agreement.result.
+registerTool({
+  name: 'legal.firm.import_engagement_agreement',
+  description:
+    'Enqueue conversion of an uploaded engagement letter (parsed markdown) into the firm engagement-agreement merge template, OFF the request (the model pass is slow and would 504 the gateway). Client-specific values become merge fields; the client acceptance block gets {{sign:client}}/{{date:client}} markers; rates/retainer are extracted into details. Returns { jobId, requestId }; poll legal.firm.import_engagement_agreement.result with the requestId. On completion the firm pointer is set (replacing any prior agreement; the prior template stays in history).',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    await enqueueEngagementImport(ctx, {
+      markdown: input.markdown,
+      sourceFilename: input.sourceFilename,
+    }),
+} satisfies Tool<{ markdown: string; sourceFilename?: string }, EnqueueEngagementImportResult>)
+
+registerTool({
+  name: 'legal.firm.import_engagement_agreement.result',
+  description:
+    'Poll the outcome of an engagement-agreement import by requestId: { status: "completed" | "failed", templateId?, version?, details?, error? }, or null while the worker is still running. The settings card polls this after enqueuing.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    result: await getEngagementImportResult(ctx, input.requestId),
+  }),
+} satisfies Tool<{ requestId: string }, { result: EngagementImportJobResult | null }>)
+
+registerTool({
+  name: 'legal.firm.clear_engagement_agreement',
+  description:
+    'Clear the firm engagement-agreement template pointer. The portal gate falls back to text-terms-only acceptance; the template itself is not deleted.',
+  mode: 'write',
+  handler: async (ctx: ActionContext) => await setEngagementTemplate(ctx, { templateId: null }),
+} satisfies Tool<Record<string, never>, { templateId: string | null; version?: number }>)

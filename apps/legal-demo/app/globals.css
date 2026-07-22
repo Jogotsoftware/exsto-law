@@ -26343,3 +26343,37 @@ details.li-brief-research summary:hover {
   background: rgba(198, 169, 104, 0.55);
   box-shadow: 0 0 0 1.5px #c6a968;
 }
+
+/* ── ENGAGEMENT-DOC-1 — the merged agreement inside the engagement gate ────── */
+.li-cp-agreement-doc {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--li-line, #e3e6ee);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  background: #fff;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+.li-cp-agreement-doc h1,
+.li-cp-agreement-doc h2,
+.li-cp-agreement-doc h3 {
+  font-size: 1em;
+  margin: 0.9em 0 0.4em;
+}
+.li-cp-sign-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.li-cp-sign-input {
+  border: 1px solid var(--li-line, #cfd6e4);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'Snell Roundhand', 'Segoe Script', cursive;
+  font-size: 1.05rem;
+}
