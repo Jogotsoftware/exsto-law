@@ -4,6 +4,11 @@ import { listSignaturesAwaitingAttorney, type AwaitingAttorneySignature } from '
 import { listInvoices, type InvoiceSummary } from './billing.js'
 import { listPaymentReports, type PaymentReport } from '../api/manualPayments.js'
 import { listPendingRequests, type AttorneyRequestItem } from './clientRequests.js'
+import {
+  listWorkflowStepsAwaitingAttorney,
+  type WorkflowStepAwaitingAttorney,
+} from './workflowSteps.js'
+import { listOpenTasksForAttorney, type AttorneyTodoTask } from './tasks.js'
 
 // TASK-QUEUE-1 — the unified attorney Task Queue. Aggregates every task
 // currently waiting on the attorney across four sources (document review,
@@ -13,7 +18,13 @@ import { listPendingRequests, type AttorneyRequestItem } from './clientRequests.
 // listAttorneyTasks wraps each source read in try/catch so one failing source
 // degrades (log + skip) instead of blanking the whole queue.
 
-export type AttorneyTaskType = 'document_review' | 'esign' | 'billing' | 'client_request'
+export type AttorneyTaskType =
+  | 'document_review'
+  | 'esign'
+  | 'billing'
+  | 'client_request'
+  | 'workflow_step'
+  | 'todo'
 
 export interface AttorneyTask {
   id: string
@@ -178,6 +189,55 @@ export function normalizeClientRequestTask(req: AttorneyRequestItem): AttorneyTa
   }
 }
 
+// ── Workflow steps (legal.attorney.task_queue, TASK-QUEUE-2) ────────────────
+
+// A matter parked on an attorney-gated workflow step. No per-step deep link
+// exists, so the row's Open action routes to the matter workspace (the step
+// modals live there). draft.approve / e-sign steps are already deduped out by
+// the reader, so a workflow_step row never double-lists a Document Review or
+// E-Sign row.
+export function normalizeWorkflowStepTask(step: WorkflowStepAwaitingAttorney): AttorneyTask {
+  return {
+    id: step.matterEntityId,
+    type: 'workflow_step',
+    typeLabel: 'Workflow Step',
+    title: step.title,
+    clientName: step.clientName ?? null,
+    matterNumber: step.matterNumber || null,
+    matterEntityId: step.matterEntityId,
+    contactEntityId: null,
+    date: step.since,
+    dateLabel: 'Waiting since',
+    status: null,
+    workHref: `/attorney/matters/${step.matterEntityId}`,
+    viewHref: null,
+  }
+}
+
+// ── Ad-hoc to-dos (legal.attorney.task_queue, TASK-QUEUE-2) ─────────────────
+
+// An open to-do assigned to (or unassigned in) the single-attorney firm. The row
+// dates off the due date ("Due") when set, else the creation date ("Added"), so a
+// to-do with no deadline still carries a sensible timestamp.
+export function normalizeTodoTask(task: AttorneyTodoTask): AttorneyTask {
+  const hasDue = Boolean(task.dueDate)
+  return {
+    id: task.taskId,
+    type: 'todo',
+    typeLabel: 'To-Do',
+    title: task.title,
+    clientName: task.clientName ?? null,
+    matterNumber: task.matterNumber || null,
+    matterEntityId: task.matterEntityId,
+    contactEntityId: null,
+    date: hasDue ? task.dueDate : task.createdAt,
+    dateLabel: hasDue ? 'Due' : 'Added',
+    status: task.status,
+    workHref: `/attorney/matters/${task.matterEntityId}/tasks/${task.taskId}`,
+    viewHref: null,
+  }
+}
+
 // ── Aggregator ────────────────────────────────────────────────────────────
 
 // Every task waiting on the attorney, merged across all four sources. Each
@@ -220,6 +280,20 @@ export async function listAttorneyTasks(ctx: ActionContext): Promise<AttorneyTas
     tasks.push(...requests.map(normalizeClientRequestTask))
   } catch (err) {
     console.error('listAttorneyTasks: client request source failed:', err)
+  }
+
+  try {
+    const steps = await listWorkflowStepsAwaitingAttorney(ctx)
+    tasks.push(...steps.map(normalizeWorkflowStepTask))
+  } catch (err) {
+    console.error('listAttorneyTasks: workflow step source failed:', err)
+  }
+
+  try {
+    const todos = await listOpenTasksForAttorney(ctx)
+    tasks.push(...todos.map(normalizeTodoTask))
+  } catch (err) {
+    console.error('listAttorneyTasks: to-do source failed:', err)
   }
 
   return tasks
