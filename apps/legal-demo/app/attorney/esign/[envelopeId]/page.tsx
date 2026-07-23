@@ -18,6 +18,7 @@ import {
   DownloadIcon,
   FileTextIcon,
   ShieldCheckIcon,
+  PlusIcon,
 } from '@/components/icons'
 import { cleanEnvelopeSubject, humanizeDocKind } from '../page'
 
@@ -125,8 +126,14 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
   const router = useRouter()
   const [env, setEnv] = useState<EnvelopeStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<null | 'resend' | 'void' | 'download'>(null)
+  const [busy, setBusy] = useState<null | 'resend' | 'void' | 'download' | 'addSigner' | 'finish'>(
+    null,
+  )
   const [notice, setNotice] = useState<string | null>(null)
+  // ADD-NEXT-SIGNER-1 — the attorney's own "add signer" mini-form.
+  const [showAddSigner, setShowAddSigner] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addEmail, setAddEmail] = useState('')
 
   const load = useCallback(() => {
     callAttorneyMcp<EnvelopeStatus>({ toolName: 'legal.esign.status', input: { envelopeId } })
@@ -176,6 +183,52 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
         input: { envelopeId },
       })
       setNotice('Envelope voided.')
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onAddSigner(): Promise<void> {
+    if (!addEmail.trim()) {
+      setError('An email address is required.')
+      return
+    }
+    setBusy('addSigner')
+    setNotice(null)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.esign.add_signer',
+        input: { envelopeId, name: addName.trim(), email: addEmail.trim() },
+      })
+      setNotice('Signer added.')
+      setShowAddSigner(false)
+      setAddName('')
+      setAddEmail('')
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ADD-NEXT-SIGNER-1 — fallback finish for an envelope stuck awaiting a
+  // signer's "add another / no more" decision (they never came back).
+  async function onFinishNow(): Promise<void> {
+    if (
+      !window.confirm('Finish this envelope now? No more signers can be added once it completes.')
+    )
+      return
+    setBusy('finish')
+    setNotice(null)
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.esign.finish', input: { envelopeId } })
+      setNotice('Envelope completed.')
       load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -252,7 +305,11 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
     )
 
   const meta = BUCKET_META[env.bucket]
-  const isActive = env.status === 'sent' || env.status === 'pending_dispatch'
+  // ADD-NEXT-SIGNER-1 — an envelope awaiting a signer's decision is still
+  // open (the attorney can still add a signer or void it), just not
+  // actively delivered to anyone right now.
+  const isAwaitingDecision = env.status === 'awaiting_signer_decision'
+  const isActive = env.status === 'sent' || env.status === 'pending_dispatch' || isAwaitingDecision
   const canResend = env.status === 'sent'
   const canDownload = env.bucket === 'completed' && Boolean(env.executedDocumentVersionId)
   const docLabel = humanizeDocKind(env.documentKind)
@@ -307,6 +364,25 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
               )}
               <button
                 type="button"
+                className="li-esign-btn"
+                onClick={() => setShowAddSigner((v) => !v)}
+                disabled={busy !== null}
+              >
+                <PlusIcon size={15} />
+                Add signer
+              </button>
+              {isAwaitingDecision && (
+                <button
+                  type="button"
+                  className="li-esign-btn"
+                  onClick={onFinishNow}
+                  disabled={busy !== null}
+                >
+                  {busy === 'finish' ? 'Finishing…' : 'Finish now'}
+                </button>
+              )}
+              <button
+                type="button"
                 className="li-esign-btn li-esign-btn--danger"
                 onClick={onVoid}
                 disabled={busy !== null}
@@ -333,8 +409,55 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
         </div>
       </div>
 
+      {isAwaitingDecision && (
+        <div className="li-esign-notice li-esign-notice--warn">
+          Awaiting a decision from the signer — they were offered "add another signer" instead of
+          finishing. Add one yourself, or finish the envelope now.
+        </div>
+      )}
       {notice && <div className="li-esign-notice">{notice}</div>}
       {error && <div className="alert alert-error">{error}</div>}
+
+      {showAddSigner && (
+        <div className="li-esign-addsigner">
+          <label className="li-esign-addsigner-field">
+            <span>Name</span>
+            <input
+              type="text"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              disabled={busy !== null}
+            />
+          </label>
+          <label className="li-esign-addsigner-field">
+            <span>Email</span>
+            <input
+              type="email"
+              value={addEmail}
+              onChange={(e) => setAddEmail(e.target.value)}
+              disabled={busy !== null}
+            />
+          </label>
+          <div className="li-esign-addsigner-actions">
+            <button
+              type="button"
+              className="li-esign-btn li-esign-btn--primary"
+              onClick={onAddSigner}
+              disabled={busy !== null}
+            >
+              {busy === 'addSigner' ? 'Adding…' : 'Add'}
+            </button>
+            <button
+              type="button"
+              className="li-esign-btn"
+              onClick={() => setShowAddSigner(false)}
+              disabled={busy !== null}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="li-esign-detail-grid">
         <div className="li-esign-detail-main">

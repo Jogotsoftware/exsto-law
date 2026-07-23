@@ -104,7 +104,10 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
         })
         const data = await r.json()
         if (!r.ok) throw new Error(data.error ?? 'Could not record your signature.')
-        return { completed: Boolean(data.completed) }
+        return {
+          completed: Boolean(data.completed),
+          awaitingAddDecision: Boolean(data.awaitingAddDecision),
+        }
       }}
       onDecline={async () => {
         const r = await fetch('/api/sign/decline', {
@@ -114,6 +117,25 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
         })
         const data = await r.json()
         if (!r.ok) throw new Error(data.error ?? 'Could not record your decision.')
+      }}
+      onAddSigner={async ({ name, email }) => {
+        const r = await fetch('/api/sign/add-signer', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token, name, email }),
+        })
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error ?? 'Could not add the next signer.')
+      }}
+      onFinishSigning={async () => {
+        const r = await fetch('/api/sign/finish', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error ?? 'Could not finish the envelope.')
+        return { completed: Boolean(data.completed) }
       }}
     />
   )

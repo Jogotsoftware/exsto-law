@@ -18,8 +18,18 @@
 //                    is written as a NEW immutable document_version (invariant 14).
 //   esign.decline  → a signer declines; the envelope closes. esign.declined.
 //   esign.record_status → EXTERNAL (dormant): same transitions for a future driver.
+//   esign.add_signer → ADD-NEXT-SIGNER-1: insert a NEW signature_request mid-
+//                    envelope (a signer whose role opted in, or the attorney's
+//                    own "add signer"), ordered right after an anchor request
+//                    and ahead of anything already queued later. Delivered
+//                    immediately if nothing else is unresolved ahead of it.
+//   esign.finish_signing → ADD-NEXT-SIGNER-1: the deferred completion tail
+//                    (shared with esign.sign's normal path via
+//                    completeEnvelope) — runs when a signer explicitly
+//                    confirms "no more signers" after their signature held
+//                    the envelope open awaiting that decision.
 import { createHash } from 'node:crypto'
-import { registerActionHandler } from '@exsto/substrate'
+import { registerActionHandler, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
   insertAttribute,
@@ -45,9 +55,11 @@ import type { FieldPlacement } from '../esign/placements.js'
 // writes + events).
 import {
   copyRecipients,
+  nextInsertionOrder,
   normalizeRole,
   planInitialDispatch,
   planNextDelivery,
+  shouldHoldForAddDecision,
   type SignerRole,
 } from '../esign/routing.js'
 import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
@@ -72,6 +84,11 @@ interface SendSigner {
   presigned?: boolean | null
   presigned_signature_data?: string | null
   presigned_signature_name?: string | null
+  /** ADD-NEXT-SIGNER-1 — this signer may add the next signer instead of
+   *  auto-completing the envelope, if their signature would otherwise be the
+   *  one that finishes it. Written as `signer_allow_add_next` (mirrors
+   *  signer_role) so esign.sign can read it back for the completing request. */
+  allow_add_next?: boolean | null
 }
 
 /** One document in an envelope's ordered set (ES-MULTIDOC-1). */
@@ -301,6 +318,15 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     await setAttr(client, tenantId, actionId, requestId, 'signer_role', role, {
       sourceRef: ctx.actorId,
     })
+    // ADD-NEXT-SIGNER-1 — only written when true (mirrors signer_key/
+    // signer_title's "optional, absent reads as the safe default" style,
+    // rather than signer_role's "always written" style — most requests never
+    // set this).
+    if (s.allow_add_next) {
+      await setAttr(client, tenantId, actionId, requestId, 'signer_allow_add_next', true, {
+        sourceRef: ctx.actorId,
+      })
+    }
     // BUILDER-CERT-1 (WP4) — write each signer's INITIAL status exactly once.
     // The first routing group starts 'delivered' directly; later groups start
     // 'pending' (deliverNextGroup promotes them on later sign actions). The old
@@ -469,6 +495,108 @@ function base64DecodedBytes(b64: string): number {
   return Math.floor((b64.length * 3) / 4) - padding
 }
 
+interface CompleteEnvelopeResult {
+  executedVersionId: string | null
+  executedVersionNumber: number | null
+  copyDeliveredRequestIds: string[]
+}
+
+// The completion tail: mark the envelope completed, stamp the executed copy
+// of every document, drive any matter lifecycle waiting on esign.completed,
+// and resolve which receives_copy requests to notify. Shared by esign.sign's
+// normal completion (every needs_to_sign request resolved, no hold) and
+// esign.finish_signing (ADD-NEXT-SIGNER-1 — a signer explicitly confirms "no
+// more signers" after their signature held the envelope open for that
+// decision) so there is exactly ONE place an envelope actually finishes.
+async function completeEnvelope(
+  ctx: ActionContext,
+  client: DbClient,
+  tenantId: string,
+  actionId: string,
+  envelopeId: string,
+  sourceRef: string,
+): Promise<CompleteEnvelopeResult> {
+  await setAttr(client, tenantId, actionId, envelopeId, 'envelope_status', 'completed', {
+    sourceType: 'system',
+    sourceRef,
+  })
+  // ES-MULTIDOC-1 — write the executed copy of EVERY document in the envelope,
+  // in order. Each document is its own entity with its own version chain, so
+  // writeExecutedVersion runs once per document (the placement subset that lands
+  // on document d is resolved inside, by docIndex). The primary (order-0)
+  // document keeps driving the lifecycle + the single-value event fields so
+  // every existing reader is unchanged; a single-doc envelope loops exactly once.
+  const documentEntityIds = await resolveEnvelopeDocuments(client, tenantId, envelopeId)
+  const documentEntityId = documentEntityIds[0] ?? null
+  const executedVersionIds: string[] = []
+  let executedVersionId: string | null = null
+  let executedVersionNumber: number | null = null
+  for (let d = 0; d < documentEntityIds.length; d++) {
+    const executed = await writeExecutedVersion(
+      client,
+      tenantId,
+      actionId,
+      envelopeId,
+      documentEntityIds[d]!,
+    )
+    executedVersionIds.push(executed.versionId)
+    if (d === 0) {
+      executedVersionId = executed.versionId
+      executedVersionNumber = executed.versionNumber
+    }
+  }
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.completed',
+    primaryEntityId: documentEntityId ?? envelopeId,
+    secondaryEntityIds: [envelopeId],
+    data: {
+      document_entity_id: documentEntityId,
+      executed_document_version_id: executedVersionId,
+      executed_version_number: executedVersionNumber,
+      // ES-MULTIDOC-1: every executed version, in document order (length 1 for a
+      // single-doc envelope). Additive alongside the primary fields above.
+      executed_document_version_ids: executedVersionIds,
+      document_count: documentEntityIds.length,
+    },
+    sourceType: 'system',
+    sourceRef,
+  })
+
+  // ADR 0045 — drive any matter whose lifecycle waits ON esign.completed. The matter
+  // is resolved via the signed document's draft_of link. Flag-guarded no-op when the
+  // engine is off (and a no-op for a document with no matter / no waiting edge). The
+  // advance commits in this same transaction under this action's id.
+  if (documentEntityId) {
+    const matterEntityId = await resolveDocumentMatter(client, tenantId, documentEntityId)
+    if (matterEntityId) {
+      await dispatchLifecycleEvent(client, ctx, matterEntityId, 'esign.completed', actionId)
+    }
+  }
+
+  // ESIGN-UNIFY-1 (ES-1, §9.2/§10, 0186) — receives_copy recipients get NO link
+  // at send; now that the envelope is complete, record one esign.copy_delivered
+  // event per copy recipient (same shape as esign.delivered) and hand their
+  // request ids back so the api layer can queue the executed-copy email
+  // (notifications are a side effect of the action layer, never written from
+  // inside a handler — see notifyCopyDelivered in api/esign.ts).
+  const copyDeliveredRequestIds = await loadCopyRecipientRequests(client, tenantId, envelopeId)
+  for (const requestId of copyDeliveredRequestIds) {
+    await insertEvent(client, {
+      tenantId,
+      actionId,
+      eventKindName: 'esign.copy_delivered',
+      primaryEntityId: envelopeId,
+      secondaryEntityIds: [requestId],
+      sourceType: 'system',
+      sourceRef,
+    })
+  }
+
+  return { executedVersionId, executedVersionNumber, copyDeliveredRequestIds }
+}
+
 registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as EsignSignPayload
   const tenantId = ctx.tenantId
@@ -550,96 +678,48 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
     }
   }
 
-  await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'completed', {
-    sourceType: 'system',
-    sourceRef,
-  })
-  // ES-MULTIDOC-1 — write the executed copy of EVERY document in the envelope,
-  // in order. Each document is its own entity with its own version chain, so
-  // writeExecutedVersion runs once per document (the placement subset that lands
-  // on document d is resolved inside, by docIndex). The primary (order-0)
-  // document keeps driving the lifecycle + the single-value event fields so
-  // every existing reader is unchanged; a single-doc envelope loops exactly once.
-  const documentEntityIds = await resolveEnvelopeDocuments(client, tenantId, p.envelope_entity_id)
-  const documentEntityId = documentEntityIds[0] ?? null
-  const executedVersionIds: string[] = []
-  let executedVersionId: string | null = null
-  let executedVersionNumber: number | null = null
-  for (let d = 0; d < documentEntityIds.length; d++) {
-    const executed = await writeExecutedVersion(
+  // ADD-NEXT-SIGNER-1 — this signature would otherwise finish the envelope.
+  // If the role that just signed opted into "let me add the next signer",
+  // hold completion open and ask instead of auto-completing (Joe's call: an
+  // open-ended signer count needs an explicit "no more signers", not a close
+  // the instant the last KNOWN signer finishes).
+  if (
+    shouldHoldForAddDecision(await signerAllowsAddNext(client, tenantId, p.request_entity_id), true)
+  ) {
+    await setAttr(
       client,
       tenantId,
       actionId,
       p.envelope_entity_id,
-      documentEntityIds[d]!,
+      'envelope_status',
+      'awaiting_signer_decision',
+      { sourceType: 'system', sourceRef },
     )
-    executedVersionIds.push(executed.versionId)
-    if (d === 0) {
-      executedVersionId = executed.versionId
-      executedVersionNumber = executed.versionNumber
-    }
-  }
-  await insertEvent(client, {
-    tenantId,
-    actionId,
-    eventKindName: 'esign.completed',
-    primaryEntityId: documentEntityId ?? p.envelope_entity_id,
-    secondaryEntityIds: [p.envelope_entity_id],
-    data: {
-      document_entity_id: documentEntityId,
-      executed_document_version_id: executedVersionId,
-      executed_version_number: executedVersionNumber,
-      // ES-MULTIDOC-1: every executed version, in document order (length 1 for a
-      // single-doc envelope). Additive alongside the primary fields above.
-      executed_document_version_ids: executedVersionIds,
-      document_count: documentEntityIds.length,
-    },
-    sourceType: 'system',
-    sourceRef,
-  })
-
-  // ADR 0045 — drive any matter whose lifecycle waits ON esign.completed. The matter
-  // is resolved via the signed document's draft_of link. Flag-guarded no-op when the
-  // engine is off (and a no-op for a document with no matter / no waiting edge). The
-  // advance commits in this same transaction under this action's id.
-  if (documentEntityId) {
-    const matterEntityId = await resolveDocumentMatter(client, tenantId, documentEntityId)
-    if (matterEntityId) {
-      await dispatchLifecycleEvent(client, ctx, matterEntityId, 'esign.completed', actionId)
+    return {
+      envelopeId: p.envelope_entity_id,
+      status: 'signed' as const,
+      completed: false,
+      deliveredRequestIds: [],
+      awaitingAddDecision: true,
     }
   }
 
-  // ESIGN-UNIFY-1 (ES-1, §9.2/§10, 0186) — receives_copy recipients get NO link
-  // at send; now that the envelope is complete, record one esign.copy_delivered
-  // event per copy recipient (same shape as esign.delivered) and hand their
-  // request ids back so the api layer can queue the executed-copy email
-  // (notifications are a side effect of the action layer, never written from
-  // inside a handler — see notifyCopyDelivered in api/esign.ts).
-  const copyDeliveredRequestIds = await loadCopyRecipientRequests(
+  const done = await completeEnvelope(
+    ctx,
     client,
     tenantId,
+    actionId,
     p.envelope_entity_id,
+    sourceRef,
   )
-  for (const requestId of copyDeliveredRequestIds) {
-    await insertEvent(client, {
-      tenantId,
-      actionId,
-      eventKindName: 'esign.copy_delivered',
-      primaryEntityId: p.envelope_entity_id,
-      secondaryEntityIds: [requestId],
-      sourceType: 'system',
-      sourceRef,
-    })
-  }
-
   return {
     envelopeId: p.envelope_entity_id,
     status: 'completed' as const,
     completed: true,
     deliveredRequestIds: [],
-    executedDocumentVersionId: executedVersionId,
-    executedVersionNumber,
-    copyDeliveredRequestIds,
+    executedDocumentVersionId: done.executedVersionId,
+    executedVersionNumber: done.executedVersionNumber,
+    copyDeliveredRequestIds: done.copyDeliveredRequestIds,
   }
 })
 
@@ -724,6 +804,179 @@ registerActionHandler('esign.void', async (ctx, client, payload, actionId) => {
     envelopeId: p.envelope_entity_id,
     status: 'voided' as const,
     voidedRequestIds: openRequestIds,
+  }
+})
+
+interface EsignAddSignerPayload {
+  envelope_entity_id: string
+  /** The request to insert right after (Joe's design: right after the
+   *  anchor, ahead of anything already queued later). A signer adding the
+   *  next signer passes their OWN just-signed request; an attorney add
+   *  omits it — anchors after whichever group is currently active, or after
+   *  everyone if nothing is unresolved. */
+  anchor_request_entity_id?: string | null
+  name: string
+  email: string
+  title?: string | null
+  channel?: 'portal' | 'link' | null
+}
+
+// esign.add_signer (ADD-NEXT-SIGNER-1) — insert a NEW needs_to_sign request
+// mid-envelope: a signer whose role opted in ("add the next signer"), or the
+// attorney's own "add signer" on an in-flight envelope. Never rewrites any
+// existing request's order (attribute history is append-only) — the new
+// request gets an order strictly between the anchor and whatever was already
+// queued past it (nextInsertionOrder, esign/routing.ts). Reuses
+// deliverNextGroup so the new request is promoted to 'delivered' immediately
+// when it is now the earliest unresolved group — the exact same rule any
+// other pending request is promoted by.
+registerActionHandler('esign.add_signer', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignAddSignerPayload
+  const tenantId = ctx.tenantId
+  const sourceRef = ctx.actorId
+
+  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
+  const current = await latestEnvelopeStatus(client, tenantId, p.envelope_entity_id)
+  if (current === 'completed' || current === 'declined' || current === 'voided') {
+    throw new Error(`Envelope is already ${current} — no more signers can be added.`)
+  }
+
+  const reqs = await loadRoutingRequests(client, tenantId, p.envelope_entity_id)
+  const signingOrders = reqs.filter((r) => r.role === 'needs_to_sign').map((r) => r.order)
+  let anchorOrder: number
+  if (p.anchor_request_entity_id) {
+    const anchor = reqs.find((r) => r.requestId === p.anchor_request_entity_id)
+    if (!anchor) throw new Error(`signature_request not found: ${p.anchor_request_entity_id}`)
+    anchorOrder = anchor.order
+  } else {
+    const unresolved = reqs.filter(
+      (r) => r.role === 'needs_to_sign' && r.status !== 'signed' && r.status !== 'declined',
+    )
+    anchorOrder =
+      unresolved.length > 0
+        ? Math.min(...unresolved.map((r) => r.order))
+        : Math.max(0, ...signingOrders)
+  }
+  const order = nextInsertionOrder(signingOrders, anchorOrder)
+
+  const requestKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    tenantId,
+    'signature_request',
+  )
+  const requestOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    tenantId,
+    'request_of',
+  )
+  const requestId = await insertEntity(
+    client,
+    tenantId,
+    actionId,
+    requestKindId,
+    p.name || p.email,
+    {
+      email: p.email,
+    },
+  )
+  await setAttr(client, tenantId, actionId, requestId, 'signer_email', p.email, { sourceRef })
+  if (p.name)
+    await setAttr(client, tenantId, actionId, requestId, 'signer_name', p.name, { sourceRef })
+  if (p.title)
+    await setAttr(client, tenantId, actionId, requestId, 'signer_title', p.title, { sourceRef })
+  await setAttr(client, tenantId, actionId, requestId, 'signer_order', order, { sourceRef })
+  await setAttr(client, tenantId, actionId, requestId, 'signer_channel', p.channel ?? 'link', {
+    sourceRef,
+  })
+  await setAttr(client, tenantId, actionId, requestId, 'signer_role', 'needs_to_sign', {
+    sourceRef,
+  })
+  await setAttr(client, tenantId, actionId, requestId, 'signer_status', 'pending', { sourceRef })
+  await insertRelationship(client, {
+    tenantId,
+    actionId,
+    sourceEntityId: requestId,
+    targetEntityId: p.envelope_entity_id,
+    relationshipKindId: requestOfId,
+  })
+
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.signer_added',
+    primaryEntityId: p.envelope_entity_id,
+    secondaryEntityIds: [requestId],
+    data: { name: p.name || null, email: p.email, order },
+    sourceType: 'human',
+    sourceRef,
+  })
+
+  // The hold (if any) is resolved by a REAL next signer existing now — flip
+  // back to 'sent' unconditionally (a no-op write if it was already 'sent').
+  if (current === 'awaiting_signer_decision') {
+    await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'sent', {
+      sourceType: 'system',
+      sourceRef,
+    })
+  }
+
+  // Promote the new request to 'delivered' if it is now the earliest
+  // unresolved group — same rule (and same helper) any other pending
+  // request is promoted by after a sign. Never reports completed=true: we
+  // just added an unresolved needs_to_sign request, so it can't be.
+  const { delivered } = await deliverNextGroup(
+    client,
+    tenantId,
+    actionId,
+    p.envelope_entity_id,
+    sourceRef,
+  )
+
+  return { envelopeId: p.envelope_entity_id, requestId, deliveredRequestIds: delivered }
+})
+
+interface EsignFinishSigningPayload {
+  envelope_entity_id: string
+  /** The signer confirming "no more signers" — used only for the audit
+   *  sourceRef. Omitted for the attorney's fallback finish. */
+  request_entity_id?: string | null
+}
+
+// esign.finish_signing (ADD-NEXT-SIGNER-1) — the deferred completion a
+// signer's "no more signers" confirms, or the attorney's fallback finish for
+// an envelope stuck awaiting that decision. Only valid while the envelope is
+// actually in the hold: refuses a normal in-flight envelope (nothing to
+// finish early) and an already-completed one (no double-completion).
+registerActionHandler('esign.finish_signing', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignFinishSigningPayload
+  const tenantId = ctx.tenantId
+  const sourceRef = p.request_entity_id ? `signature_request:${p.request_entity_id}` : ctx.actorId
+
+  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
+  const current = await latestEnvelopeStatus(client, tenantId, p.envelope_entity_id)
+  if (current !== 'awaiting_signer_decision') {
+    throw new Error(
+      `Envelope is not awaiting a signer decision (status: ${current}) — nothing to finish.`,
+    )
+  }
+
+  const done = await completeEnvelope(
+    ctx,
+    client,
+    tenantId,
+    actionId,
+    p.envelope_entity_id,
+    sourceRef,
+  )
+  return {
+    envelopeId: p.envelope_entity_id,
+    status: 'completed' as const,
+    completed: true,
+    executedDocumentVersionId: done.executedVersionId,
+    executedVersionNumber: done.executedVersionNumber,
+    copyDeliveredRequestIds: done.copyDeliveredRequestIds,
   }
 })
 
@@ -919,6 +1172,25 @@ async function latestEnvelopeStatus(
     [tenantId, envelopeId],
   )
   return res.rows[0]?.status ?? 'pending_dispatch'
+}
+
+// ADD-NEXT-SIGNER-1 — whether THIS request's role opted into "let me add the
+// next signer" (written only when true at send/insert time — see
+// signer_allow_add_next in esign.send/esign.add_signer below); absent reads
+// as false, the safe default for every request written before this feature.
+async function signerAllowsAddNext(
+  client: DbClient,
+  tenantId: string,
+  requestId: string,
+): Promise<boolean> {
+  const res = await client.query<{ v: string }>(
+    `SELECT a.value #>> '{}' AS v FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+      WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'signer_allow_add_next'
+      ORDER BY a.valid_from DESC LIMIT 1`,
+    [tenantId, requestId],
+  )
+  return res.rows[0]?.v === 'true'
 }
 
 // ES-MULTIDOC-1 — every document linked to the envelope, in send order (the

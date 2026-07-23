@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest'
 import {
   completionRecipients,
   copyRecipients,
+  nextInsertionOrder,
   normalizeRole,
   planInitialDispatch,
   planNextDelivery,
+  shouldHoldForAddDecision,
   type RoutingRequestState,
 } from '../../verticals/legal/src/esign/routing.js'
 
@@ -214,5 +216,44 @@ describe('completionRecipients', () => {
         req('a', 'needs_to_sign', 1, 'signed'),
       ]),
     ).toEqual(['b', 'a'])
+  })
+})
+
+describe('nextInsertionOrder — ADD-NEXT-SIGNER-1', () => {
+  it('appends at the end when nothing is queued past the anchor', () => {
+    expect(nextInsertionOrder([1, 2], 2)).toBe(3)
+    expect(nextInsertionOrder([], 1)).toBe(2)
+  })
+
+  it('slots between the anchor and the next-queued order', () => {
+    // anchor=1, something already queued at order 3 (e.g. attorney countersign)
+    // — the new signer goes between them, not after the countersign.
+    expect(nextInsertionOrder([1, 3], 1)).toBe(2)
+  })
+
+  it('finds the NEAREST later order, not just any later order', () => {
+    expect(nextInsertionOrder([1, 2, 5], 1)).toBe(1.5)
+  })
+
+  it('repeated insertion at the same anchor keeps halving toward it, never colliding', () => {
+    const first = nextInsertionOrder([1, 2], 1) // 1.5
+    const second = nextInsertionOrder([1, 1.5, 2], 1) // between 1 and 1.5
+    expect(first).toBe(1.5)
+    expect(second).toBeGreaterThan(1)
+    expect(second).toBeLessThan(first)
+  })
+})
+
+describe('shouldHoldForAddDecision — ADD-NEXT-SIGNER-1', () => {
+  it('holds only when this signature would complete AND the role opted in', () => {
+    expect(shouldHoldForAddDecision(true, true)).toBe(true)
+  })
+
+  it('never holds a completion the signer did not opt into', () => {
+    expect(shouldHoldForAddDecision(false, true)).toBe(false)
+  })
+
+  it('never holds when the envelope would not complete anyway (others still pending)', () => {
+    expect(shouldHoldForAddDecision(true, false)).toBe(false)
   })
 })

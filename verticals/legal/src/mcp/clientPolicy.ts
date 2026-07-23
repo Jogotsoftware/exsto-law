@@ -78,6 +78,8 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.esign.portal.load', // load one of the client's signing requests (+ their fields)
   'legal.esign.portal.sign', // record the client's signature on their own request
   'legal.esign.portal.decline', // record the client declining their own request
+  'legal.esign.portal.add_signer', // ADD-NEXT-SIGNER-1: insert the next signer after the client's own request
+  'legal.esign.portal.finish', // ADD-NEXT-SIGNER-1: confirm "no more signers" on the client's own request
 ])
 
 export function isClientPortalAuthedTool(toolName: string): boolean {

@@ -358,9 +358,16 @@ export function TemplateEsignPanel({
                   <select
                     value={role.recipientRole}
                     aria-label={`Role ${i + 1} recipient role`}
-                    onChange={(e) =>
-                      patchRole(i, { recipientRole: e.target.value as EsignRecipientRole })
-                    }
+                    onChange={(e) => {
+                      const recipientRole = e.target.value as EsignRecipientRole
+                      // "Add the next signer" only makes sense for a role that
+                      // actually signs interactively — drop it the moment this
+                      // row stops being needs_to_sign (parse would anyway).
+                      patchRole(i, {
+                        recipientRole,
+                        ...(recipientRole !== 'needs_to_sign' ? { allowAddNextSigner: false } : {}),
+                      })
+                    }}
                   >
                     {RECIPIENT_ROLE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -406,11 +413,40 @@ export function TemplateEsignPanel({
                   <input
                     type="checkbox"
                     checked={role.presigned === true}
-                    onChange={(e) => patchRole(i, { presigned: e.target.checked })}
+                    onChange={(e) =>
+                      // A pre-signed role never visits an interactive signing
+                      // screen, so there's no moment to offer "add another
+                      // signer" — turning pre-sign on clears it (parse would
+                      // drop it anyway).
+                      patchRole(i, {
+                        presigned: e.target.checked,
+                        ...(e.target.checked ? { allowAddNextSigner: false } : {}),
+                      })
+                    }
                   />
                   <span>
                     Pre-sign automatically — apply my saved signature at send, so only the client
                     needs to sign.
+                  </span>
+                </label>
+              )}
+
+              {/* ADD-NEXT-SIGNER-1 — for a signer count that isn't known up
+                  front (e.g. an unknown number of LLC members): when this
+                  signer's signature would otherwise be the one that completes
+                  the envelope, ask them to add another signer instead of
+                  auto-completing. Only meaningful for a role that actually
+                  signs interactively. */}
+              {role.recipientRole === 'needs_to_sign' && !role.presigned && (
+                <label className="li-tplsign-presign">
+                  <input
+                    type="checkbox"
+                    checked={role.allowAddNextSigner === true}
+                    onChange={(e) => patchRole(i, { allowAddNextSigner: e.target.checked })}
+                  />
+                  <span>
+                    Let this signer add another signer — offered instead of finishing, when their
+                    signature would otherwise be the last one.
                   </span>
                 </label>
               )}

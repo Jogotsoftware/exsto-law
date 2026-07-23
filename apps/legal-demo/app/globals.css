@@ -19806,6 +19806,44 @@ a.li-uac-done-primary:hover {
   font-weight: 600;
   margin-bottom: 16px;
 }
+/* ADD-NEXT-SIGNER-1 — "awaiting a signer's decision" needs attention, unlike
+   the ok-green confirmation above (resend/void/add-signer notices). */
+.li-esign-notice--warn {
+  background: var(--li-warn-bg);
+  color: var(--li-warn);
+  border-color: var(--li-warn);
+}
+/* ADD-NEXT-SIGNER-1 — the attorney's own "add signer" mini-form. */
+.li-esign-addsigner {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.li-esign-addsigner-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--li-muted-2);
+}
+.li-esign-addsigner-field input {
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 8px 11px;
+  font-size: 14px;
+  color: var(--li-navy);
+  min-width: 220px;
+}
+.li-esign-addsigner-actions {
+  display: flex;
+  gap: 8px;
+}
 
 .li-esign-detail-grid {
   display: flex;
@@ -23566,6 +23604,37 @@ details.li-brief-research summary:hover {
   font-size: 13px;
   color: var(--li-muted-2);
   margin: 4px 0 0;
+}
+/* ADD-NEXT-SIGNER-1 — "add another signer / no more signers" mini-form,
+   shown on the awaiting_decision done screen. */
+.li-cp-addsigner {
+  margin-top: 20px;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.li-cp-addsigner-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--li-muted-2);
+}
+.li-cp-addsigner-field input {
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--li-navy);
+}
+.li-cp-addsigner-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .li-cp-adopt {
   margin-top: 24px;

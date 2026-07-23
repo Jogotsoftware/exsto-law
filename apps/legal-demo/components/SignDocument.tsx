@@ -120,15 +120,23 @@ export function SignDocument({
     signatureData: string | null
     fieldValues: Record<string, string>
     consent: string
-  }) => Promise<{ completed: boolean }>
+  }) => Promise<{ completed: boolean; awaitingAddDecision?: boolean }>
   onDecline: () => Promise<void>
   /** TASK-QUEUE-3 — mirrors DocumentReviewer's onCompleted: fired right after a
    *  successful sign, before the local "Signed" screen renders. Returning true
    *  (e.g. a queue session advancing to the next task) tells this component the
    *  caller is handling the aftermath itself, so it skips its own done screen. */
-  onSigned?: (result: { completed: boolean }) => boolean | void
+  onSigned?: (result: { completed: boolean; awaitingAddDecision?: boolean }) => boolean | void
   /** Same contract as onSigned, for a successful decline. */
   onDeclined?: () => boolean | void
+  /** ADD-NEXT-SIGNER-1 — offered instead of the normal "you're done" message
+   *  when onSign returns awaitingAddDecision: true. Absent ⇒ the signer just
+   *  sees the ordinary "we'll let you know" text (a role that didn't opt in
+   *  never gets awaitingAddDecision:true in the first place, but the prop is
+   *  still optional so a caller that hasn't wired it degrades safely). */
+  onAddSigner?: (a: { name: string; email: string }) => Promise<void>
+  /** ADD-NEXT-SIGNER-1 — the signer confirms "no more signers". */
+  onFinishSigning?: () => Promise<{ completed: boolean }>
 }) {
   // ES-MULTIDOC-1 — the ordered documents the signer sees. The flat fields
   // describe the primary (document 0), so a one-document envelope synthesizes a
@@ -178,8 +186,16 @@ export function SignDocument({
   )
   const [busy, setBusy] = useState<null | 'sign' | 'decline'>(null)
   const { confirm, confirmElement } = useConfirm()
-  const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
+  const [done, setDone] = useState<
+    null | 'signed' | 'completed' | 'declined' | 'awaiting_decision' | 'added'
+  >(null)
   const [error, setError] = useState<string | null>(null)
+  // ADD-NEXT-SIGNER-1 — the "add another signer" mini-form, shown only in the
+  // 'awaiting_decision' done state.
+  const [addName, setAddName] = useState('')
+  const [addEmail, setAddEmail] = useState('')
+  const [addBusy, setAddBusy] = useState<null | 'add' | 'finish'>(null)
+  const [addError, setAddError] = useState<string | null>(null)
 
   // ESIGN-GUIDED-1 — the guided walk's own state. `stage` gates the up-front
   // adopt screen vs the document; `appliedIds` are sign/initial placements the
@@ -327,13 +343,104 @@ export function SignDocument({
     )
   }
 
+  // ADD-NEXT-SIGNER-1 — this signature would otherwise have completed the
+  // envelope, but the role opted into "add the next signer": ask instead of
+  // showing the normal done screen.
+  async function submitAddSigner() {
+    if (!onAddSigner) return
+    setAddError(null)
+    if (!addEmail.trim()) {
+      setAddError('An email address is required.')
+      return
+    }
+    setAddBusy('add')
+    try {
+      await onAddSigner({ name: addName.trim(), email: addEmail.trim() })
+      setDone('added')
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAddBusy(null)
+    }
+  }
+  async function submitFinishSigning() {
+    if (!onFinishSigning) return
+    setAddError(null)
+    setAddBusy('finish')
+    try {
+      const r = await onFinishSigning()
+      setDone(r.completed ? 'completed' : 'signed')
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAddBusy(null)
+    }
+  }
+
+  if (done === 'awaiting_decision') {
+    return (
+      <div className="public-draft">
+        {head()}
+        <div role="status" aria-live="polite" className="alert alert-success">
+          Signed. Is there another signer who needs to sign this document?
+        </div>
+        <div className="li-cp-addsigner">
+          <label className="li-cp-addsigner-field">
+            <span>Their name</span>
+            <input
+              type="text"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              disabled={addBusy != null}
+            />
+          </label>
+          <label className="li-cp-addsigner-field">
+            <span>Their email</span>
+            <input
+              type="email"
+              value={addEmail}
+              onChange={(e) => setAddEmail(e.target.value)}
+              disabled={addBusy != null}
+            />
+          </label>
+          {addError && (
+            <div className="alert alert-error" role="alert">
+              {addError}
+            </div>
+          )}
+          <div className="li-cp-addsigner-actions">
+            <button
+              type="button"
+              className="li-cp-btn"
+              onClick={submitAddSigner}
+              disabled={addBusy != null || !onAddSigner}
+            >
+              {addBusy === 'add' && <span className="spinner" />}
+              {addBusy === 'add' ? 'Adding…' : 'Add signer'}
+            </button>
+            <button
+              type="button"
+              className="li-cp-btn li-cp-btn--ghost"
+              onClick={submitFinishSigning}
+              disabled={addBusy != null || !onFinishSigning}
+            >
+              {addBusy === 'finish' ? 'Finishing…' : 'No more signers — finish'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (done) {
     const msg =
       done === 'declined'
         ? 'You declined to sign. The firm has been notified.'
         : done === 'completed'
           ? 'Signed. All parties have now signed — the executed copy has been filed to the matter.'
-          : 'Signed. Thank you — we’ll let you know when the remaining parties have signed.'
+          : done === 'added'
+            ? 'Added. They’ll be asked to sign next — we’ll let you know when everyone has signed.'
+            : 'Signed. Thank you — we’ll let you know when the remaining parties have signed.'
     return (
       <div className="public-draft">
         {head()}
@@ -412,7 +519,9 @@ export function SignDocument({
         consent: CONSENT_TEXT,
       })
       const handled = onSigned?.(r)
-      if (!handled) setDone(r.completed ? 'completed' : 'signed')
+      if (!handled) {
+        setDone(r.awaitingAddDecision ? 'awaiting_decision' : r.completed ? 'completed' : 'signed')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

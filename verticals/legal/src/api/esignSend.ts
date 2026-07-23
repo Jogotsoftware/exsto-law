@@ -50,6 +50,10 @@ export interface EnvelopeRecipient {
    *  (never trusts a client-supplied one) and blocks the send if none is on
    *  file. Only honored on a needs_to_sign recipient. */
   presigned?: boolean | null
+  /** ADD-NEXT-SIGNER-1 — this recipient may add the next signer instead of
+   *  auto-completing the envelope, if their signature would otherwise be last.
+   *  Only honored on a needs_to_sign, non-presigned recipient. */
+  allowAddNext?: boolean | null
 }
 
 /** One document in an envelope's ordered set (ES-MULTIDOC-1). */
@@ -173,6 +177,7 @@ export async function buildAndSubmitEnvelope(
       subject: input.subject,
       signers: recipients.map((r, i) => {
         const presigned = Boolean(r.presigned && isSigning(r) && presignedSig)
+        const allowAddNext = Boolean(r.allowAddNext && isSigning(r) && !presigned)
         return {
           email: r.email.trim(),
           name: r.name ?? null,
@@ -188,6 +193,7 @@ export async function buildAndSubmitEnvelope(
                 presigned_signature_name: presignedSig!.name || r.name || null,
               }
             : {}),
+          ...(allowAddNext ? { allow_add_next: true } : {}),
         }
       }),
       fields: input.fields ?? [],

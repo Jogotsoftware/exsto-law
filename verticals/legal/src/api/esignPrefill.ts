@@ -50,6 +50,9 @@ export interface ResolvedEsignRecipient {
   // send (attorney_of_record role marked pre-signed in the template). The
   // composer shows it as "signs automatically" and never asks for an email/turn.
   presigned: boolean
+  /** ADD-NEXT-SIGNER-1 — if this signer's signature would otherwise complete
+   *  the envelope, offer them "add another signer" instead of auto-completing. */
+  allowAddNext: boolean
 }
 
 export interface ResolvedIdentity {
@@ -227,6 +230,12 @@ export async function assembleRecipientRows(
       // Honor pre-sign only for the attorney bind (parse enforces this too;
       // re-assert so a hand-built config can't smuggle it onto a client row).
       presigned: role.presigned === true && role.bind === 'attorney_of_record',
+      // ADD-NEXT-SIGNER-1 — re-assert parse's needs_to_sign + non-presigned
+      // restriction here too, same defensive doctrine as presigned above.
+      allowAddNext:
+        role.allowAddNextSigner === true &&
+        role.recipientRole === 'needs_to_sign' &&
+        !(role.presigned === true && role.bind === 'attorney_of_record'),
     })
   }
   // Stable sort: ascending order, ties keep config order.

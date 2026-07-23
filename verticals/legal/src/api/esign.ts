@@ -83,6 +83,9 @@ export interface PrepareSigner {
   /** PRESIGN-1: the attorney signer whose standing signature applies at send.
    *  The builder resolves the signature server-side and blocks if none is saved. */
   presigned?: boolean
+  /** ADD-NEXT-SIGNER-1: this signer may add the next signer instead of
+   *  auto-completing the envelope, if their signature would otherwise be last. */
+  allowAddNext?: boolean
 }
 
 export interface SendForSignatureInput {
@@ -254,6 +257,7 @@ export async function sendForSignature(
       channel: s.channel,
       role: s.role ?? null,
       presigned: s.presigned ?? null,
+      allowAddNext: s.allowAddNext ?? null,
     })),
     fields,
     placements: input.placements,
@@ -1558,6 +1562,11 @@ export interface RecordSignatureResult {
   completed: boolean
   envelopeId: string
   executedDocumentVersionId?: string | null
+  /** ADD-NEXT-SIGNER-1 — this signature would have completed the envelope,
+   *  but the role opted into "add the next signer": completion is held open
+   *  and the signer should be offered "add another signer" / "no more —
+   *  finish" instead of the normal "you're done" screen. */
+  awaitingAddDecision?: boolean
 }
 
 // ESIGN-UNIFY-1 (ES-1, §9.2) — a view-scoped token was minted for a
@@ -1594,6 +1603,33 @@ export async function declineSignature(input: {
   const ctx = signingCtx(tok.tenantId)
   await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId: tok.envelopeId }
+}
+
+// ADD-NEXT-SIGNER-1 — the signer who just signed (this token's own request)
+// adds the next signer. The token stays valid to prove identity even after
+// its request is 'signed' (verifySigningToken only checks the token itself).
+export async function addNextSigner(input: {
+  token: string
+  name: string
+  email: string
+  title?: string | null
+}): Promise<AddSignerResult> {
+  const tok = verifySigningToken(input.token)
+  assertSignScope(tok)
+  const ctx = signingCtx(tok.tenantId)
+  return addSigner(ctx, tok.envelopeId, tok.requestId, input)
+}
+
+// ADD-NEXT-SIGNER-1 — the signer confirms "no more signers": runs the
+// completion that held open when their signature would otherwise have
+// finished the envelope.
+export async function confirmNoMoreSigners(input: {
+  token: string
+}): Promise<RecordSignatureResult> {
+  const tok = verifySigningToken(input.token)
+  assertSignScope(tok)
+  const ctx = signingCtx(tok.tenantId)
+  return finishSigning(ctx, tok.envelopeId, tok.requestId)
 }
 
 // ── Portal (authenticated) surface ────────────────────────────────────────────
@@ -1863,6 +1899,26 @@ export async function declineForClient(
   return { ok: true, envelopeId }
 }
 
+// ADD-NEXT-SIGNER-1 — same ownership check as recordSignatureForClient: the
+// portal signer may only anchor off a request that is actually theirs.
+export async function addNextSignerForClient(
+  p: ClientPrincipal,
+  input: { requestId: string; name: string; email: string; title?: string | null },
+): Promise<AddSignerResult> {
+  const envelopeId = await assertClientOwnsRequest(p, input.requestId)
+  const ctx = signingCtx(p.tenantId)
+  return addSigner(ctx, envelopeId, input.requestId, input)
+}
+
+export async function confirmNoMoreSignersForClient(
+  p: ClientPrincipal,
+  input: { requestId: string },
+): Promise<RecordSignatureResult> {
+  const envelopeId = await assertClientOwnsRequest(p, input.requestId)
+  const ctx = signingCtx(p.tenantId)
+  return finishSigning(ctx, envelopeId, input.requestId)
+}
+
 // ── Attorney-authed signing surface (own countersignature) ──────────────────
 //
 // ESIGN-ATTORNEY-REVIEW-1 — mirrors the client wrappers above
@@ -1935,6 +1991,78 @@ export async function declineForAttorney(
   return { ok: true, envelopeId }
 }
 
+// ADD-NEXT-SIGNER-1 — the attorney adds the next signer after their OWN
+// countersignature, same ownership check as recordSignatureForAttorney.
+export async function addNextSignerForAttorneyRequest(
+  ctx: ActionContext,
+  input: { requestId: string; name: string; email: string; title?: string | null },
+): Promise<AddSignerResult> {
+  const envelopeId = await assertAttorneyOwnsRequest(ctx, input.requestId)
+  return addSigner(ctx, envelopeId, input.requestId, input)
+}
+
+export async function confirmNoMoreSignersForAttorneyRequest(
+  ctx: ActionContext,
+  input: { requestId: string },
+): Promise<RecordSignatureResult> {
+  const envelopeId = await assertAttorneyOwnsRequest(ctx, input.requestId)
+  return finishSigning(ctx, envelopeId, input.requestId)
+}
+
+// ADD-NEXT-SIGNER-1 — the envelope's matter, if any (same traversal
+// voidEnvelope uses), so the attorney's own add-signer/finish-now gate the
+// same way voiding/sending do: only a matter owner / granted attorney / firm
+// admin may act. A standalone envelope (no matter) has nothing to gate on.
+async function resolveEnvelopeMatterIdForAttorney(
+  ctx: ActionContext,
+  envelopeId: string,
+): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ matter_id: string | null }>(
+      `SELECT df.target_entity_id AS matter_id
+         FROM relationship eo
+         JOIN relationship_kind_definition eok
+           ON eok.id = eo.relationship_kind_id AND eok.kind_name = 'envelope_of'
+         LEFT JOIN relationship df ON df.source_entity_id = eo.target_entity_id
+           AND df.tenant_id = eo.tenant_id
+         LEFT JOIN relationship_kind_definition dfk
+           ON dfk.id = df.relationship_kind_id AND dfk.kind_name = 'draft_of'
+        WHERE eo.tenant_id = $1 AND eo.source_entity_id = $2
+          AND (eo.valid_to IS NULL OR eo.valid_to > now())
+          AND COALESCE((eo.properties->>'order')::int, 0) = 0
+          AND (df.valid_to IS NULL OR df.valid_to > now())
+        LIMIT 1`,
+      [ctx.tenantId, envelopeId],
+    )
+    return res.rows[0]?.matter_id ?? null
+  })
+}
+
+// The attorney adds a signer to an in-flight envelope — no anchor request
+// (server picks the current active group, or appends at the end if nothing
+// is unresolved; see esign.add_signer's handler).
+export async function addSignerForAttorney(
+  ctx: ActionContext,
+  envelopeId: string,
+  input: { name: string; email: string; title?: string | null },
+): Promise<AddSignerResult> {
+  const matterId = await resolveEnvelopeMatterIdForAttorney(ctx, envelopeId)
+  if (matterId) await assertCanSendOnMatter(ctx, matterId)
+  return addSigner(ctx, envelopeId, null, input)
+}
+
+// The attorney's fallback finish — for an envelope stuck awaiting a signer's
+// "add another / no more" decision (they never came back). The handler
+// itself refuses this unless the envelope is actually in that hold.
+export async function finishSigningForAttorney(
+  ctx: ActionContext,
+  envelopeId: string,
+): Promise<RecordSignatureResult> {
+  const matterId = await resolveEnvelopeMatterIdForAttorney(ctx, envelopeId)
+  if (matterId) await assertCanSendOnMatter(ctx, matterId)
+  return finishSigning(ctx, envelopeId, null)
+}
+
 // ── Shared sign/decline/open (turn-checked) ──────────────────────────────────
 
 async function signRequest(
@@ -1969,6 +2097,7 @@ async function signRequest(
     completed?: boolean
     executedDocumentVersionId?: string | null
     deliveredRequestIds?: string[]
+    awaitingAddDecision?: boolean
   }
   // Sequential routing: notify the next group that just became active.
   await notifyDelivered(ctx, envelopeId, eff.deliveredRequestIds ?? [])
@@ -1985,6 +2114,7 @@ async function signRequest(
     completed: Boolean(eff.completed),
     envelopeId,
     executedDocumentVersionId: eff.executedDocumentVersionId ?? null,
+    ...(eff.awaitingAddDecision ? { awaitingAddDecision: true } : {}),
   }
 }
 
@@ -2023,6 +2153,73 @@ async function recordOpen(
       signer_ip: signerIp ?? null,
     },
   })
+}
+
+// ── ADD-NEXT-SIGNER-1 — insert a signer mid-envelope, confirm no more ───────
+
+export interface AddSignerResult {
+  envelopeId: string
+  requestId: string
+  deliveredRequestIds: string[]
+}
+
+// Shared by all three doors (token/portal/attorney) — `anchorRequestId` null
+// means "let the handler pick" (the attorney's own add-signer, anchored to
+// whatever group is currently active). Auto-detects portal vs link the same
+// way a normal send does: a known active client of THIS firm gets the
+// portal channel, everyone else a secure emailed link.
+async function addSigner(
+  ctx: ActionContext,
+  envelopeId: string,
+  anchorRequestId: string | null,
+  input: { name: string; email: string; title?: string | null },
+): Promise<AddSignerResult> {
+  const email = input.email?.trim()
+  if (!email) throw new Error('An email address is required.')
+  const contact = await findClientContactByEmailInTenant(ctx.tenantId, email).catch(() => null)
+  const channel: 'portal' | 'link' = contact ? 'portal' : 'link'
+  const result = await submitAction(ctx, {
+    actionKindName: 'esign.add_signer',
+    intentKind: 'enforcement',
+    payload: {
+      envelope_entity_id: envelopeId,
+      anchor_request_entity_id: anchorRequestId,
+      name: input.name?.trim() || null,
+      email,
+      title: input.title?.trim() || null,
+      channel,
+    },
+  })
+  const eff = (result.effects[0] ?? {}) as { requestId?: string; deliveredRequestIds?: string[] }
+  const deliveredRequestIds = eff.deliveredRequestIds ?? []
+  await notifyDelivered(ctx, envelopeId, deliveredRequestIds)
+  return { envelopeId, requestId: eff.requestId ?? '', deliveredRequestIds }
+}
+
+// Shared by all three doors — the deferred completion a signer's "no more
+// signers" confirms, or the attorney's fallback finish. Returns the SAME
+// shape signRequest's completion does, so callers can reuse
+// finalizeEnvelopeIfCompleted (lib/esignStamping.ts) unchanged.
+async function finishSigning(
+  ctx: ActionContext,
+  envelopeId: string,
+  requestId: string | null,
+): Promise<RecordSignatureResult> {
+  const result = await submitAction(ctx, {
+    actionKindName: 'esign.finish_signing',
+    intentKind: 'enforcement',
+    payload: { envelope_entity_id: envelopeId, request_entity_id: requestId },
+  })
+  const eff = (result.effects[0] ?? {}) as {
+    completed?: boolean
+    executedDocumentVersionId?: string | null
+  }
+  return {
+    ok: true,
+    completed: Boolean(eff.completed),
+    envelopeId,
+    executedDocumentVersionId: eff.executedDocumentVersionId ?? null,
+  }
 }
 
 async function assertSignerTurn(ctx: ActionContext, requestId: string): Promise<void> {

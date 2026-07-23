@@ -52,17 +52,36 @@ export default function PortalSignPage({ params }: { params: Promise<{ requestId
           `/api/client/portal/file?requestId=${encodeURIComponent(requestId)}&doc=${i}`
         }
         onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
-          const r = await callClientPortalMcp<{ completed: boolean }>({
+          const r = await callClientPortalMcp<{
+            completed: boolean
+            awaitingAddDecision?: boolean
+          }>({
             toolName: 'legal.esign.portal.sign',
             input: { requestId, signatureName, signatureData, fieldValues, consent },
           })
-          return { completed: Boolean(r.completed) }
+          return {
+            completed: Boolean(r.completed),
+            awaitingAddDecision: Boolean(r.awaitingAddDecision),
+          }
         }}
         onDecline={async () => {
           await callClientPortalMcp({
             toolName: 'legal.esign.portal.decline',
             input: { requestId },
           })
+        }}
+        onAddSigner={async ({ name, email }) => {
+          await callClientPortalMcp({
+            toolName: 'legal.esign.portal.add_signer',
+            input: { requestId, name, email },
+          })
+        }}
+        onFinishSigning={async () => {
+          const r = await callClientPortalMcp<{ completed: boolean }>({
+            toolName: 'legal.esign.portal.finish',
+            input: { requestId },
+          })
+          return { completed: Boolean(r.completed) }
         }}
       />
     </div>

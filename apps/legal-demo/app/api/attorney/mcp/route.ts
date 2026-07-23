@@ -43,7 +43,14 @@ export async function POST(request: Request) {
     // finalizeEnvelopeIfCompleted — the one completion step, not duplicated).
     // Best-effort: the signature is already recorded, so a stamping/notify
     // failure must never turn a successful signing into an error.
-    if (body.toolName === 'legal.esign.sign_submit') {
+    // ADD-NEXT-SIGNER-1 — sign_finish (the attorney's own "no more signers")
+    // and the envelope-level fallback finish can ALSO complete an envelope —
+    // same step.
+    if (
+      body.toolName === 'legal.esign.sign_submit' ||
+      body.toolName === 'legal.esign.sign_finish' ||
+      body.toolName === 'legal.esign.finish'
+    ) {
       await finalizeEnvelopeIfCompleted(ctxOrError, result as RecordSignatureResult)
     }
     return NextResponse.json({ result })

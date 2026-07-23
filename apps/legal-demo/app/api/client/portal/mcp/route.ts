@@ -118,7 +118,12 @@ export async function POST(request: Request) {
     // envelope. Best-effort: the signature is already recorded, so a
     // stamping/notify failure must never turn a successful signing into an
     // error.
-    if (body.toolName === 'legal.esign.portal.sign') {
+    // ADD-NEXT-SIGNER-1 — .finish can ALSO complete an envelope (the deferred
+    // completion a signer's "no more signers" confirms) — same stamping step.
+    if (
+      body.toolName === 'legal.esign.portal.sign' ||
+      body.toolName === 'legal.esign.portal.finish'
+    ) {
       await finalizeEnvelopeIfCompleted(ctx, result as RecordSignatureResult)
     }
 

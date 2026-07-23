@@ -32,6 +32,9 @@ interface StepRecipient {
   contactEntityId: string | null
   // PRESIGN-1 — attorney role marked pre-signed; signs automatically at send.
   presigned?: boolean
+  // ADD-NEXT-SIGNER-1 — this signer may add the next signer instead of
+  // auto-completing the envelope, if their signature would otherwise be last.
+  allowAddNext?: boolean
 }
 
 interface StepContext {
@@ -116,6 +119,7 @@ export function EsignWorkflowStep({
       key: r.signerKey,
       label: r.label,
       ...(r.presigned ? { presigned: true } : {}),
+      ...(r.allowAddNext ? { allowAddNext: true } : {}),
     }))
     return (
       <Modal title={stage.label} onClose={() => setComposing(false)} size="wide">

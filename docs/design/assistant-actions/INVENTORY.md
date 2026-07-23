@@ -406,6 +406,24 @@ entries into the gap map in §3 and marks closed ones fixed.
     signer's identity comes from intake" as a package, so an AI-authored service with extra signers
     can't reproduce this in one step either.
 
+- **2026-07-23 (ADD-NEXT-SIGNER-1, Phase 3 of the signer program — presigned #500, service-scoped
+  signers #501):** two new action-layer ops, both deliberately human-in-the-loop, neither wired to
+  chat:
+  - `esign.add_signer` (`legal.esign.add_signer` attorney tool, `legal.esign.portal.add_signer` /
+    `legal.esign.sign_add_signer` signer-self-service tools, `handlers/esign.ts`) — insert a new
+    signature_request mid-envelope. No `ClientTool` wrapper: adding a legal signer to a live envelope
+    is a decision an attorney or the signer themselves makes explicitly on the signing/detail
+    surfaces, not one the AI should be able to trigger from a chat turn — not logged as a gap to
+    close, a deliberate boundary.
+  - `esign.finish_signing` (`legal.esign.finish` / `legal.esign.sign_finish` / portal `.finish`) —
+    same reasoning: completing an envelope that's holding open for a human decision should stay a
+    human action.
+  - Template config: a new `allowAddNextSigner` flag per `TemplateEsignRole`
+    (`queries/templates.ts`) — exposed in the standalone template MCP schema
+    (`standaloneTemplateTools.ts`) for AI-authored template edits, but `propose_service`'s schema
+    still doesn't cover per-document-kind e-sign config at all (same gap #501 already flagged for
+    `presigned`/`fields` — this just adds one more field to that same unreached surface).
+
 ## Critical files
 
 `verticals/legal/src/api/assistantChat.ts` (attorney ClientTool assembly, `buildAttorneyClientTools`)
