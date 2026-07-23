@@ -1,6 +1,8 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import type { ActionContext } from '@exsto/substrate'
 import {
+  addNextSignerForClient,
+  confirmNoMoreSignersForClient,
   declineForClient,
   listClientDocuments,
   listClientSignatures,
@@ -8,6 +10,7 @@ import {
   loadSignableForClient,
   recordSignatureForClient,
   resolveClientMatterIds,
+  type AddSignerResult,
   type ClientDocument,
   type ClientPrincipal,
   type PendingSignature,
@@ -103,8 +106,44 @@ const declineTool: Tool<
     }),
 }
 
+// ADD-NEXT-SIGNER-1 — offered to the signer instead of the normal "you're
+// done" screen when their signature would otherwise have completed the
+// envelope and their role opted into "add the next signer".
+interface AddSignerInput extends WithClient {
+  requestId: string
+  name: string
+  email: string
+  title?: string | null
+}
+const addSignerTool: Tool<AddSignerInput, AddSignerResult> = {
+  name: 'legal.esign.portal.add_signer',
+  description:
+    'Insert the next signer after the signed-in client, instead of finishing the envelope — offered when their signature would otherwise have completed it and their role opted into "add the next signer".',
+  mode: 'write',
+  handler: async (ctx, input) =>
+    addNextSignerForClient(await principal(ctx, input.clientContactId), {
+      requestId: input.requestId,
+      name: input.name,
+      email: input.email,
+      title: input.title,
+    }),
+}
+
+const finishTool: Tool<WithClient & { requestId: string }, RecordSignatureResult> = {
+  name: 'legal.esign.portal.finish',
+  description:
+    'The signed-in client confirms "no more signers" — completes the envelope that held open awaiting their decision.',
+  mode: 'write',
+  handler: async (ctx, input) =>
+    confirmNoMoreSignersForClient(await principal(ctx, input.clientContactId), {
+      requestId: input.requestId,
+    }),
+}
+
 registerTool(listTool)
 registerTool(documentsTool)
 registerTool(loadTool)
 registerTool(signTool)
 registerTool(declineTool)
+registerTool(addSignerTool)
+registerTool(finishTool)

@@ -31,7 +31,7 @@ import type { ActionContext } from '@exsto/substrate'
 const ESIGN_CONFIG_SCHEMA = {
   type: 'object',
   description:
-    "Template-embedded e-sign config (supersedes `signature`): { signable: boolean, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual'|'contact_role:<name>', order: number, presigned?: boolean, fields?: { name?, email?, title? } }] }. `key` must match the marker signer key ({{sign:<key>}}) the role owns in the body. `presigned: true` (attorney_of_record only) applies the attorney's saved signature automatically at send so only the client signs — ignored on any other bind. `fields` binds a signer's printed name/delivery email/title to merge-field TOKEN names (no braces) the document collects — each overrides the coarse `bind`-resolved value for that slot when the matter has a value. A provided config supersedes the prior; { signable: false } unsigns.",
+    "Template-embedded e-sign config (supersedes `signature`): { signable: boolean, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual'|'contact_role:<name>', order: number, presigned?: boolean, allowAddNextSigner?: boolean, fields?: { name?, email?, title? } }] }. `key` must match the marker signer key ({{sign:<key>}}) the role owns in the body. `presigned: true` (attorney_of_record only) applies the attorney's saved signature automatically at send so only the client signs — ignored on any other bind. `allowAddNextSigner: true` (needs_to_sign, non-presigned roles only) offers this signer \"add another signer\" instead of auto-completing the envelope when their signature would otherwise be the last one — for an open-ended signer count not known at send time. `fields` binds a signer's printed name/delivery email/title to merge-field TOKEN names (no braces) the document collects — each overrides the coarse `bind`-resolved value for that slot when the matter has a value. A provided config supersedes the prior; { signable: false } unsigns.",
   properties: {
     signable: { type: 'boolean' },
     roles: {
@@ -48,6 +48,7 @@ const ESIGN_CONFIG_SCHEMA = {
           bind: { type: 'string' },
           order: { type: 'number' },
           presigned: { type: 'boolean' },
+          allowAddNextSigner: { type: 'boolean' },
           fields: {
             type: 'object',
             properties: {

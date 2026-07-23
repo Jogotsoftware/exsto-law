@@ -59,6 +59,9 @@ export interface WorkflowStepRecipientSeed {
   /** PRESIGN-1: attorney role marked pre-signed in the template — signs
    *  automatically at send. */
   presigned?: boolean
+  /** ADD-NEXT-SIGNER-1: this signer may add the next signer instead of
+   *  auto-completing the envelope, if their signature would otherwise be last. */
+  allowAddNext?: boolean
 }
 
 export type ComposerSource =
@@ -517,6 +520,7 @@ export function EsignComposer({
           role: r.role,
           key: signerKeyForRow.get(rowIndex),
           ...(r.presigned ? { presigned: true } : {}),
+          ...(r.allowAddNext ? { allowAddNext: true } : {}),
         }
       })
 

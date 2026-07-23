@@ -106,3 +106,37 @@ export function completionRecipients(requests: RoutingRequestState[]): string[] 
     .filter((r) => r.role === 'needs_to_sign' || r.role === 'receives_copy')
     .map((r) => r.requestId)
 }
+
+// ADD-NEXT-SIGNER-1 — a signer/attorney can insert a NEW signer mid-envelope
+// (a template role opted in, or the attorney's own "add signer"). Design:
+// "right after the anchor, ahead of anything already queued later" (Joe's
+// call) — so an added co-signer takes the very next turn, and anything
+// already queued past the anchor (e.g. a trailing attorney countersign)
+// still happens last. No existing request's order is ever rewritten
+// (attribute history is append-only) — the new request just gets an order
+// value that sits strictly between the anchor and whatever came after it.
+
+/** The order to give a newly-inserted signer, anchored right after
+ *  `afterOrder`. `existingOrders` is every OTHER needs_to_sign request's
+ *  order on the envelope. Floating-point midpoint insertion: if nothing is
+ *  queued past the anchor, the new signer simply goes last (+1); otherwise
+ *  it slots into the open interval before the next queued order. */
+export function nextInsertionOrder(existingOrders: number[], afterOrder: number): number {
+  const later = existingOrders.filter((o) => o > afterOrder)
+  if (later.length === 0) return afterOrder + 1
+  const nextOrder = Math.min(...later)
+  return (afterOrder + nextOrder) / 2
+}
+
+// A signer whose role opted in to "let me add the next signer" (template
+// config, ADD-NEXT-SIGNER-1) is offered the choice INSTEAD of auto-completing
+// when their signature would otherwise be the one that finishes the envelope
+// — Joe's call: an open-ended signer count (count unknown up front) needs a
+// human "no more signers" confirmation, not an automatic close the moment the
+// last known signer finishes.
+export function shouldHoldForAddDecision(
+  justSignedAllowsAddNext: boolean,
+  wouldComplete: boolean,
+): boolean {
+  return wouldComplete && justSignedAllowsAddNext
+}

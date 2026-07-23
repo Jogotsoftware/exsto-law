@@ -131,6 +131,13 @@ export interface TemplateEsignRole {
    *  meaningful for the `attorney_of_record` bind (the firm's own signer); parse
    *  drops it for any other bind. */
   presigned?: boolean
+  /** ADD-NEXT-SIGNER-1 — when this role's signer would otherwise be the LAST
+   *  signature (their signing would complete the envelope), offer them "add
+   *  another signer" instead of auto-completing. For an open-ended signer
+   *  count (e.g. an unknown number of LLC members) that isn't known at send
+   *  time. Meaningless for a `presigned` role — there is no interactive
+   *  signing moment to offer the choice at — so parse drops it there. */
+  allowAddNextSigner?: boolean
 }
 
 // A merge-field token reference on a role, normalized to the token grammar
@@ -181,6 +188,11 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
   // automatically; it is nonsensical (and unsafe) on any other bind, so honor the
   // flag only for attorney_of_record and drop it everywhere else.
   const presigned = o.presigned === true && bind === 'attorney_of_record'
+  // ADD-NEXT-SIGNER-1 — only a role that actually signs interactively can ever
+  // be offered "add another signer" (a presigned role never visits a signing
+  // screen), and only needs_to_sign can gate/hold completion in the first place.
+  const allowAddNextSigner =
+    o.allowAddNextSigner === true && recipientRole === 'needs_to_sign' && !presigned
   return {
     key,
     label,
@@ -189,6 +201,7 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
     order,
     ...(fields ? { fields } : {}),
     ...(presigned ? { presigned: true } : {}),
+    ...(allowAddNextSigner ? { allowAddNextSigner: true } : {}),
   }
 }
 

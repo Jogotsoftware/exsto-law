@@ -580,3 +580,65 @@ describe('PRESIGN-1 — pre-signed attorney role', () => {
     expect(rows.find((r) => r.signerKey === 'client')?.presigned).toBe(false)
   })
 })
+
+describe('ADD-NEXT-SIGNER-1 — "let this signer add the next signer"', () => {
+  it('parse honors allowAddNextSigner only for needs_to_sign and non-presigned roles', () => {
+    const cfg = parseTemplateEsignConfig({
+      signable: true,
+      roles: [
+        { key: 'client', bind: 'matter_primary_contact', order: 1, allowAddNextSigner: true },
+        // A viewer/copy recipient never signs interactively — dropped.
+        {
+          key: 'viewer',
+          recipientRole: 'needs_to_view',
+          bind: 'manual',
+          order: 2,
+          allowAddNextSigner: true,
+        },
+        // A presigned attorney never visits a signing screen — dropped.
+        {
+          key: 'attorney',
+          bind: 'attorney_of_record',
+          order: 3,
+          presigned: true,
+          allowAddNextSigner: true,
+        },
+      ],
+    })
+    expect(cfg.roles.find((r) => r.key === 'client')?.allowAddNextSigner).toBe(true)
+    expect(cfg.roles.find((r) => r.key === 'viewer')?.allowAddNextSigner).toBeUndefined()
+    expect(cfg.roles.find((r) => r.key === 'attorney')?.allowAddNextSigner).toBeUndefined()
+  })
+
+  it('assembleRecipientRows propagates allowAddNext the same way', async () => {
+    const resolve = async (): Promise<ResolvedIdentity> => ({
+      name: 'Client',
+      email: 'client@example.com',
+      title: null,
+      contactEntityId: null,
+    })
+    const rows = await assembleRecipientRows(
+      [
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'matter_primary_contact',
+          order: 1,
+          allowAddNextSigner: true,
+        },
+        {
+          key: 'viewer',
+          label: 'Viewer',
+          recipientRole: 'needs_to_view',
+          bind: 'manual',
+          order: 2,
+          allowAddNextSigner: true,
+        },
+      ] as TemplateEsignConfig['roles'],
+      resolve,
+    )
+    expect(rows.find((r) => r.signerKey === 'client')?.allowAddNext).toBe(true)
+    expect(rows.find((r) => r.signerKey === 'viewer')?.allowAddNext).toBe(false)
+  })
+})

@@ -28,6 +28,9 @@ interface Input {
     /** PRESIGN-1: the attorney signer whose saved signature applies automatically
      *  at send (resolved server-side; blocks if no signature is saved). */
     presigned?: boolean
+    /** ADD-NEXT-SIGNER-1: this signer may add the next signer instead of
+     *  auto-completing the envelope, if their signature would otherwise be last. */
+    allowAddNext?: boolean
   }>
   subject?: string
   provider?: string

@@ -26,6 +26,10 @@ export interface DraftRecipient {
    *  at send (seeded from a template role marked pre-signed). Shown as "signs
    *  automatically"; never needs an email/turn. */
   presigned?: boolean
+  /** ADD-NEXT-SIGNER-1: this signer may add the next signer instead of
+   *  auto-completing the envelope, if their signature would otherwise be last
+   *  (seeded from a template role that opted in). */
+  allowAddNext?: boolean
 }
 
 /** ES-MULTIDOC-1 — one uploaded document in the envelope's ordered set. Its

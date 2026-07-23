@@ -225,17 +225,36 @@ export default function AttorneySignPage({ params }: { params: Promise<{ request
         fileUrlForDoc={(i) => `/api/attorney/esign/${doc.envelopeId}/file?doc=${i}`}
         savedSignature={savedSignature}
         onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
-          const r = await callAttorneyMcp<{ completed: boolean }>({
+          const r = await callAttorneyMcp<{
+            completed: boolean
+            awaitingAddDecision?: boolean
+          }>({
             toolName: 'legal.esign.sign_submit',
             input: { requestId, signatureName, signatureData, fieldValues, consent },
           })
-          return { completed: Boolean(r.completed) }
+          return {
+            completed: Boolean(r.completed),
+            awaitingAddDecision: Boolean(r.awaitingAddDecision),
+          }
         }}
         onDecline={async () => {
           await callAttorneyMcp({
             toolName: 'legal.esign.sign_decline',
             input: { requestId },
           })
+        }}
+        onAddSigner={async ({ name, email }) => {
+          await callAttorneyMcp({
+            toolName: 'legal.esign.sign_add_signer',
+            input: { requestId, name, email },
+          })
+        }}
+        onFinishSigning={async () => {
+          const r = await callAttorneyMcp<{ completed: boolean }>({
+            toolName: 'legal.esign.sign_finish',
+            input: { requestId },
+          })
+          return { completed: Boolean(r.completed) }
         }}
         onSigned={advanceOrExit}
         onDeclined={advanceOrExit}

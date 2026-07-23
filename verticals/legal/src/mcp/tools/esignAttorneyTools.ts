@@ -1,5 +1,9 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
+  addNextSignerForAttorneyRequest,
+  addSignerForAttorney,
+  confirmNoMoreSignersForAttorneyRequest,
+  finishSigningForAttorney,
   getEnvelopeStatus,
   listEnvelopes,
   resendEnvelope,
@@ -8,6 +12,7 @@ import {
   loadSignableForAttorney,
   recordSignatureForAttorney,
   declineForAttorney,
+  type AddSignerResult,
   type EnvelopeStatus,
   type EnvelopeListItem,
   type ResendResult,
@@ -124,6 +129,76 @@ const signDeclineTool: Tool<
     }),
 }
 
+// ADD-NEXT-SIGNER-1 — mirrors legal.esign.portal.add_signer/.finish, but for
+// the attorney adding a signer after their OWN countersignature (the
+// sign_load/sign_submit/sign_decline signing surface, not the envelope
+// detail page's attorney-initiated add below).
+interface AttorneySignAddSignerInput {
+  requestId: string
+  name: string
+  email: string
+  title?: string | null
+}
+const signAddSignerTool: Tool<AttorneySignAddSignerInput, AddSignerResult> = {
+  name: 'legal.esign.sign_add_signer',
+  description:
+    'Insert the next signer after the signed-in attorney’s own countersignature, instead of finishing ' +
+    'the envelope — offered when their signature would otherwise have completed it.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    addNextSignerForAttorneyRequest(ctx, {
+      requestId: input.requestId,
+      name: input.name,
+      email: input.email,
+      title: input.title,
+    }),
+}
+
+const signFinishTool: Tool<{ requestId: string }, RecordSignatureResult> = {
+  name: 'legal.esign.sign_finish',
+  description:
+    'The signed-in attorney confirms "no more signers" on their own countersignature — completes the ' +
+    'envelope that held open awaiting their decision.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    confirmNoMoreSignersForAttorneyRequest(ctx, { requestId: input.requestId }),
+}
+
+// ADD-NEXT-SIGNER-1 — the attorney adds a signer to an in-flight envelope
+// (no anchor request; the handler picks the current active group, or
+// appends at the end if nothing is unresolved).
+interface AttorneyAddSignerInput {
+  envelopeId: string
+  name: string
+  email: string
+  title?: string | null
+}
+const addSignerTool: Tool<AttorneyAddSignerInput, AddSignerResult> = {
+  name: 'legal.esign.add_signer',
+  description:
+    'Add a signer to an in-flight envelope. Ordered right after whichever group is currently active ' +
+    '(or appended at the end if nothing is unresolved) — refused once the envelope is completed / ' +
+    'declined / voided.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    addSignerForAttorney(ctx, input.envelopeId, {
+      name: input.name,
+      email: input.email,
+      title: input.title,
+    }),
+}
+
+// ADD-NEXT-SIGNER-1 — fallback finish for an envelope stuck awaiting a
+// signer's "add another / no more" decision (they never came back).
+const finishTool: Tool<{ envelopeId: string }, RecordSignatureResult> = {
+  name: 'legal.esign.finish',
+  description:
+    'Finish an envelope that is stuck awaiting a signer’s "add another signer / no more signers" ' +
+    'decision. Refused unless the envelope is actually in that state.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => finishSigningForAttorney(ctx, input.envelopeId),
+}
+
 registerTool(statusTool)
 registerTool(listTool)
 registerTool(resendTool)
@@ -132,3 +207,7 @@ registerTool(awaitingMeTool)
 registerTool(signLoadTool)
 registerTool(signSubmitTool)
 registerTool(signDeclineTool)
+registerTool(signAddSignerTool)
+registerTool(signFinishTool)
+registerTool(addSignerTool)
+registerTool(finishTool)
