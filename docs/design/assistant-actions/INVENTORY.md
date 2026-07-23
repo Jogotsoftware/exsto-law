@@ -392,6 +392,20 @@ entries into the gap map in §3 and marks closed ones fixed.
     questionnaire re-ask for it.
   - #494 (matter-status mirror fix): internal consistency fix only, no chat/builder surface — not a gap.
 
+- **2026-07-23 (PRESIGN-1 Phase 2, service-scoped signer intake):**
+  - `legal.service.template.esign.get`/`.update` (§1's flagged "unverified" row, `serviceLibraryTools.ts:288-317`)
+    now has its FIRST UI: a Signers section on the service's own Templates tab
+    (`app/attorney/services/[serviceKey]/templates/page.tsx`, reusing `TemplateEsignPanel`). Confirmed:
+    no dedicated `propose_*` tool exists for it and `propose_service`'s schema
+    (`serviceAuthoringTools.ts`) doesn't cover per-document-kind e-sign config — the wizard cannot set
+    or read a service's signers from chat.
+  - New in this PR: a "collect this signer at intake" toggle that auto-adds three questions to the
+    service's intake form and binds them to the role (`signerIntakeFieldIds`,
+    `TemplateEsignPanel.tsx`). Convenience UI only, not modeled as an action-layer op — nothing for
+    chat to wrap directly, but `propose_service`/`propose_questionnaire` still can't express "this
+    signer's identity comes from intake" as a package, so an AI-authored service with extra signers
+    can't reproduce this in one step either.
+
 ## Critical files
 
 `verticals/legal/src/api/assistantChat.ts` (attorney ClientTool assembly, `buildAttorneyClientTools`)

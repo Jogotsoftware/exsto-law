@@ -26727,6 +26727,32 @@ details.li-brief-research summary:hover {
   color: var(--li-danger, #b91c1c);
 }
 
+/* PRESIGN-1 Phase 2 — "collect at intake" toggle, replacing the three slots
+   for a non-attorney row in a service context. */
+.li-tplsign-collectintake {
+  padding: 7px 9px;
+  border: 1px solid var(--li-border);
+  border-radius: 7px;
+  background: var(--li-card);
+}
+.li-tplsign-collectintake-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--li-text);
+  cursor: pointer;
+}
+.li-tplsign-collectintake-toggle input {
+  flex: 0 0 auto;
+}
+.li-tplsign-collectintake-err {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--li-danger, #b91c1c);
+}
+
 /* Signable-signer email-coverage gap (§ warn + one-click "capture on intake"). */
 .li-tplsign-role-gap {
   margin-top: 8px;

@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEntity, lookupKindId } from './common.js'
+import { parseTemplateEsignConfig, type TemplateEsignConfig } from '../queries/templates.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Standalone templates (beta sprint Objective 9). A template entity is a
@@ -72,76 +73,20 @@ function normalizeSignature(raw: unknown): { required: boolean; signer_roles: st
 // check lives at the API layer with body context: validateProposedTemplate
 // (the AI-proposal gate, hard) and the editor panel's live warning (soft, via
 // esign/fields.js computeMarkerRoleDrift) — see templateAuthoring.ts.
-const ESIGN_RECIPIENT_ROLES = ['needs_to_sign', 'needs_to_view', 'receives_copy'] as const
-type EsignRecipientRoleLiteral = (typeof ESIGN_RECIPIENT_ROLES)[number]
-
-interface RawEsignRole {
-  key?: unknown
-  label?: unknown
-  recipientRole?: unknown
-  bind?: unknown
-  order?: unknown
-  presigned?: unknown
-}
-
-function isValidBind(v: unknown): boolean {
-  if (typeof v !== 'string' || !v) return false
-  if (v === 'matter_primary_contact' || v === 'attorney_of_record' || v === 'manual') return true
-  return v.startsWith('contact_role:') && v.length > 'contact_role:'.length
-}
-
-function normalizeEsignConfig(raw: unknown): {
-  signable: boolean
-  roles: Array<{
-    key: string
-    label: string
-    recipientRole: EsignRecipientRoleLiteral
-    bind: string
-    order: number
-    presigned?: boolean
-  }>
-} {
-  const o = (raw && typeof raw === 'object' ? raw : {}) as {
-    signable?: unknown
-    roles?: unknown
-  }
-  const seen = new Set<string>()
-  const roles: Array<{
-    key: string
-    label: string
-    recipientRole: EsignRecipientRoleLiteral
-    bind: string
-    order: number
-    presigned?: boolean
-  }> = []
-  if (Array.isArray(o.roles)) {
-    for (const entry of o.roles as RawEsignRole[]) {
-      const key = typeof entry?.key === 'string' ? entry.key.trim() : ''
-      if (!key) throw new Error('Every e-sign role needs a key (the marker signer key it owns).')
-      if (seen.has(key)) throw new Error(`Duplicate e-sign role key "${key}".`)
-      seen.add(key)
-      const recipientRole: EsignRecipientRoleLiteral = ESIGN_RECIPIENT_ROLES.includes(
-        entry.recipientRole as EsignRecipientRoleLiteral,
-      )
-        ? (entry.recipientRole as EsignRecipientRoleLiteral)
-        : 'needs_to_sign'
-      const bind = isValidBind(entry.bind) ? (entry.bind as string) : 'manual'
-      const order =
-        typeof entry.order === 'number' && Number.isFinite(entry.order) ? entry.order : 1
-      const label = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : key
-      // PRESIGN-1 — pre-signing is the attorney auto-applying their OWN standing
-      // signature; honor it only for attorney_of_record (dropped elsewhere).
-      const presigned = entry.presigned === true && bind === 'attorney_of_record'
-      roles.push({ key, label, recipientRole, bind, order, ...(presigned ? { presigned } : {}) })
-    }
-  }
-  const signable = o.signable === true
-  if (signable && !roles.some((r) => r.recipientRole === 'needs_to_sign')) {
+//
+// Reuses the SAME defensive parser the read layer and the service-scoped
+// e-sign config write path (services.ts updateDocumentTemplateEsignConfig)
+// use, instead of a second hand-rolled parser — a prior hand-rolled copy here
+// silently dropped role.fields (ESIGN-FIELDS-1 name/email/title bindings) on
+// every save because it never had a `fields` key at all (#496).
+function normalizeEsignConfig(raw: unknown): TemplateEsignConfig {
+  const parsed = parseTemplateEsignConfig(raw)
+  if (parsed.signable && !parsed.roles.some((r) => r.recipientRole === 'needs_to_sign')) {
     throw new Error(
       'esignConfig.signable is true but no role is set to "needs_to_sign" — declare at least one signer.',
     )
   }
-  return { signable, roles }
+  return parsed
 }
 
 interface TemplateCreatePayload {

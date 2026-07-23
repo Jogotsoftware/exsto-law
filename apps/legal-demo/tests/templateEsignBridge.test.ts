@@ -6,7 +6,7 @@
 // a template survives open → save with its anchors intact.
 import { describe, it, expect } from 'vitest'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
-import { roleBlockHtml } from '@/components/templates/TemplateEsignPanel'
+import { roleBlockHtml, signerIntakeFieldIds } from '@/components/templates/TemplateEsignPanel'
 
 describe('markdownToHtml — marker hydration', () => {
   it('hydrates a whole-line marker into a marker-carrying sig-line div', () => {
@@ -89,5 +89,28 @@ describe('roleBlockHtml — the eSign panel insert fragment', () => {
 
   it('omits the heading when the body already has an execution section', () => {
     expect(roleBlockHtml(role, false)).not.toContain('Accepted and Agreed')
+  })
+})
+
+// PRESIGN-1 Phase 2 — the deterministic id convention behind "collect at
+// intake": derived from the role's marker KEY (never its label, which the
+// attorney can rename freely) so re-toggling the same role is idempotent.
+describe('signerIntakeFieldIds', () => {
+  it('derives stable, predictable ids from the role key', () => {
+    expect(signerIntakeFieldIds('member_2')).toEqual({
+      name: 'signer_member_2_name',
+      email: 'signer_member_2_email',
+      title: 'signer_member_2_title',
+    })
+  })
+
+  it('is idempotent — the same key always yields the same ids', () => {
+    expect(signerIntakeFieldIds('client')).toEqual(signerIntakeFieldIds('client'))
+  })
+
+  it('differs across roles so two signers never collide on the same question', () => {
+    const a = signerIntakeFieldIds('member_1')
+    const b = signerIntakeFieldIds('member_2')
+    expect(a.email).not.toBe(b.email)
   })
 })

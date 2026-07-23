@@ -19,6 +19,14 @@
 // reached (a `manual` bind with no email field) is flagged with a one-click
 // "capture it on intake" fix.
 //
+// PRESIGN-1 Phase 2 — in a service context (onCollectAtIntake provided), a
+// non-attorney row trades the three drag-and-drop slots for one "Collect at
+// intake" toggle: turning it on asks the host to add three questions
+// (signerIntakeFieldIds below) to THIS service's intake form and binds the
+// role's name/email/title to them in one step — no manual dragging, no
+// pre-existing merge field required. The standalone/library editor has no
+// service to add questions to, so it keeps the slots unchanged.
+//
 // Drift warnings (same orphan-report pattern as validateProposedTemplate):
 // marker keys in the body with no role row, and needs_to_sign roles with no
 // {{sign:key}} marker — computed live via the shared pure helper
@@ -127,12 +135,77 @@ function FieldSlot({
   )
 }
 
+// PRESIGN-1 Phase 2 — the deterministic id convention for a role's auto-added
+// intake questions, shared by the panel (to know whether a role is currently
+// "collecting at intake") and the host (to know what to add to the service's
+// intake schema). Keyed off the role's marker key so re-toggling the SAME role
+// is idempotent — never off role LABEL, which the attorney can freely rename.
+export function signerIntakeFieldIds(roleKey: string): {
+  name: string
+  email: string
+  title: string
+} {
+  const base = `signer_${roleKey}`
+  return { name: `${base}_name`, email: `${base}_email`, title: `${base}_title` }
+}
+
+// One row's "collect at intake" control (Phase 2): a signable non-attorney row
+// trades the three drag-and-drop slots for this single toggle. On, the role's
+// name/email/title are bound to this role's intake field ids (host guarantees
+// those questions exist on the service's intake form); off, the bindings clear
+// (the questions themselves are left in place — harmless if unused).
+function CollectAtIntakeToggle({
+  role,
+  fieldIds,
+  onCollect,
+  onClear,
+}: {
+  role: TemplateEsignRole
+  fieldIds: { name: string; email: string; title: string }
+  onCollect: () => Promise<void>
+  onClear: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const collecting = role.fields?.email === fieldIds.email && role.fields?.name === fieldIds.name
+
+  return (
+    <div className="li-tplsign-slots li-tplsign-collectintake">
+      <label className="li-tplsign-collectintake-toggle">
+        <input
+          type="checkbox"
+          checked={collecting}
+          disabled={busy}
+          onChange={async (e) => {
+            setErr(null)
+            if (!e.target.checked) {
+              onClear()
+              return
+            }
+            setBusy(true)
+            try {
+              await onCollect()
+            } catch (ex) {
+              setErr(ex instanceof Error ? ex.message : String(ex))
+            } finally {
+              setBusy(false)
+            }
+          }}
+        />
+        Collect this signer’s name, email, and title at intake
+      </label>
+      {err && <span className="li-tplsign-collectintake-err">{err}</span>}
+    </div>
+  )
+}
+
 export function TemplateEsignPanel({
   body,
   config,
   onChange,
   onInsertBlock,
   onCaptureEmailOnIntake,
+  onCollectAtIntake,
 }: {
   // The current template body MARKDOWN (for live marker↔role drift).
   body: string
@@ -146,6 +219,11 @@ export function TemplateEsignPanel({
   // panel binds the role's email slot to it. Host-level (touches the variables
   // map + the editor).
   onCaptureEmailOnIntake?: (role: TemplateEsignRole) => string | void
+  // PRESIGN-1 Phase 2 — service context only. Ensures the three
+  // signerIntakeFieldIds(role.key) questions exist on the CURRENT service's
+  // intake form (host owns serviceKey). The panel binds role.fields to those
+  // ids itself once this resolves — the host doesn't touch config directly.
+  onCollectAtIntake?: (role: TemplateEsignRole) => Promise<void>
 }) {
   const drift = useMemo(
     () => (config.signable ? computeMarkerRoleDrift(body, config.roles) : null),
@@ -337,32 +415,52 @@ export function TemplateEsignPanel({
                 </label>
               )}
 
-              {/* ESIGN-FIELDS-1 — identity from merge fields (drag targets). */}
-              <div className="li-tplsign-slots" aria-label={`Signer ${i + 1} identity fields`}>
-                <FieldSlot
-                  label="Name"
-                  token={role.fields?.name}
-                  onBind={(t) => patchRoleFields(i, { name: t })}
-                  onClear={() => patchRoleFields(i, { name: undefined })}
+              {/* ESIGN-FIELDS-1 — identity from merge fields (drag targets), or
+                  (Phase 2, service context) one "collect at intake" toggle in
+                  place of the three slots. Attorney identity never comes from
+                  intake, so the attorney row always keeps the slots. */}
+              {onCollectAtIntake && role.bind !== 'attorney_of_record' ? (
+                <CollectAtIntakeToggle
+                  role={role}
+                  fieldIds={signerIntakeFieldIds(role.key)}
+                  onCollect={async () => {
+                    const ids = signerIntakeFieldIds(role.key)
+                    await onCollectAtIntake(role)
+                    patchRoleFields(i, { name: ids.name, email: ids.email, title: ids.title })
+                  }}
+                  onClear={() =>
+                    patchRoleFields(i, { name: undefined, email: undefined, title: undefined })
+                  }
                 />
-                <FieldSlot
-                  label="Email"
-                  token={role.fields?.email}
-                  onBind={(t) => patchRoleFields(i, { email: t })}
-                  onClear={() => patchRoleFields(i, { email: undefined })}
-                />
-                <FieldSlot
-                  label="Title"
-                  token={role.fields?.title}
-                  onBind={(t) => patchRoleFields(i, { title: t })}
-                  onClear={() => patchRoleFields(i, { title: undefined })}
-                />
-              </div>
+              ) : (
+                <div className="li-tplsign-slots" aria-label={`Signer ${i + 1} identity fields`}>
+                  <FieldSlot
+                    label="Name"
+                    token={role.fields?.name}
+                    onBind={(t) => patchRoleFields(i, { name: t })}
+                    onClear={() => patchRoleFields(i, { name: undefined })}
+                  />
+                  <FieldSlot
+                    label="Email"
+                    token={role.fields?.email}
+                    onBind={(t) => patchRoleFields(i, { email: t })}
+                    onClear={() => patchRoleFields(i, { email: undefined })}
+                  />
+                  <FieldSlot
+                    label="Title"
+                    token={role.fields?.title}
+                    onBind={(t) => patchRoleFields(i, { title: t })}
+                    onClear={() => patchRoleFields(i, { title: undefined })}
+                  />
+                </div>
+              )}
 
               {gapKeys.has(role.key) && (
                 <div className="li-tplsign-role-gap" role="alert">
                   No email source — this signer can’t be reached.
-                  {onCaptureEmailOnIntake ? (
+                  {onCollectAtIntake && role.bind !== 'attorney_of_record' ? (
+                    <span> Turn on “Collect at intake” above.</span>
+                  ) : onCaptureEmailOnIntake ? (
                     <button
                       type="button"
                       className="li-tplsign-role-gap-fix"
