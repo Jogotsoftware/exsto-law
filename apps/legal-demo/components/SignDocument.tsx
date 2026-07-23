@@ -105,6 +105,8 @@ export function SignDocument({
   onDecline,
   onSigned,
   onDeclined,
+  onAddSigner,
+  onFinishSigning,
 }: {
   doc: SignableDoc
   /** 0170: token/session-gated streaming URL for a file (PDF) envelope. The
