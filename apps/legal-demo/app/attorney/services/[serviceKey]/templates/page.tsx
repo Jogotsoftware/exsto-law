@@ -19,9 +19,17 @@ import { streamTemplateAi } from '@/lib/templateAiStream'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
-import { EyeIcon } from '@/components/icons'
+import { EyeIcon, SignatureIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
 import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import {
+  TemplateEsignPanel,
+  roleBlockHtml,
+  signerIntakeFieldIds,
+} from '@/components/templates/TemplateEsignPanel'
+import type { TemplateEsignConfig, TemplateEsignRole } from '@exsto/legal'
+
+const EMPTY_ESIGN: TemplateEsignConfig = { signable: false, roles: [] }
 
 // Standard merge tokens available in every document (filled at generation time
 // from the client/matter/firm profile), so the `{{` autocomplete and chip
@@ -58,6 +66,7 @@ interface TemplateDoc {
   templateText: string | null
   source: 'config' | 'repo' | 'none'
   templateVersion: number | null
+  esignConfig: TemplateEsignConfig
 }
 interface QField {
   id: string
@@ -420,15 +429,22 @@ export default function TemplateEditorPage() {
       const docs = svcRes.service.documents ?? []
       const states = await Promise.all(
         docs.map(async (documentKind) => {
-          const r = await callAttorneyMcp<{ template: TemplateDoc | null }>({
-            toolName: 'legal.service.template.get',
-            input: { serviceKey, documentKind },
-          })
+          const [r, esignRes] = await Promise.all([
+            callAttorneyMcp<{ template: TemplateDoc | null }>({
+              toolName: 'legal.service.template.get',
+              input: { serviceKey, documentKind },
+            }),
+            callAttorneyMcp<{ esignConfig: TemplateEsignConfig | null }>({
+              toolName: 'legal.service.template.esign.get',
+              input: { serviceKey, documentKind },
+            }),
+          ])
           return {
             documentKind,
             templateText: r.template?.templateText ?? '',
             source: r.template?.source ?? ('none' as const),
             templateVersion: r.template?.templateVersion ?? null,
+            esignConfig: esignRes.esignConfig ?? EMPTY_ESIGN,
           }
         }),
       )
@@ -674,6 +690,7 @@ function KindEditor({
 }) {
   const { confirm, confirmElement } = useConfirm()
   const [text, setText] = useState(template.templateText ?? '')
+  const [esign, setEsign] = useState<TemplateEsignConfig>(template.esignConfig)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -681,6 +698,7 @@ function KindEditor({
   const [libNote, setLibNote] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [showAi, setShowAi] = useState(false)
+  const [showSigners, setShowSigners] = useState(false)
   // Comp: the Templates tab card is COLLAPSED to a thumbnail by default; "Open
   // editor" expands it in place to the full rich-text editor below (no separate
   // template-editor route exists yet — that's WP-E's scope).
@@ -762,6 +780,29 @@ function KindEditor({
     setNewLabel('')
   }
 
+  // ES-3: insert a role's signature/name/date execution lines at the cursor as
+  // ruled lines (marker-carrying SignatureLine nodes), same as the standalone
+  // editor's insertEsignBlock. The canonical heading is added once, when the
+  // body has no execution section yet.
+  function insertEsignBlock(role: TemplateEsignRole) {
+    const hasExecution = /\{\{\s*sign\s*:/.test(text)
+    editorRef.current?.insertHtml(roleBlockHtml(role, !hasExecution))
+  }
+
+  // PRESIGN-1 Phase 2 — ensure this role's three intake questions exist on
+  // THIS service's intake form (idempotent: onAddFields skips ids already
+  // present). Labeled by the role so the attorney recognizes them on the
+  // intake form, not by the raw signer_<key>_* id.
+  async function collectSignerAtIntake(role: TemplateEsignRole): Promise<void> {
+    const ids = signerIntakeFieldIds(role.key)
+    const who = role.label || role.key
+    await onAddFields([
+      { id: ids.name, label: `${who} — name` },
+      { id: ids.email, label: `${who} — email` },
+      { id: ids.title, label: `${who} — title` },
+    ])
+  }
+
   async function save() {
     if (!text.trim()) {
       setErr('The template cannot be empty.')
@@ -770,10 +811,16 @@ function KindEditor({
     setBusy(true)
     setErr(null)
     try {
-      await callAttorneyMcp({
-        toolName: 'legal.service.template.update',
-        input: { serviceKey, documentKind: template.documentKind, templateText: text },
-      })
+      await Promise.all([
+        callAttorneyMcp({
+          toolName: 'legal.service.template.update',
+          input: { serviceKey, documentKind: template.documentKind, templateText: text },
+        }),
+        callAttorneyMcp({
+          toolName: 'legal.service.template.esign.update',
+          input: { serviceKey, documentKind: template.documentKind, esignConfig: esign },
+        }),
+      ])
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -849,6 +896,18 @@ function KindEditor({
               <EyeIcon size={15} /> Preview
             </button>
             <button
+              type="button"
+              className={showSigners ? 'primary' : undefined}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+              onClick={() => setShowSigners((v) => !v)}
+              title="Who signs this document, in what order"
+            >
+              <SignatureIcon size={15} /> Signers
+              {esign.signable && esign.roles.length > 0 && (
+                <span className="li-svc-fieldcount">{esign.roles.length}</span>
+              )}
+            </button>
+            <button
               className="li-svc-btn-primary"
               style={{ marginLeft: 'auto' }}
               onClick={save}
@@ -857,6 +916,19 @@ function KindEditor({
               {busy ? 'Saving…' : 'Save new version'}
             </button>
           </div>
+
+          {showSigners && (
+            <TemplateEsignPanel
+              body={text}
+              config={esign}
+              onChange={(next) => {
+                setEsign(next)
+                setSaved(false)
+              }}
+              onInsertBlock={insertEsignBlock}
+              onCollectAtIntake={collectSignerAtIntake}
+            />
+          )}
 
           {showAi && (
             <AiEnhancePanel
