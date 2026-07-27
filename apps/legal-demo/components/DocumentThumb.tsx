@@ -22,6 +22,20 @@ import { buildPreview } from '@/lib/templatePreview'
 // buildPreview also merges sample data, so the thumbnail reads as a finished
 // document rather than a page of raw {{tokens}}.
 
+// A thumbnail clips at the page edge, so only the opening of the body is ever
+// visible. Parsing + sanitizing a 20-page agreement to show its first 15 lines
+// would be pure waste — and the template gallery renders one of these PER CARD,
+// so the whole grid would pay it. Cut to a generous prefix on a LINE boundary
+// (never mid-tag, which would hand the renderer a torn element) before rendering.
+const THUMB_CHARS = 4000
+
+function thumbSource(body: string): string {
+  if (body.length <= THUMB_CHARS) return body
+  const cut = body.slice(0, THUMB_CHARS)
+  const lastBreak = cut.lastIndexOf('\n')
+  return lastBreak > 0 ? cut.slice(0, lastBreak) : cut
+}
+
 export function DocumentThumb({
   body,
   title,
@@ -36,7 +50,7 @@ export function DocumentThumb({
   empty?: string
   className?: string
 }): ReactElement {
-  const { html } = useMemo(() => buildPreview(body ?? ''), [body])
+  const { html } = useMemo(() => buildPreview(thumbSource(body ?? '')), [body])
   const has = (body ?? '').trim().length > 0
   return (
     <DocumentSheet
