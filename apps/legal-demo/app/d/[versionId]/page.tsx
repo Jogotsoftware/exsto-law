@@ -8,6 +8,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 interface DraftPayload {
@@ -124,16 +125,18 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
           </button>
         </div>
       </div>
-      {/* Same page treatment as the attorney review screen, so the client sees
-          exactly the document that was approved (same renderer + .doc-paper page). */}
-      <div className="doc-canvas">
-        {watermark && <div className="doc-watermark-banner">{watermark}</div>}
-        <article
-          className={`doc-rendered doc-paper${watermark ? ' doc-watermark' : ''}`}
-          data-watermark={watermark ?? undefined}
-          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-        />
-      </div>
+      {/* DOC-RENDER-1: the SAME page treatment as the attorney review screen —
+          literally the same components now, not a parallel `.doc-paper` rule
+          that had drifted to a different measure, font and watermark. The client
+          sees exactly the document the attorney approved. */}
+      <DocumentCanvas>
+        <DocumentSheet variant="full" watermark={watermark ?? undefined}>
+          <article
+            className="doc-rendered li-rev-doc"
+            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+          />
+        </DocumentSheet>
+      </DocumentCanvas>
     </div>
   )
 }

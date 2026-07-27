@@ -20,6 +20,7 @@ import { Tabs } from '@/components/Tabs'
 import { useI18n } from '@/lib/i18n'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { DocumentSheet } from '@/components/DocumentSheet'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 
 // LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
@@ -984,11 +985,17 @@ function EngagementGateModal({
                   agreement AND accepting the hourly rate. */}
               {agreement ? (
                 <>
+                  {/* DOC-RENDER-1: the engagement letter the client signs renders
+                      on the same letter page as every other document surface —
+                      `fit` keeps true page margins inside the gate's narrow
+                      column instead of the old bespoke .li-cp-agreement-paper. */}
                   <div className="li-cp-agreement-frame">
-                    <article
-                      className="doc-rendered doc-paper li-cp-agreement-paper"
-                      dangerouslySetInnerHTML={{ __html: renderDocumentHtml(agreement.markdown) }}
-                    />
+                    <DocumentSheet variant="fit" serif>
+                      <article
+                        className="doc-rendered li-rev-doc"
+                        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(agreement.markdown) }}
+                      />
+                    </DocumentSheet>
                   </div>
                   <label className="li-cp-sign-row">
                     <span>

@@ -11,6 +11,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { formatDate } from '@/lib/datetime'
 import { BackButton } from '@/components/BackButton'
+import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
 import { EsignComposer } from '@/components/esign/EsignComposer'
 import { EnvelopeStatusView, type EnvelopeStatus } from '@/components/EnvelopeStatusView'
 
@@ -256,16 +257,17 @@ export default function TaskWindowPage({
                 Every party has signed. Review the executed document, then complete the task.
               </p>
               {executedMarkdown ? (
-                <div
-                  className="doc-rendered"
-                  style={{
-                    maxHeight: 420,
-                    overflow: 'auto',
-                    border: '1px solid var(--border, #ddd)',
-                    padding: 'var(--space-3)',
-                  }}
-                  dangerouslySetInnerHTML={{ __html: renderDocumentHtml(executedMarkdown) }}
-                />
+                // DOC-RENDER-1: the executed copy is a DOCUMENT — it renders on
+                // the same letter page as the review reader and the share link,
+                // not as bare sans-serif text in a scroll box.
+                <DocumentCanvas className="li-doc-canvas--inset">
+                  <DocumentSheet variant="fit">
+                    <div
+                      className="doc-rendered li-rev-doc"
+                      dangerouslySetInnerHTML={{ __html: renderDocumentHtml(executedMarkdown) }}
+                    />
+                  </DocumentSheet>
+                </DocumentCanvas>
               ) : (
                 <div className="loading-block" role="status">
                   <span className="spinner" /> Loading executed copy…

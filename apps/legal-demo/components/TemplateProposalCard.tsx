@@ -1,14 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 import { ProposalCardShell } from '@/components/ProposalCardShell'
-import { DocumentSheet } from '@/components/DocumentSheet'
+import { DocumentThumb } from '@/components/DocumentThumb'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
-import { buildPreview } from '@/lib/templatePreview'
 import type { TemplateEsignConfig } from '@exsto/legal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
@@ -136,12 +135,6 @@ export function TemplateProposalCard({
     }
     setEditing(true)
   }
-
-  // The FORMATTED preview — the same buildPreview() pipeline (renderDocumentHtml +
-  // sample-data merge + gap highlighting) that drives the pop-up editor's preview
-  // pane, so the inline chat card shows the real document shape (headings, lists,
-  // bold, merged fields) instead of a stripped, hard-truncated plain-text dump.
-  const { html: previewHtml } = useMemo(() => buildPreview(currentBody), [currentBody])
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
@@ -287,10 +280,12 @@ export function TemplateProposalCard({
           same as any other document thumbnail; the FULL body opens in the real
           editor via "Open & edit". */}
       <div className="li-uac-prop-doc">
-        <DocumentSheet variant="thumb" serif className="li-uac-prop-sheet">
-          <div className="li-uac-prop-dochead">{humanKind(proposal.docKind).toUpperCase()}</div>
-          <div className="li-uac-prop-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-        </DocumentSheet>
+        <DocumentThumb
+          body={currentBody}
+          title={humanKind(proposal.docKind).toUpperCase()}
+          empty="No body yet."
+          className="li-uac-prop-sheet"
+        />
       </div>
 
       {/* WP-4 (kept) — the variable contract as CHIPS with a count, never a

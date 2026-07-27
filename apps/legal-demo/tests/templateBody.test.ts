@@ -203,3 +203,54 @@ describe('template body round-trip — tables (DOC-TABLES-1)', () => {
     expect(md).toContain('line one<br>line two')
   })
 })
+
+// DOC-RENDER-1. An aligned block is saved as RAW HTML (alignedBlock rule), and
+// outerHTML bypasses every other turndown rule — so a merge chip inside a
+// centered title used to be persisted as the editor's own DOM. That leaked the
+// literal markup into the stored body (visible as tags on any surface that
+// renders the body as text) and nested one more wrapper span on every save.
+describe('aligned blocks never leak editor chip markup (DOC-RENDER-1)', () => {
+  const CENTERED_TITLE =
+    '<p style="text-align: center"><strong>OPERATING AGREEMENT OF ' +
+    '<span class="tpl-var-chip" data-variable="company_name">{{company_name}}</span></strong></p>'
+
+  it('collapses a chip inside an aligned block to its bare {{token}}', () => {
+    const md = htmlToMarkdown(CENTERED_TITLE)
+    expect(md).toContain('{{company_name}}')
+    expect(md).not.toContain('tpl-var-chip')
+    expect(md).not.toContain('data-variable')
+  })
+
+  it('keeps the alignment it was serialized for', () => {
+    expect(htmlToMarkdown(CENTERED_TITLE)).toContain('text-align: center')
+  })
+
+  it('is stable across repeated save→load→save (no nesting growth)', () => {
+    const once = htmlToMarkdown(CENTERED_TITLE)
+    const twice = htmlToMarkdown(markdownToHtml(once))
+    const thrice = htmlToMarkdown(markdownToHtml(twice))
+    expect(twice.trim()).toBe(once.trim())
+    expect(thrice.trim()).toBe(once.trim())
+  })
+
+  it('heals a body already saved with the leaked markup', () => {
+    // What is sitting in prod today, including the double wrapper a second save
+    // produced. Loading it must yield exactly ONE chip span, not three nested.
+    const legacy =
+      '<p style="text-align: center"><strong>OPERATING AGREEMENT OF ' +
+      '<span class="tpl-var-chip" data-variable="company_name">' +
+      '<span data-variable="company_name">{{company_name}}</span></span></strong></p>'
+    const html = markdownToHtml(legacy)
+    expect(html.match(/data-variable="company_name"/g)).toHaveLength(1)
+    expect(html).not.toContain('tpl-var-chip')
+    // …and re-saving writes a clean body.
+    expect(htmlToMarkdown(html)).not.toContain('data-variable')
+  })
+
+  it('leaves a legitimately styled span alone', () => {
+    const md = htmlToMarkdown(
+      '<p style="text-align: center"><span style="font-size: 16pt">Big</span></p>',
+    )
+    expect(md).toContain('font-size: 16pt')
+  })
+})
