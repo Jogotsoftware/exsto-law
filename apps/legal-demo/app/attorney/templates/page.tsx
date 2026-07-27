@@ -6,7 +6,7 @@
 // TEMPLATE EDITOR). The body is text with {{tokens}}; CRUD + AI go through the
 // through-core legal.template.* tools.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
 import { TemplateConfigModal } from '@/components/configEditors'
@@ -27,7 +27,8 @@ import { TemplateEditor, type TemplateEditorHandle } from '@/components/template
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { TemplateEsignPanel, roleBlockHtml } from '@/components/templates/TemplateEsignPanel'
-import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import { DocumentSheet } from '@/components/DocumentSheet'
+import { DocumentThumb } from '@/components/DocumentThumb'
 import { Tabs } from '@/components/Tabs'
 import { GemCluster } from '@/components/GemSparkle'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
@@ -238,69 +239,6 @@ function DocKindCombobox({
 // have): the template's own document-kind tag when set, else its category.
 function kindBadge(t: Pick<Template, 'category' | 'docKind'>): string {
   return t.docKind ? humanKind(t.docKind) : t.category === 'email' ? 'Email' : 'Document'
-}
-
-// Split a line of body text into literal-text / {{token}} runs, so a gallery
-// thumbnail can render real merge tokens as gold chips (comp: editBlocks runs).
-function renderTokenRuns(text: string): ReactNode[] {
-  const parts: ReactNode[] = []
-  const re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
-  let last = 0
-  let i = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    parts.push(<TokenChip key={i++}>{`{{${m[1]}}}`}</TokenChip>)
-    last = m.index + m[0].length
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts
-}
-
-// A light-touch markdown-to-plain pass for thumbnail text — strips heading
-// markers, emphasis, and any raw inline HTML the body carries (aligned blocks
-// / per-run styling are kept as literal <p style="..."> etc. in the stored
-// markdown, see lib/templateBody.ts's alignedBlock rule — a thumbnail must
-// never show that markup verbatim). Keeps {{tokens}} intact for
-// renderTokenRuns above. No length-slicing here: overflow/ellipsis in CSS
-// (.li-tpl-thumb-heading / .li-tpl-thumb-line) truncates visually without
-// ever cutting a {{token}} in half.
-function stripMd(s: string): string {
-  return s
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/[*_`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-// Real content for a gallery card thumbnail: the template's own first heading
-// (or its name, if the body has none yet) + a few real body lines — never the
-// comp's placeholder bars (README rule 4: comp demo data is never hardcoded).
-function thumbPreview(t: Template): { heading: string; lines: string[] } {
-  // isHeading is read off the RAW row (before stripMd removes the `#` marker
-  // it's testing for) — stripMd is applied only to the text kept for display.
-  const rawRows = (t.body ?? '')
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-  let heading = ''
-  const lines: string[] = []
-  for (const raw of rawRows) {
-    const isHeading = /^#{1,6}\s+/.test(raw)
-    const row = stripMd(raw)
-    if (!row) continue
-    if (!heading) {
-      heading = row
-      continue
-    }
-    if (isHeading) continue // one heading in the snippet, like the comp
-    lines.push(row)
-    if (lines.length >= 4) break
-  }
-  return { heading: heading || t.name || 'Untitled', lines }
 }
 
 export default function TemplatesPage() {
@@ -990,7 +928,6 @@ export default function TemplatesPage() {
           {templates && templates.length > 0 && view === 'grid' && (
             <div className="li-tpl-grid">
               {templates.map((t) => {
-                const preview = thumbPreview(t)
                 const tokenCount = extractTokens(t.body).length
                 const updated = new Date(t.updatedAt).toLocaleDateString('en-US', {
                   month: 'short',
@@ -1006,18 +943,11 @@ export default function TemplatesPage() {
                       aria-label={`Open ${t.name || 'untitled template'}`}
                     >
                       <div className="li-tpl-card-thumbwrap">
-                        <DocumentSheet variant="thumb" className="li-tpl-card-thumb">
-                          <div className="li-tpl-thumb-heading">
-                            {renderTokenRuns(preview.heading)}
-                          </div>
-                          <div className="li-tpl-thumb-body">
-                            {preview.lines.map((l, i) => (
-                              <div key={i} className="li-tpl-thumb-line">
-                                {renderTokenRuns(l)}
-                              </div>
-                            ))}
-                          </div>
-                        </DocumentSheet>
+                        <DocumentThumb
+                          body={t.body ?? ''}
+                          empty="Empty template — open to draft it."
+                          className="li-tpl-card-thumb"
+                        />
                       </div>
                       <div className="li-tpl-card-meta">
                         <div className="li-tpl-card-row">

@@ -173,6 +173,29 @@ turndown.addRule('liTableSection', {
   replacement: (content) => content,
 })
 
+// DOC-RENDER-1: an aligned block is serialized as RAW HTML (see alignedBlock
+// below), and outerHTML bypasses turndown's rules entirely — including the
+// templateVariableSpan rule that collapses a chip to `{{token}}`. So a merge
+// chip sitting inside a centered title used to be persisted into the stored
+// markdown as the editor's own DOM (`<span class="tpl-var-chip"
+// data-variable="company_name">{{company_name}}</span>`), which then (a) showed
+// as literal tags on any surface that renders the body as text and (b) gained
+// one more nested wrapper span on every load/save cycle, because markdownToHtml
+// re-chipified the `{{token}}` still sitting inside the stale chip.
+//
+// Collapse chips to their bare `{{token}}` before serializing. Work on a CLONE:
+// `node` is the LIVE editor DOM in the browser, and mutating it mid-save would
+// destroy the attorney's chips on screen.
+function alignedBlockHtml(el: HTMLElement): string {
+  const clone = el.cloneNode(true) as HTMLElement
+  for (const chip of Array.from(clone.querySelectorAll('span[data-variable]'))) {
+    const name = chip.getAttribute('data-variable') ?? ''
+    const text = clone.ownerDocument.createTextNode(`{{${name}}}`)
+    chip.parentNode?.replaceChild(text, chip)
+  }
+  return clone.outerHTML
+}
+
 // Alignment lives on block elements that DO have built-in commonmark rules
 // (heading → `#`, paragraph → text), which out-prioritize keep(). So an aligned
 // block needs an addRule (user rules win) that emits it as raw HTML; an unaligned
@@ -182,7 +205,7 @@ turndown.addRule('alignedBlock', {
   filter: (node) =>
     ALIGNED_BLOCKS.has(node.nodeName) &&
     /text-align\s*:/i.test((node as HTMLElement).getAttribute?.('style') ?? ''),
-  replacement: (_content, node) => `\n\n${(node as HTMLElement).outerHTML}\n\n`,
+  replacement: (_content, node) => `\n\n${alignedBlockHtml(node as HTMLElement)}\n\n`,
 })
 
 // A bare merge token: {{client_name}}. Deliberately NOT matched: {{>include_key}}
@@ -235,8 +258,32 @@ function hydrateMarkerLines(body: string): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
+// DOC-RENDER-1: bodies saved BEFORE the alignedBlockHtml fix above carry the
+// editor's raw chip DOM inline inside their aligned blocks. Collapse any such
+// span back to its bare `{{token}}` on load, so the re-chipify pass below
+// produces ONE clean chip instead of nesting a second span inside the stale one
+// (and so the next save writes a healed body). Matches only the chip shape the
+// editor emits — a single span whose content is its own token text — so a
+// legitimately styled `<span style>` in the body is never touched.
+const LEGACY_CHIP_RE =
+  /<span\b(?=[^>]*\bdata-variable="([a-zA-Z0-9_]+)")[^>]*>\s*(?:\{\{\s*[a-zA-Z0-9_]+\s*\}\})?\s*<\/span>/gi
+
+function healLegacyChips(body: string): string {
+  if (!body.includes('data-variable')) return body
+  // A body saved repeatedly nests one wrapper per save; the inner-most chip is
+  // the only one the pattern can match, so unwrap outward until stable. Bounded
+  // so a pathological body can never spin.
+  let out = body
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(LEGACY_CHIP_RE, (_m, name: string) => `{{${name}}}`)
+    if (next === out) break
+    out = next
+  }
+  return out
+}
+
 export function markdownToHtml(body: string): string {
-  const html = md.parse(hydrateMarkerLines(body ?? ''), { async: false }) as string
+  const html = md.parse(hydrateMarkerLines(healLegacyChips(body ?? '')), { async: false }) as string
   // Re-hydrate {{token}} markers into TipTap variable spans so they load as
   // atomic chips (not editable literal text). The turndown rule above reverses this.
   return html.replace(

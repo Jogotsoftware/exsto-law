@@ -11,7 +11,7 @@
 // template's fields in one click. Composition: {{>other_template}} inlines another
 // template (handled by renderTemplate; insert it like any token).
 
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
@@ -21,7 +21,7 @@ import type { VariableStatus } from '@/components/templates/TemplateVariableNode
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { EyeIcon, SignatureIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
-import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import { DocumentThumb } from '@/components/DocumentThumb'
 import {
   TemplateEsignPanel,
   roleBlockHtml,
@@ -110,32 +110,6 @@ function humanize(token: string): string {
 
 function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-// A handful of lines from the template body for the collapsed card's mini
-// thumbnail (comp: SERVICE EDITOR › Templates), rendering {{token}} markers as
-// gold TokenChips so the preview reads as a real merge document, not a mockup.
-function renderThumbLines(body: string, max = 6): ReactNode[] {
-  const lines = body
-    .split(/\r?\n/)
-    .map((l) =>
-      l
-        .replace(/^#+\s*/, '')
-        .replace(/[*_>#-]/g, '')
-        .trim(),
-    )
-    .filter(Boolean)
-    .slice(0, max)
-  return lines.map((line, i) => {
-    const parts = line.split(TOKEN_RE)
-    return (
-      <div key={i} className="li-svc-thumb-line">
-        {parts.map((part, j) =>
-          j % 2 === 1 ? <TokenChip key={j}>{part}</TokenChip> : <Fragment key={j}>{part}</Fragment>,
-        )}
-      </div>
-    )
-  })
 }
 
 interface AiModelOpt {
@@ -853,14 +827,11 @@ function KindEditor({
       </div>
 
       <div className="li-svc-thumbwrap">
-        <DocumentSheet variant="thumb" serif className="li-svc-thumb">
-          <div className="li-svc-thumb-title">{humanKind(template.documentKind).toUpperCase()}</div>
-          {text.trim() ? (
-            renderThumbLines(text)
-          ) : (
-            <div className="li-svc-thumb-line text-muted">No content yet — open the editor.</div>
-          )}
-        </DocumentSheet>
+        <DocumentThumb
+          body={text}
+          title={humanKind(template.documentKind).toUpperCase()}
+          className="li-svc-thumb"
+        />
       </div>
 
       {open && (

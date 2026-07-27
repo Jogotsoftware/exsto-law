@@ -144,3 +144,40 @@ describe('template preview', () => {
     })
   })
 })
+
+// DOC-RENDER-1. Thumbnails used to be built by stripping markdown syntax
+// characters off each line with `.replace(/[*_>#-]/g, '')` and printing the
+// result as text. A body carrying inline markup therefore rendered its TAGS as
+// visible body text — with the stripped characters missing from the attribute
+// names, which is what made the report so distinctive:
+//   <p style="textalign: center;"<strongOPERATING AGREEMENT OF <span
+//   datavariable="companyname" class="tplvarchip"
+// DocumentThumb renders through buildPreview instead, so markup is PARSED and
+// sanitized, never printed.
+describe('document thumbnails never print markup as text (DOC-RENDER-1)', () => {
+  const LEAKY_BODY =
+    '<p style="text-align: center"><strong>OPERATING AGREEMENT OF ' +
+    '<span class="tpl-var-chip" data-variable="company_name">{{company_name}}</span></strong></p>'
+
+  it('renders the aligned title as real markup, not literal text', () => {
+    const { html } = buildPreview(LEAKY_BODY)
+    expect(html).toContain('OPERATING AGREEMENT OF')
+    // The tag survives as a TAG (centered, bold) — the sanitizer re-serializes
+    // the style declaration without the space, hence the loose match.
+    expect(html).toMatch(/text-align:\s*center/)
+    expect(html).toContain('<strong>')
+    // … and never as escaped text the attorney would read on the page.
+    expect(html).not.toContain('&lt;p')
+    expect(html).not.toContain('&lt;strong')
+    expect(html).not.toContain('&lt;span')
+  })
+
+  it('drops the editor-only chip class at the sanitizer boundary', () => {
+    expect(buildPreview(LEAKY_BODY).html).not.toContain('tpl-var-chip')
+  })
+
+  it('merges the token rather than showing raw {{…}} in the thumbnail', () => {
+    const { html } = buildPreview(LEAKY_BODY)
+    expect(html).not.toContain('{{company_name}}')
+  })
+})

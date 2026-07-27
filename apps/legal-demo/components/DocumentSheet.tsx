@@ -10,11 +10,15 @@ import type { ReactElement, ReactNode } from 'react'
 //   full       816×1056px (8.5in × 11in @ 96dpi), 96px padding — review
 //              reader, eSign detail preview
 //   editor     612×792px — template-editor canvas and its sample-data preview
+//   fit        fluid width up to 816px, margins and type scaled from the page
+//              width so the text-to-page ratio matches `full` at any size —
+//              for readers inside a narrow column or modal (client-portal
+//              engagement gate, eSign signing pane, executed-copy review)
 //   thumb      fluid width, aspect-ratio 8.5/11, container queries (cqw) for
 //              typography — template gallery, doc previews in cards
 //   thumb-form aspect-ratio 8.5/9.5 — intake-form gallery cards
 
-export type DocumentSheetVariant = 'full' | 'editor' | 'thumb' | 'thumb-form'
+export type DocumentSheetVariant = 'full' | 'editor' | 'fit' | 'thumb' | 'thumb-form'
 
 export type DocumentSheetProps = {
   variant?: DocumentSheetVariant
@@ -29,6 +33,7 @@ export type DocumentSheetProps = {
 const VARIANT_CLASS: Record<DocumentSheetVariant, string> = {
   full: 'li-docsheet--full',
   editor: 'li-docsheet--editor',
+  fit: 'li-docsheet--fit',
   thumb: 'li-docsheet--thumb',
   'thumb-form': 'li-docsheet--thumb li-docsheet--thumb-form',
 }
@@ -50,7 +55,12 @@ export function DocumentSheet({
           <span>{watermark}</span>
         </div>
       ) : null}
-      <div style={{ position: 'relative' }}>{children}</div>
+      {/* The page's content box. Classed (not just inline-positioned) so the
+          `fit` variant can scale margins/type off the sheet's own width — the
+          sheet is the container, so only a DESCENDANT can read cqw units. */}
+      <div className="li-docsheet-inner" style={{ position: 'relative' }}>
+        {children}
+      </div>
     </div>
   )
 }

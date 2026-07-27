@@ -21,6 +21,7 @@ import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import {
   guidedCtaLabel,
@@ -941,13 +942,21 @@ function SignerDoc({
       </div>
     )
   }
+  // DOC-RENDER-1: the markdown-bodied document a signer reads before signing is
+  // shown on the same letter page as every other document surface. (The
+  // overlayMode branch above already renders true page proportions — it draws the
+  // real PDF through PdfCanvas — so only this branch was off-pattern.)
   return (
     <div className="li-esp-sign-doc">
       {title}
-      <div
-        className="doc-rendered"
-        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(view.bodyMarkdown) }}
-      />
+      <DocumentCanvas className="li-doc-canvas--inset">
+        <DocumentSheet variant="fit">
+          <div
+            className="doc-rendered li-rev-doc"
+            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(view.bodyMarkdown) }}
+          />
+        </DocumentSheet>
+      </DocumentCanvas>
     </div>
   )
 }
