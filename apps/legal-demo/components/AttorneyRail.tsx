@@ -100,6 +100,10 @@ const NAV: NavNode[] = [
       { href: '/attorney/settings/payments', label: 'Payments', Icon: DollarSignIcon },
       { href: '/attorney/settings/ai-usage', label: 'AI Usage', Icon: SparklesIcon },
       { href: '/attorney/settings/assistant', label: 'Assistant', Icon: WandIcon },
+      // CONTEXT-SETTINGS-1 — firm-wide AI instructions per capability + the
+      // firm/user persistent context files. Sits next to Assistant, which owns
+      // the chat/email instruction slots.
+      { href: '/attorney/settings/context', label: 'AI Context', Icon: SparklesIcon },
     ],
   },
 ]

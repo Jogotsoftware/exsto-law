@@ -39,6 +39,7 @@ import {
   setServiceLifecycleAI,
   createCostAI,
   setServiceActive,
+  listServicesIncludingInactive,
   type AssistantChatReply,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
@@ -204,6 +205,23 @@ function splice(s: DriveState, key: keyof DriveState['pending'], index: number):
 // calls, mark the phase approved (as the client does), and fire the app's exact
 // hidden continuation as the next turn.
 async function approve(s: DriveState, artifact: string, step: string): Promise<void> {
+  const remaining = (): number => {
+    const k: Record<string, keyof DriveState['pending']> = {
+      service: 'serviceProposals',
+      template: 'templateProposals',
+      questionnaire: 'questionnaireProposals',
+      billing: 'costProposals',
+      workflow: 'workflowProposals',
+    }
+    return ((s.pending[k[artifact]!] as unknown[] | undefined) ?? []).length
+  }
+  while (remaining() > 1) await approveOne(s, artifact, null)
+  return approveOne(s, artifact, step)
+}
+
+// Approve ONE card. A null step means "don't spend a model turn on the
+// continuation yet" — used while draining a multi-card batch.
+async function approveOne(s: DriveState, artifact: string, step: string | null): Promise<void> {
   let label = ''
   let link = ''
   if (artifact === 'service') {
@@ -291,6 +309,7 @@ async function approve(s: DriveState, artifact: string, step: string): Promise<v
   // The client marks the phase approved — add-only, exactly as the app does
   // (UnifiedAssistantChat.tsx:2878 `next.add(info.artifact)`).
   s.approvedPhases.add(artifact)
+  if (!step) return
   await turn(s, step, `✓ ${label} created (${link}).\n${CONTINUE_DRIVER}`)
 }
 
@@ -303,10 +322,11 @@ async function answer(s: DriveState, step: string, answers: Record<string, strin
 }
 
 const WALKTHROUGH =
-  'This is a service for a trademark clearance search. The client books it from my site, ' +
-  'tells me the mark they want to use and what goods or services it is for, I run the ' +
-  'clearance search and write them a clearance opinion letter, and they pay a flat $600 ' +
-  'when I send it. There is also an engagement letter they sign up front.'
+  'This is a service for a consulting services agreement. The client books it from ' +
+  'my site, tells me who the contractor is and what the scope and pay terms are, the ' +
+  'agreement drafts from their answers, I review it before anything goes out, then both ' +
+  'sides e-sign it. Flat $350, charged when I approve the agreement. There is also an ' +
+  'engagement letter they sign up front.'
 
 async function run(outFile: string): Promise<void> {
   const attorneyId = await resolveAttorney()
@@ -347,6 +367,13 @@ async function run(outFile: string): Promise<void> {
       (s.pending.questionnaireProposals ?? [])[0]?.serviceKey ??
       null
     if (!adopted) throw new Error('no shell proposed and no card names a service to adopt')
+    const live = await listServicesIncludingInactive(s.ctx)
+    if (!live.some((x) => x.serviceKey === adopted)) {
+      throw new Error(
+        `the model proposed against "${adopted}", which is not a live service (retired?) — ` +
+          `it skipped the shell for a service that does not exist`,
+      )
+    }
     s.buildServiceKey = adopted
     s.approvedPhases.add('service')
     console.log(`(reused existing service ${adopted} — no shell proposed)`)
@@ -371,8 +398,8 @@ async function run(outFile: string): Promise<void> {
   await turn(
     s,
     '6-GO-BACK-TO-INTAKE',
-    'hold on — go back to the intake form. I also need it to ask whether they have ' +
-      'already started using the mark, and if so the date they first used it in commerce.',
+    'hold on — go back to the intake form. I also want it to ask how they heard about ' +
+      'the firm.',
   )
   for (let i = 0; i < 2 && !(s.pending.questionnaireProposals ?? []).length; i++) {
     const qs = s.pending.buildQuestions ?? []

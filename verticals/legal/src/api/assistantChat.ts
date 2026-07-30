@@ -39,11 +39,18 @@ import {
 } from './assistantContext.js'
 import {
   buildBaseSystemPrompt,
+  buildContextFilesBlock,
   buildCustomInstructionsBlock,
   type AssistantFirmFacts,
 } from './assistantPrompt.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
 import { getAssistantSettings } from './assistantSettings.js'
+import { getAiContextConfig } from './aiContextConfig.js'
+import {
+  AI_INSTRUCTION_SCOPES,
+  isAiInstructionScope,
+  saveAiInstruction,
+} from './aiInstructionRouting.js'
 import { jurisdictionDisplayName } from './jurisdictions.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
@@ -578,6 +585,82 @@ const PRODUCE_DOCUMENT_TOOL_DEF = {
   },
 }
 
+// CONTEXT-SETTINGS-1 (3) — the scope router the attorney actually talks to.
+// The description IS the routing doctrine: the model reads it to decide which
+// of the eight stores an instruction belongs in. The two rules that matter most
+// are stated as hard rules because getting either wrong is the expensive
+// mistake — a service-specific instruction written firm-wide silently changes
+// every document the firm produces, and a firm-wide one written onto a service
+// silently fails to apply anywhere else.
+const SAVE_AI_INSTRUCTION_TOOL_DEF = {
+  name: 'save_ai_instruction',
+  description:
+    'Save a standing instruction the attorney gives you about HOW the AI should work, into the right settings scope. Call this whenever they state a durable preference rather than asking for a one-off ("every document we generate should be professional and well formatted", "every letter should have my letterhead", "on this service always check the indemnity cap", "remember that we file in Wake County"). Do NOT call it for a request about the current task only.\n\nCHOOSING THE SCOPE — this is the whole job, get it right:\n• "every document" / "all our documents" / "always, when drafting" → firm_document_generation.\n• "every review" / "whenever you review a contract" → firm_document_review.\n• A rule about how YOU behave in chat ("always CC my paralegal", "give me bullets") → firm_assistant_chat if it is the firm\'s rule, my_assistant_chat if it is this attorney\'s own preference.\n• BACKGROUND FACTS rather than commands — about the firm (offices, filing courts, who does what) → firm_context; about this attorney personally (how they like to work, their caseload) → my_context.\n• Anything scoped to ONE service or ONE kind of matter ("this is a contract review for medical employee agreements, I look out for these three things", "for the LLC service, always add a buy-sell clause") → service_document_review or service_document_generation, with serviceKey set.\n\nHARD RULES:\n1. If the instruction is about one service but you do not know WHICH service, ASK. Never save it firm-wide as a fallback.\n2. If it is genuinely ambiguous between firm-wide and one service, ASK which they meant before calling this.\n3. Instructions are APPENDED, never replacing what is already saved.\n4. After it saves, tell the attorney in ONE short sentence exactly which setting you wrote to and where to find it. Never claim to have saved something you did not.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      scope: {
+        type: 'string',
+        enum: [...AI_INSTRUCTION_SCOPES],
+        description: 'Which settings store this instruction belongs in. See the routing rules.',
+      },
+      instruction: {
+        type: 'string',
+        description:
+          "The instruction to save, written as a clear standing rule in the attorney's own terms (one or two sentences). Not a transcript of the conversation.",
+      },
+      serviceKey: {
+        type: 'string',
+        description:
+          'REQUIRED for the two service_* scopes: the service this applies to. Call get_service_context to resolve the key if you do not have it; ask the attorney if it is unclear.',
+      },
+      documentKind: {
+        type: 'string',
+        description:
+          'REQUIRED for service_document_generation: which of the service\'s documents the instruction applies to (e.g. "operating_agreement").',
+      },
+    },
+    required: ['scope', 'instruction'],
+    additionalProperties: false,
+  },
+}
+
+// Executes the routing. Every write goes through api/aiInstructionRouting.ts →
+// the action layer; nothing here touches the substrate. The returned string is
+// what the model reports back, so it names the scope and where to find it.
+function buildSaveAiInstructionTool(ctx: ActionContext): ClientTool {
+  return {
+    definition: SAVE_AI_INSTRUCTION_TOOL_DEF,
+    name: 'save_ai_instruction',
+    run: async (raw) => {
+      const args = (raw ?? {}) as {
+        scope?: string
+        instruction?: string
+        serviceKey?: string
+        documentKind?: string
+      }
+      if (!isAiInstructionScope(args.scope)) {
+        return `"${String(args.scope)}" is not a valid scope. Choose one of: ${AI_INSTRUCTION_SCOPES.join(', ')}. Nothing was saved.`
+      }
+      try {
+        const saved = await saveAiInstruction(ctx, {
+          scope: args.scope,
+          instruction: args.instruction ?? '',
+          serviceKey: args.serviceKey,
+          documentKind: args.documentKind,
+        })
+        const target = saved.serviceKey
+          ? `${saved.scopeLabel} (service: ${saved.serviceKey}${saved.documentKind ? `, document: ${saved.documentKind}` : ''})`
+          : saved.scopeLabel
+        return `Saved to ${target}. The attorney can see and edit it at ${saved.where}. Tell them exactly this — which setting you wrote to and where — in one short sentence.`
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return `NOT saved: ${msg} Tell the attorney it was not saved and why; do not claim otherwise.`
+      }
+    },
+  }
+}
+
 // Build the produce_document ClientTool for this turn. Its run() captures the
 // produced document into `captured` (read back by the caller to surface the
 // downloadable card and to record it on the turn) and returns a short ack telling
@@ -668,6 +751,10 @@ export function buildAttorneyClientTools(
   // real ranked feed even on an unscoped chat. READ-ONLY; the paired ACT tools
   // (compose_email, the review/e-sign launchers) stay scope-gated below.
   tools.push(buildAttentionFeedTool(ctx))
+  // CONTEXT-SETTINGS-1: the scope router is registered on EVERY attorney turn,
+  // scoped or not — a standing preference ("every document should…") is stated
+  // just as often on a general chat as on a matter.
+  tools.push(buildSaveAiInstructionTool(ctx))
   // ASSISTANT-ACTS-1: act-in-place tools exist only on SCOPED turns — a client
   // email needs a client to resolve (matter/contact), and an envelope needs the
   // matter's documents. A general or context-off chat never offers them, so the
@@ -817,6 +904,10 @@ export function buildClaudeSystem(
   // assistantPrompt.ts normalizeInstructionsText for the string | string[]
   // compat shim (a pre-WP-2 settings row is still a bare string).
   attorneyInstructions: string | string[] = '',
+  // CONTEXT-SETTINGS-1 — the firm's and this attorney's persistent context
+  // files. Constant for the conversation, so they ride the cached stable half
+  // alongside the instruction blocks.
+  contextFiles: { firmContextMd?: string | null; userContextMd?: string | null } = {},
 ): string {
   const basePrompt = buildBaseSystemPrompt(firm)
   // FB-B — firm + attorney standing instructions, fenced and placed AFTER the
@@ -827,9 +918,13 @@ export function buildClaudeSystem(
     firm.firmInstructions,
     attorneyInstructions,
   )
-  const promptWithInstructions = customInstructions
-    ? `${basePrompt}\n\n${customInstructions}`
-    : basePrompt
+  const contextFilesBlock = buildContextFilesBlock(
+    contextFiles.firmContextMd,
+    contextFiles.userContextMd,
+  )
+  const promptWithInstructions = [basePrompt, customInstructions, contextFilesBlock]
+    .filter((part) => !!part)
+    .join('\n\n')
   let system = context
     ? `${promptWithInstructions}\n\n--- Context ---\n${context.full}`
     : promptWithInstructions
@@ -1516,11 +1611,14 @@ export async function assistantChat(
     // attorney force-selected from the /skills menu, and pass the current route.
     // Four independent reads — run concurrently instead of one-at-a-time so this
     // turn's context assembly isn't paying for their sum on the hot path.
-    const [catalog, forced, firm, attorneySettings] = await Promise.all([
+    const [catalog, forced, firm, attorneySettings, aiContext] = await Promise.all([
       listSkillCatalog(ctx),
       loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode)),
       resolveAssistantFirmFacts(ctx),
       getAssistantSettings(ctx),
+      // CONTEXT-SETTINGS-1 — the firm's persistent context file. Read on the
+      // same concurrent hop as the rest of the turn's context.
+      getAiContextConfig(ctx),
     ])
     const system = buildClaudeSystem(
       scope,
@@ -1532,6 +1630,7 @@ export async function assistantChat(
       buildSkillCatalogText(catalog, firm.practiceAreas),
       buildActiveSkillsText(forced),
       attorneySettings?.customInstructions,
+      { firmContextMd: aiContext.firmContextMd, userContextMd: attorneySettings?.contextMd },
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey, input.pendingArtifacts ?? [])
@@ -1844,13 +1943,15 @@ export async function* assistantChatStream(
     )
     const firmPromise = resolveAssistantFirmFacts(ctx)
     const attorneySettingsPromise = getAssistantSettings(ctx)
+    const aiContextPromise = getAiContextConfig(ctx)
     const forced = await forcedPromise
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
-    const [catalog, firm, attorneySettings] = await Promise.all([
+    const [catalog, firm, attorneySettings, aiContext] = await Promise.all([
       catalogPromise,
       firmPromise,
       attorneySettingsPromise,
+      aiContextPromise,
     ])
     const system = buildClaudeSystem(
       scope,
@@ -1862,6 +1963,7 @@ export async function* assistantChatStream(
       buildSkillCatalogText(catalog, firm.practiceAreas),
       buildActiveSkillsText(forced),
       attorneySettings?.customInstructions,
+      { firmContextMd: aiContext.firmContextMd, userContextMd: attorneySettings?.contextMd },
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey, input.pendingArtifacts ?? [])

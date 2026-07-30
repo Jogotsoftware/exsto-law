@@ -1319,6 +1319,12 @@ export interface SignerDocument {
   isFile: boolean
   fileName: string | null
   fileContentType: string | null
+  /** DOC-RENDER-2 — the version's persisted per-document base font (EDITOR-FIX-1
+   *  item 7), so the signing surface shows the document in the SAME face/size the
+   *  attorney reviewed and the PDF export uses. Null (⇒ app defaults) for files
+   *  and pre-existing versions without the metadata. */
+  fontFamily: string | null
+  fontSize: number | null
   /** This signer's fillable fields on THIS document. */
   fields: Array<{ id: string; type: EsignFieldType; label: string; prefill?: string }>
   /** This signer's coordinate placements on THIS document. */
@@ -1336,6 +1342,9 @@ export interface SignableDocument {
   isFile: boolean
   fileName: string | null
   fileContentType: string | null
+  /** DOC-RENDER-2 — the primary document's persisted base font (mirrors documents[0]). */
+  fontFamily: string | null
+  fontSize: number | null
   signerName: string | null
   signerEmail: string | null
   signerTitle: string | null
@@ -1393,11 +1402,15 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       object_key: string | null
       content_type: string | null
       original_filename: string | null
+      font_family: string | null
+      font_size: string | null
     }>(
       `SELECT e.name AS doc_name, cb.body,
               dv.metadata->>'object_key' AS object_key,
               COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
-              dv.metadata->>'original_filename' AS original_filename
+              dv.metadata->>'original_filename' AS original_filename,
+              dv.metadata->>'font_family' AS font_family,
+              dv.metadata->>'font_size' AS font_size
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
@@ -1466,6 +1479,8 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
         isFile: isFileDoc,
         fileName: isFileDoc ? (row.original_filename ?? null) : null,
         fileContentType: isFileDoc ? (row.content_type ?? null) : null,
+        fontFamily: isFileDoc ? null : (row.font_family ?? null),
+        fontSize: isFileDoc || row.font_size == null ? null : Number(row.font_size),
         fields: deriveFields(docPlacements, i === 0),
         placements: docPlacements,
       }
@@ -1479,6 +1494,8 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       isFile: false,
       fileName: null,
       fileContentType: null,
+      fontFamily: null,
+      fontSize: null,
       fields: [],
       placements: [],
     }
@@ -1490,6 +1507,8 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       isFile: primary.isFile,
       fileName: primary.fileName,
       fileContentType: primary.fileContentType,
+      fontFamily: primary.fontFamily,
+      fontSize: primary.fontSize,
       signerName: await latestAttr(client, ctx.tenantId, requestId, 'signer_name'),
       signerEmail: await latestAttr(client, ctx.tenantId, requestId, 'signer_email'),
       signerTitle,

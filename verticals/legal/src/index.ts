@@ -45,6 +45,9 @@ export * from './templates/loader.js'
 // Shared document-formatting standard injected into every generation path
 // (draft/revise/template-AI/propose_template). Pure policy, no IO.
 export { DOCUMENT_STYLE_INSTRUCTION, DOCUMENT_STYLE_BRIEF } from './templates/documentStyle.js'
+// CONTEXT-SETTINGS-1 — the universal drafting/review rules, single-sourced and
+// composed in at generation time instead of pasted into every service prompt.
+export { DRAFTING_BASE_GUIDANCE, REVIEW_BASE_GUIDANCE } from './templates/promptDefaults.js'
 // Platform control plane (ADR 0046) — cross-tenant operations behind guarded
 // private.cp_* functions; the admin console's operation core.
 export * from './controlPlane/index.js'

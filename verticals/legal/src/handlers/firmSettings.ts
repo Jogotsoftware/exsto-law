@@ -297,6 +297,41 @@ registerActionHandler(
   },
 )
 
+// CONTEXT-SETTINGS-1 — the firm's AI Context settings: per-capability standing
+// instructions (document generation, document review), optional overrides of
+// the universal base guidance, and the firm's persistent context file. One JSON
+// config attribute on the firm_settings singleton, same Contract-K discipline
+// as email_drafting_config above. The API layer (api/aiContextConfig.ts
+// updateAiContextConfig) normalizes, caps and versions the config before
+// calling submitAction; this handler stores the already-resolved config
+// verbatim.
+registerActionHandler(
+  'legal.firm.set_ai_context_config',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as { config?: Record<string, unknown> }
+    const config = p.config && typeof p.config === 'object' ? p.config : {}
+
+    const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'ai_context_config',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: firmSettingsId,
+      attributeKindId: akId,
+      value: config,
+      confidence: 1.0,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { firm_settings_id: firmSettingsId }
+  },
+)
+
 // The firm's invoice template branding/content config (Phase 3). Stored as one
 // JSON attribute on the firm_settings singleton; a new write supersedes the prior
 // (append-only, effective-dated). The shape is validated/resolved on the read side

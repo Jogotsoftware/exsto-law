@@ -26,6 +26,12 @@ import {
   type Lifecycle,
 } from '../lifecycle/index.js'
 import { getServiceLifecycle, setServiceLifecycle } from './serviceLifecycle.js'
+import {
+  composeContextBlocks,
+  getAiContextConfig,
+  resolveAiContextConfigDoc,
+  type AiContextConfigDoc,
+} from './aiContextConfig.js'
 
 export interface ServiceField {
   id: string
@@ -874,11 +880,22 @@ export function completenessFromTransitions(
   const promptByKind: Record<string, string | null> = {}
   const templateByKind: Record<string, 'config' | 'repo' | 'none'> = {}
   if (route === 'auto') {
-    const prompts = transitions.drafting?.prompts ?? {}
     const templates = transitions.document_templates?.templates ?? {}
     for (const kind of documents) {
-      const t = prompts[kind]
-      promptByKind[kind] = typeof t === 'string' ? t : null
+      // CONTEXT-SETTINGS-1 — the gate asks "has the attorney authored drafting
+      // config for this kind in-app", and there are now TWO shapes that answer
+      // yes: the service's own instructions (composed into a full prompt at
+      // generation time) or a hand-authored full prompt. Resolve through the
+      // same resolver the drafting worker uses so both count, and a service
+      // built on the new layer is enableable. Deliberately resolved with the
+      // PLATFORM-DEFAULT context config rather than the firm's: a composed
+      // prompt always carries the required slots regardless of what the firm
+      // has configured, so completeness must not depend on a DB read (this
+      // helper is pure, and the enable handler calls it inside its own
+      // transaction). 'repo'/'none' still means nothing was authored.
+      const doc = resolveDraftingPromptDoc(transitions.drafting, serviceKey, kind)
+      promptByKind[kind] =
+        doc.source === 'composed' || doc.source === 'config' ? doc.promptText : null
       const tpl = templates[kind]
       templateByKind[kind] =
         typeof tpl === 'string' && tpl.trim() ? 'config' : hasRepoTemplate(kind) ? 'repo' : 'none'
@@ -1215,20 +1232,44 @@ export const REQUIRED_DRAFTING_SLOTS = [
 export interface DraftingConfig {
   prompt_version?: number
   prompts?: Record<string, string>
+  // CONTEXT-SETTINGS-1 — the attorney's SERVICE-SPECIFIC instructions per
+  // document kind, slot-free. This is the layer the per-service prompt box
+  // now edits: the universal rules, the firm's standing generation
+  // instructions, and the fixed input slots are composed around it at
+  // generation time (composeDraftingBasePrompt below) instead of being pasted
+  // into every service's textarea. `prompts` above stays as the ADVANCED
+  // full-prompt override for a service that genuinely needs to control the
+  // whole template; instructions win when both are present.
+  instructions?: Record<string, string>
 }
 
 export interface DraftingPromptDoc {
   serviceKey: string
   documentKind: string
-  // The resolved prompt text. Null when neither config nor a repo file yields one.
+  // The resolved prompt text — always the FULL prompt the drafting worker
+  // feeds the model, whichever mode produced it. This is what the editor's
+  // Advanced panel previews.
   promptText: string | null
-  // 'config' when it came from transitions.drafting.prompts; 'repo' when it fell
-  // back to the bundled drafting-prompt.md; 'none' when nothing resolved.
-  source: 'config' | 'repo' | 'none'
-  // The config prompt_version when source === 'config'; null otherwise.
+  // 'composed' — assembled from the universal rules + firm AI Context settings
+  //   + this service's own instructions (the normal mode after
+  //   CONTEXT-SETTINGS-1).
+  // 'config'   — a stored full-prompt override in transitions.drafting.prompts.
+  // 'repo'     — the bundled drafting-prompt.md fallback.
+  // 'none'     — nothing resolved.
+  source: 'composed' | 'config' | 'repo' | 'none'
+  // The config prompt_version when the prompt came from config; null otherwise.
   promptVersion: number | null
   // The required mustache slots, for the editor's checklist.
   requiredSlots: readonly string[]
+  // The SERVICE-SPECIFIC instructions alone — what the attorney actually edits.
+  // '' when the service has none (a valid, common state: the firm defaults
+  // carry the whole prompt). Null only when this service is in legacy
+  // full-prompt mode and its stored prompt could not be safely split.
+  instructionsText: string | null
+  // True when a stored full-prompt override exists that is NOT being used
+  // because instructions mode won — surfaced in the Advanced panel so a
+  // hand-tuned legacy prompt is never silently ignored.
+  hasLegacyPromptOverride: boolean
 }
 
 // Which required slots a prompt is MISSING. Empty array = valid.
@@ -1236,15 +1277,108 @@ export function missingDraftingSlots(promptText: string): string[] {
   return REQUIRED_DRAFTING_SLOTS.filter((slot) => !promptText.includes(slot))
 }
 
-// Read a service's drafting prompt for one document kind. Resolution order:
-// in-app config (transitions.drafting.prompts[documentKind]) → repo file
-// (loadDraftingPrompt) → null. Returns a doc carrying the source + version so the
-// editor can show provenance and the worker can record it.
+// CONTEXT-SETTINGS-1 — the fixed INPUTS block. These are the three slots the
+// drafting worker fills (REQUIRED_DRAFTING_SLOTS above); they are platform
+// plumbing, not attorney guidance, so a composed prompt carries them
+// automatically and the attorney never has to keep them alive in a textarea.
+const DRAFTING_INPUTS_BLOCK = [
+  '# Inputs',
+  '',
+  "## The client's intake answers (JSON)",
+  '',
+  '{{questionnaire_responses_json}}',
+  '',
+  '## Consultation notes, if any (additional context)',
+  '',
+  '{{transcript_text}}',
+  '',
+  '## The document template to complete',
+  '',
+  '{{operating_agreement_template}}',
+].join('\n')
+
+// Assemble the FULL drafting prompt from its layers. Pure — exported for tests
+// and for the editor's Advanced preview, so what the attorney sees is byte-for-
+// byte what the worker sends.
+//
+// Order: context blocks (universal rules → firm context → firm defaults →
+// user context → this service's instructions) → the fixed inputs → the
+// output/trace and execution-block contracts. The narrowest guidance sits
+// closest to the inputs; the two contracts sit last because they describe the
+// OUTPUT and must be the final word.
+export function composeDraftingBasePrompt(args: {
+  config: AiContextConfigDoc
+  serviceInstructions?: string | null
+  userContextMd?: string | null
+}): string {
+  const context = composeContextBlocks({
+    capability: 'document_generation',
+    config: args.config,
+    serviceInstructions: args.serviceInstructions,
+    userContextMd: args.userContextMd,
+  })
+  return [
+    context,
+    '',
+    DRAFTING_INPUTS_BLOCK,
+    DRAFTING_TRACE_CONTRACT.trimEnd(),
+    DRAFTING_EXECUTION_BLOCK_RULE.trimEnd(),
+  ].join('\n')
+}
+
+// Split a LEGACY stored full prompt (one seeded by defaultDraftingPrompt before
+// CONTEXT-SETTINGS-1) into the attorney's own instructions, discarding the
+// scaffold that is now composed automatically.
+//
+// Returns null when the prompt is NOT recognizably descended from that seed —
+// a hand-authored prompt keeps full-prompt mode rather than being silently
+// mangled into an instructions string. Recognition is anchored on two phrases
+// that appear only in the seeded base paragraph.
+export function deriveInstructionsFromLegacyPrompt(promptText: string): string | null {
+  if (
+    !promptText.includes('LEAVE ITS {{token}} IN PLACE UNCHANGED') ||
+    !promptText.includes('This is the BASE guidance')
+  ) {
+    return null
+  }
+  let body = promptText
+  // Drop the appended contracts (each begins at its own markdown heading).
+  for (const heading of ['# Reasoning trace (required)', '# Execution block (signatures)']) {
+    const at = body.indexOf(heading)
+    if (at >= 0) body = body.slice(0, at)
+  }
+  const drop = new Set<string>([
+    ...REQUIRED_DRAFTING_SLOTS,
+    "The client's intake answers (use these to fill the document):",
+    'Consultation notes, if any (additional context):',
+    'The document template to complete:',
+    '# Output format',
+  ])
+  const kept = body
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim()
+      if (!t) return true
+      if (drop.has(t)) return false
+      // The seeded base paragraph itself — one long line carrying the markers.
+      if (t.includes('LEAVE ITS {{token}} IN PLACE UNCHANGED')) return false
+      return true
+    })
+    .join('\n')
+  return kept.trim()
+}
+
+// Read a service's drafting prompt for one document kind, fully resolved.
+// Resolution order: this service's INSTRUCTIONS composed with the firm's AI
+// Context settings → a stored full-prompt override → the bundled repo prompt →
+// null. Returns a doc carrying the source, the version, and the instructions
+// alone so the editor can show provenance and edit only the custom layer.
 export async function getDraftingPrompt(
   ctx: ActionContext,
   serviceKey: string,
   documentKind: string,
 ): Promise<DraftingPromptDoc | null> {
+  const config = await getAiContextConfig(ctx)
   return withActionContext(ctx, async (client) => {
     const res = await client.query<WorkflowRow>(
       `SELECT ${WORKFLOW_COLS}
@@ -1254,30 +1388,87 @@ export async function getDraftingPrompt(
     )
     const r = res.rows[0]
     if (!r) return null
-    return resolveDraftingPromptDoc(r.transitions.drafting, serviceKey, documentKind)
+    return resolveDraftingPromptDoc(r.transitions.drafting, serviceKey, documentKind, { config })
   })
 }
 
-// Pure resolver shared by getDraftingPrompt and the drafting worker: config wins,
-// else the repo file, else null. Kept side-effect-free so generateDraft can reuse
-// it without a second DB round-trip (it already has the service's transitions in
-// hand via the matter's service config).
+export interface DraftingResolutionLayers {
+  // The firm's AI Context settings. Omitted only by legacy callers that have no
+  // ctx to read it with; they get the platform defaults, which is exactly what
+  // an unconfigured firm would have resolved to anyway.
+  config?: AiContextConfigDoc
+  // The acting human's persistent context file, when one is known. Background
+  // drafting runs as the tenant's AI agent actor with no "current user", so
+  // this is deliberately absent there rather than attributed to whoever
+  // happened to trigger the job.
+  userContextMd?: string | null
+}
+
+// Pure resolver shared by getDraftingPrompt and the drafting worker: this
+// service's instructions composed with the firm's context wins, else a stored
+// full-prompt override, else the repo file, else null. Kept side-effect-free so
+// generateDraft can reuse it without a second DB round-trip.
 export function resolveDraftingPromptDoc(
   drafting: DraftingConfig | undefined,
   serviceKey: string,
   documentKind: string,
+  layers?: DraftingResolutionLayers,
 ): DraftingPromptDoc {
+  const config = layers?.config ?? resolveAiContextConfigDoc(null)
+  const promptVersion =
+    typeof drafting?.prompt_version === 'number' ? drafting.prompt_version : null
   const configured = drafting?.prompts?.[documentKind]
-  if (typeof configured === 'string' && configured.trim()) {
+  const hasLegacyPromptOverride = typeof configured === 'string' && !!configured.trim()
+
+  // 1. Instructions mode — the normal path after CONTEXT-SETTINGS-1. An
+  //    explicitly stored empty string still counts: "this service adds nothing
+  //    beyond the firm defaults" is a real, saved answer.
+  const stored = drafting?.instructions?.[documentKind]
+  let instructionsText: string | null = typeof stored === 'string' ? stored.trim() : null
+
+  // 2. No stored instructions but a legacy seeded prompt — derive the custom
+  //    remainder so an existing service moves over with nothing lost and the
+  //    boilerplate stops being shown as editable.
+  if (instructionsText === null && hasLegacyPromptOverride) {
+    instructionsText = deriveInstructionsFromLegacyPrompt(configured)
+  }
+
+  if (instructionsText !== null) {
+    return {
+      serviceKey,
+      documentKind,
+      promptText: composeDraftingBasePrompt({
+        config,
+        serviceInstructions: instructionsText,
+        userContextMd: layers?.userContextMd,
+      }),
+      source: 'composed',
+      promptVersion,
+      requiredSlots: REQUIRED_DRAFTING_SLOTS,
+      instructionsText,
+      hasLegacyPromptOverride,
+    }
+  }
+
+  // 3. A hand-authored full prompt that could not be split — left exactly as it
+  //    is. The attorney keeps control of the whole template.
+  if (hasLegacyPromptOverride) {
     return {
       serviceKey,
       documentKind,
       promptText: configured,
       source: 'config',
-      promptVersion: typeof drafting?.prompt_version === 'number' ? drafting.prompt_version : null,
+      promptVersion,
       requiredSlots: REQUIRED_DRAFTING_SLOTS,
+      instructionsText: null,
+      hasLegacyPromptOverride,
     }
   }
+
+  // 4. Nothing configured for this kind — compose from the firm defaults alone
+  //    when we can, so a brand-new document kind still gets the universal rules
+  //    and the firm's standing instructions. The repo prompt remains the last
+  //    resort for callers that expect the historical bundled text.
   try {
     return {
       serviceKey,
@@ -1286,6 +1477,8 @@ export function resolveDraftingPromptDoc(
       source: 'repo',
       promptVersion: null,
       requiredSlots: REQUIRED_DRAFTING_SLOTS,
+      instructionsText: null,
+      hasLegacyPromptOverride: false,
     }
   } catch {
     return {
@@ -1295,6 +1488,8 @@ export function resolveDraftingPromptDoc(
       source: 'none',
       promptVersion: null,
       requiredSlots: REQUIRED_DRAFTING_SLOTS,
+      instructionsText: null,
+      hasLegacyPromptOverride: false,
     }
   }
 }
@@ -1445,6 +1640,62 @@ export async function updateDraftingPrompt(
 
   const saved = await getDraftingPrompt(ctx, serviceKey, documentKind)
   if (!saved) throw new Error(`Drafting prompt not found after update: ${serviceKey}`)
+  return saved
+}
+
+// CONTEXT-SETTINGS-1 — write a service's SERVICE-SPECIFIC drafting instructions
+// for one document kind. This is the write behind the per-service prompt box
+// now that the box holds only the custom layer: no slot contract to satisfy
+// (the composer supplies the slots), no boilerplate to preserve, and an empty
+// string is a legitimate save meaning "the firm defaults are enough here".
+//
+// Merges into the existing drafting config so sibling kinds' instructions AND
+// any legacy full-prompt overrides survive, and bumps prompt_version — the same
+// versioned service-upsert path updateDraftingPrompt uses.
+export async function updateDraftingInstructions(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+  instructionsText: unknown,
+): Promise<DraftingPromptDoc> {
+  if (!documentKind || typeof documentKind !== 'string') {
+    throw new Error('A document kind is required.')
+  }
+  if (typeof instructionsText !== 'string') {
+    throw new Error('Drafting instructions must be text (an empty string clears them).')
+  }
+  const text = instructionsText.trim()
+
+  const row = await withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0] ?? null
+  })
+  if (!row) throw new Error(`Service not found: ${serviceKey}`)
+
+  const existing: DraftingConfig = row.transitions.drafting ?? {}
+  const mergedDrafting: DraftingConfig = {
+    ...existing,
+    prompt_version: (typeof existing.prompt_version === 'number' ? existing.prompt_version : 0) + 1,
+    instructions: { ...(existing.instructions ?? {}), [documentKind]: text },
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: row.display_name,
+      transitions_patch: { drafting: mergedDrafting },
+    },
+  })
+
+  const saved = await getDraftingPrompt(ctx, serviceKey, documentKind)
+  if (!saved) throw new Error(`Drafting instructions not found after update: ${serviceKey}`)
   return saved
 }
 

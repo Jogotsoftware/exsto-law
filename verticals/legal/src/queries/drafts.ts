@@ -283,6 +283,11 @@ export async function listDocumentVersions(
 
 export interface SharedDraftView extends PendingDraftSummary {
   bodyMarkdown: string
+  // DOC-RENDER-2 — the version's persisted per-document base font (EDITOR-FIX-1
+  // item 7), so the client-facing share page renders the SAME face/size the
+  // attorney reviewed and the PDF export uses. Null ⇒ app defaults.
+  fontFamily: string | null
+  fontSize: number | null
   // FB-C — the resolved firm's name (never a hardcoded literal), for the
   // public/portal share-view chrome. Null when the firm hasn't set one.
   firmName: string | null
@@ -309,6 +314,8 @@ export async function getSharedDraftVersion(
       status: string
       recorded_at: string
       body: string
+      font_family: string | null
+      font_size: string | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -319,7 +326,9 @@ export async function getSharedDraftVersion(
          dv.version_number,
          dv.status,
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
-         cb.body
+         cb.body,
+         dv.metadata->>'font_family' AS font_family,
+         dv.metadata->>'font_size' AS font_size
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
@@ -356,6 +365,8 @@ export async function getSharedDraftVersion(
       emailToRole: null,
       voiceViolations: null,
       bodyMarkdown: row.body,
+      fontFamily: row.font_family,
+      fontSize: row.font_size != null ? Number(row.font_size) : null,
     }
   })
   if (!view) return null

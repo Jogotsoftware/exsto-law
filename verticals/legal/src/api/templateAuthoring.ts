@@ -486,28 +486,24 @@ async function persistReasoningTrace(
   return id
 }
 
-// A sound DEFAULT drafting prompt for an auto-route document kind, seeded when a
-// template is authored (see createTemplateAI). It carries the three REQUIRED_DRAFTING_
-// SLOTS the completeness gate checks ({{questionnaire_responses_json}},
-// {{transcript_text}}, {{operating_agreement_template}}) and instructs the model to
-// fill the firm's body template from the client's intake answers — so an ai_draft
-// service produces real, answer-driven documents and a template_merge service simply
-// satisfies the gate (its worker never reads this). The attorney can refine it later in
-// the service editor.
-function defaultDraftingPrompt(docKind: string): string {
+// The SERVICE-SPECIFIC drafting instructions seeded when a template is authored
+// (see createTemplateAI).
+//
+// CONTEXT-SETTINGS-1 changed what this returns. It used to emit a whole prompt
+// whose first paragraph was the universal guidance ("never invent a value…",
+// "never write draft banners…", "output the final document only") plus the
+// three REQUIRED_DRAFTING_SLOTS — so every service's prompt box opened full of
+// platform boilerplate the attorney could edit or delete by accident, and
+// nothing in it was actually about their service.
+//
+// Those universal rules now live in templates/promptDefaults.ts and the slots
+// are supplied by composeDraftingBasePrompt (api/services.ts), both composed in
+// server-side at generation time. What is seeded here is only the one genuinely
+// service-shaped sentence, which the attorney can then refine — or clear, since
+// "the firm defaults are enough" is a legitimate state.
+function defaultDraftingInstructions(docKind: string): string {
   const label = docKind.replace(/_/g, ' ')
-  return [
-    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, LEAVE ITS {{token}} IN PLACE UNCHANGED — never invent a value and never write bracketed filler like "[X — TO INSERT]"; the platform renders unresolved tokens as visible markers and resolves them at review. Never write draft banners, watermarks, or review notices into the document — review state is rendered by the platform from the document's status, not written into its text. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
-    ``,
-    `The client's intake answers (use these to fill the document):`,
-    `{{questionnaire_responses_json}}`,
-    ``,
-    `Consultation notes, if any (additional context):`,
-    `{{transcript_text}}`,
-    ``,
-    `The document template to complete:`,
-    `{{operating_agreement_template}}`,
-  ].join('\n')
+  return `Draft a ${label}, completing the firm's template from the client's intake answers.`
 }
 
 // The AI write path (the live write happens ONLY on attorney approve). Validates the
@@ -610,28 +606,39 @@ export async function createTemplateAI(
   const existingDocs = Array.isArray(row.transitions.documents) ? row.transitions.documents : []
   const documents = existingDocs.includes(docKind) ? existingDocs : [...existingDocs, docKind]
 
-  // SEED THE DRAFTING PROMPT (the bug fix): an auto-route service's completeness gate
-  // requires a per-kind drafting prompt in transitions.drafting.prompts[kind] (with the
-  // required slots) — but the wizard has no separate "propose drafting prompt" tool, so
-  // the model used to misfile the prompt as a second document template (a phantom
-  // "<kind>_drafting_prompt" doc) and the service could never enable. Here, when we
-  // author a document body for an auto service that has NO prompt for this kind yet, we
-  // seed a sound default prompt in the RIGHT place so the service is actually
-  // enableable; the attorney can refine it in the editor. (template_merge never reads
-  // it; it just satisfies the gate. Manual-route services need no prompt.)
+  // SEED THE DRAFTING INSTRUCTIONS (the bug fix): an auto-route service's
+  // completeness gate requires per-kind drafting config — but the wizard has no
+  // separate "propose drafting prompt" tool, so the model used to misfile the
+  // prompt as a second document template (a phantom "<kind>_drafting_prompt"
+  // doc) and the service could never enable. Here, when we author a document
+  // body for an auto service that has nothing for this kind yet, we seed the
+  // right thing in the right place so the service is actually enableable.
+  //
+  // CONTEXT-SETTINGS-1: what gets seeded is now transitions.drafting
+  // .instructions[kind] — the service-specific layer — not a full prompt full
+  // of universal boilerplate. The required slots and the universal rules are
+  // composed in at generation time (api/services.ts composeDraftingBasePrompt),
+  // so the completeness gate and the worker are both satisfied without the
+  // attorney's prompt box ever showing platform text. A service that already
+  // has EITHER instructions or a legacy full prompt for this kind is left
+  // alone. (template_merge never reads any of it; it just satisfies the gate.
+  // Manual-route services need none.)
   const route = row.transitions.route === 'auto' ? 'auto' : 'manual'
   const existingDrafting: DraftingConfig = row.transitions.drafting ?? {}
-  const hasPrompt = !!(existingDrafting.prompts ?? {})[docKind]?.trim?.()
+  const hasDraftingConfig =
+    !!(existingDrafting.prompts ?? {})[docKind]?.trim?.() ||
+    typeof (existingDrafting.instructions ?? {})[docKind] === 'string'
   const draftingPatch: DraftingConfig | undefined =
-    route === 'auto' && !hasPrompt
+    route === 'auto' && !hasDraftingConfig
       ? {
+          ...existingDrafting,
           prompt_version:
             (typeof existingDrafting.prompt_version === 'number'
               ? existingDrafting.prompt_version
               : 0) + 1,
-          prompts: {
-            ...(existingDrafting.prompts ?? {}),
-            [docKind]: defaultDraftingPrompt(docKind),
+          instructions: {
+            ...(existingDrafting.instructions ?? {}),
+            [docKind]: defaultDraftingInstructions(docKind),
           },
         }
       : undefined
