@@ -880,11 +880,22 @@ export function completenessFromTransitions(
   const promptByKind: Record<string, string | null> = {}
   const templateByKind: Record<string, 'config' | 'repo' | 'none'> = {}
   if (route === 'auto') {
-    const prompts = transitions.drafting?.prompts ?? {}
     const templates = transitions.document_templates?.templates ?? {}
     for (const kind of documents) {
-      const t = prompts[kind]
-      promptByKind[kind] = typeof t === 'string' ? t : null
+      // CONTEXT-SETTINGS-1 — the gate asks "has the attorney authored drafting
+      // config for this kind in-app", and there are now TWO shapes that answer
+      // yes: the service's own instructions (composed into a full prompt at
+      // generation time) or a hand-authored full prompt. Resolve through the
+      // same resolver the drafting worker uses so both count, and a service
+      // built on the new layer is enableable. Deliberately resolved with the
+      // PLATFORM-DEFAULT context config rather than the firm's: a composed
+      // prompt always carries the required slots regardless of what the firm
+      // has configured, so completeness must not depend on a DB read (this
+      // helper is pure, and the enable handler calls it inside its own
+      // transaction). 'repo'/'none' still means nothing was authored.
+      const doc = resolveDraftingPromptDoc(transitions.drafting, serviceKey, kind)
+      promptByKind[kind] =
+        doc.source === 'composed' || doc.source === 'config' ? doc.promptText : null
       const tpl = templates[kind]
       templateByKind[kind] =
         typeof tpl === 'string' && tpl.trim() ? 'config' : hasRepoTemplate(kind) ? 'repo' : 'none'

@@ -441,12 +441,18 @@ export async function runDraftGeneration(
     confidence: result.reasoningTrace.confidence,
     modelIdentity: result.modelIdentity,
     fullTrace: result.reasoningTrace,
-    // Record which prompt produced this draft so the audit trail names the config
-    // version (or the repo fallback) the worker actually used.
+    // Record which prompt produced this draft so the audit trail names the
+    // config version (or the repo fallback) the worker actually used.
+    // CONTEXT-SETTINGS-1 adds the 'composed' source — the service's own
+    // instructions layered under the firm's AI Context settings. It must be
+    // labelled as such: falling through to "@repo" would tell the audit trail
+    // this draft came from the bundled prompt when it did not.
     promptId:
-      promptSource === 'config' && promptVersion != null
-        ? `${m.serviceKey}/${input.documentKind}@config-v${promptVersion}`
-        : `${input.documentKind}@repo`,
+      (promptSource === 'config' || promptSource === 'composed') && promptVersion != null
+        ? `${m.serviceKey}/${input.documentKind}@${promptSource}-v${promptVersion}`
+        : promptSource === 'composed'
+          ? `${m.serviceKey}/${input.documentKind}@composed`
+          : `${input.documentKind}@repo`,
     // Name the BODY template the worker used too (config version vs bundled repo),
     // so the audit trail captures both inputs to the draft.
     templateId,

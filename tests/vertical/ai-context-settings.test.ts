@@ -28,6 +28,7 @@ import {
   composeDraftingBasePrompt,
   deriveInstructionsFromLegacyPrompt,
   resolveDraftingPromptDoc,
+  completenessFromTransitions,
   REQUIRED_DRAFTING_SLOTS,
 } from '../../verticals/legal/src/api/services.js'
 import {
@@ -302,5 +303,49 @@ describe('chat scope routing', () => {
         serviceKey: 'llc',
       }),
     ).rejects.toThrow(/documentKind is required/)
+  })
+})
+
+describe('the enable gate accepts the new instructions layer', () => {
+  // Regression: the completeness gate used to read transitions.drafting
+  // .prompts[kind] directly and demand the mustache slots in it. A service
+  // configured with instructions only (no legacy full prompt) would have failed
+  // with "needs a drafting prompt" and could never be enabled — the gate has to
+  // resolve the same way the drafting worker does.
+  const INTAKE = {
+    sections: [{ id: 's', title: 'S', fields: [{ id: 'f', label: 'F', type: 'text' }] }],
+  }
+
+  it('marks an auto service with instructions-only drafting config as ready', () => {
+    const c = completenessFromTransitions('svc', {
+      route: 'auto',
+      documents: ['operating_agreement'],
+      intake_schema: INTAKE as never,
+      drafting: { instructions: { operating_agreement: 'Add a buy-sell.' } },
+    })
+    expect(c.missing).toEqual([])
+    expect(c.ready).toBe(true)
+  })
+
+  it('still refuses a document kind with no drafting config at all', () => {
+    const c = completenessFromTransitions('svc', {
+      route: 'auto',
+      documents: ['operating_agreement'],
+      intake_schema: INTAKE as never,
+      drafting: {},
+    })
+    expect(c.ready).toBe(false)
+    expect(c.missing.join(' ')).toMatch(/needs a drafting prompt/)
+  })
+
+  it('still refuses a hand-authored prompt that dropped a required slot', () => {
+    const c = completenessFromTransitions('svc', {
+      route: 'auto',
+      documents: ['operating_agreement'],
+      intake_schema: INTAKE as never,
+      drafting: { prompts: { operating_agreement: 'no slots here' } },
+    })
+    expect(c.ready).toBe(false)
+    expect(c.missing.join(' ')).toMatch(/missing slot/)
   })
 })
