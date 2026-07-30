@@ -328,6 +328,39 @@ const WALKTHROUGH =
   'sides e-sign it. Flat $350, charged when I approve the agreement. There is also an ' +
   'engagement letter they sign up front.'
 
+// Drive the build like an attorney would: answer whatever is asked, approve whatever
+// card appears (earliest in build order first), until a milestone is reached. The
+// builder legitimately varies its turn-by-turn shape — several documents in one turn,
+// or one per turn — so a fixed script is the wrong instrument for testing WHERE it
+// resumes.
+async function driveUntil(
+  s: DriveState,
+  label: string,
+  done: (s: DriveState) => boolean,
+  maxTurns = 8,
+): Promise<void> {
+  for (let i = 0; i < maxTurns; i++) {
+    if (done(s)) return
+    if (s.pending.buildQuestions?.length) {
+      const answers: Record<string, string> = {}
+      for (const q of s.pending.buildQuestions)
+        answers[q.key] = choiceOf(q, 'Whatever you recommend')
+      s.pending.buildQuestions = []
+      await answer(s, `${label}-answer${i}`, answers)
+      continue
+    }
+    const next = BUILD_PHASES.map((p) => p.artifact).find(
+      (a) => a !== 'enable' && pendingArtifactsOf(s).includes(a),
+    )
+    if (next) {
+      await approve(s, next, `${label}-approve-${next}`)
+      continue
+    }
+    await turn(s, `${label}-nudge${i}`, 'continue')
+  }
+  if (!done(s)) throw new Error(`${label}: milestone not reached in ${maxTurns} turns`)
+}
+
 async function run(outFile: string): Promise<void> {
   const attorneyId = await resolveAttorney()
   const s: DriveState = {
@@ -340,81 +373,44 @@ async function run(outFile: string): Promise<void> {
   }
   console.log(`Pacheco tenant ${TENANT}, attorney actor ${attorneyId}`)
 
-  // 1. The opener the Build button primes, answered with the walkthrough.
   await turn(
     s,
     '1-walkthrough',
     `My answer to "walkthrough": ${WALKTHROUGH}\n⟦Continue the guided build.⟧`,
   )
-  // The model may ask one confirmation batch before the shell. Answer generically
-  // so the drive reaches the shell without an operator.
-  for (let i = 0; i < 3 && !(s.pending.serviceProposals ?? []).length; i++) {
-    const qs = s.pending.buildQuestions ?? []
-    if (!qs.length) break
-    const answers: Record<string, string> = {}
-    for (const q of qs) answers[q.key] = choiceOf(q, 'Yes, that is right')
-    await answer(s, `1${'abc'[i]}-confirm`, answers)
-  }
 
-  // The reuse-first rule means the model may skip the shell and build onto an
-  // existing service. Approve a shell if it proposed one; otherwise adopt the key
-  // its first card names, so the drive reaches the part being tested either way.
-  if ((s.pending.serviceProposals ?? []).length) {
-    await approve(s, 'service', '2-after-shell-approved')
-  } else {
-    const adopted =
-      (s.pending.templateProposals ?? [])[0]?.serviceKey ??
-      (s.pending.questionnaireProposals ?? [])[0]?.serviceKey ??
-      null
-    if (!adopted) throw new Error('no shell proposed and no card names a service to adopt')
-    const live = await listServicesIncludingInactive(s.ctx)
-    if (!live.some((x) => x.serviceKey === adopted)) {
-      throw new Error(
-        `the model proposed against "${adopted}", which is not a live service (retired?) — ` +
-          `it skipped the shell for a service that does not exist`,
-      )
-    }
-    s.buildServiceKey = adopted
-    s.approvedPhases.add('service')
-    console.log(`(reused existing service ${adopted} — no shell proposed)`)
-  }
-  await approve(s, 'template', '3-after-template-approved')
-  await approve(s, 'questionnaire', '4-after-questionnaire-approved')
+  // ── Drive to the state the repro needs: BILLING APPROVED ─────────────────
+  await driveUntil(s, '2-to-billing', (x) => x.approvedPhases.has('billing'), 12)
+  console.log(`\n>>> MILESTONE: billing approved. approved=${[...s.approvedPhases].join(',')}`)
 
-  // The model may put a question batch between artifacts; keep answering until a
-  // cost card is on the table, so the repro reaches the billing approval.
-  for (let i = 0; i < 3 && !(s.pending.costProposals ?? []).length; i++) {
-    const qs = s.pending.buildQuestions ?? []
-    if (!qs.length) break
-    const answers: Record<string, string> = {}
-    for (const q of qs) answers[q.key] = choiceOf(q, 'Whatever you recommend')
-    await answer(s, `4${'abc'[i]}-confirm`, answers)
-  }
-
-  // ── THE REPRO ────────────────────────────────────────────────────────────
-  // Billing is approved…
-  await approve(s, 'billing', '5-AFTER-BILLING-APPROVED')
-  // …then the attorney goes BACK to change the intake questionnaire.
+  // ── THE REPRO: go back and change an already-approved artifact ────────────
   await turn(
     s,
-    '6-GO-BACK-TO-INTAKE',
-    'hold on — go back to the intake form. I also want it to ask how they heard about ' +
-      'the firm.',
+    '3-GO-BACK-TO-INTAKE',
+    'hold on — go back to the intake form. I also want it to ask how they heard about the firm.',
   )
-  for (let i = 0; i < 2 && !(s.pending.questionnaireProposals ?? []).length; i++) {
-    const qs = s.pending.buildQuestions ?? []
-    if (!qs.length) break
-    const answers: Record<string, string> = {}
-    for (const q of qs) answers[q.key] = choiceOf(q, 'Yes')
-    await answer(s, `6${'ab'[i]}-confirm`, answers)
-  }
-  // …approves the revised questionnaire. WHERE DOES THE FLOW RESUME?
-  await approve(s, 'questionnaire', '7-AFTER-REVISED-INTAKE-APPROVED')
+  await driveUntil(
+    s,
+    '4-revise-intake',
+    (x) =>
+      !pendingArtifactsOf(x).includes('questionnaire') &&
+      x.record.some((r) => r.step.startsWith('4-')),
+    6,
+  )
+
+  // ── WHERE DOES IT RESUME? One more turn, unprompted. ─────────────────────
+  const beforeResume = [...s.approvedPhases]
+  await turn(s, '5-RESUME', `✓ Questionnaire updated.\n${CONTINUE_DRIVER}`)
 
   writeFileSync(
     outFile,
     JSON.stringify(
-      { serviceKey: s.buildServiceKey, approvedPhases: [...s.approvedPhases], record: s.record },
+      {
+        serviceKey: s.buildServiceKey,
+        approvedAtResume: beforeResume,
+        approvedPhases: [...s.approvedPhases],
+        record: s.record,
+      },
       null,
       2,
     ),
@@ -422,7 +418,9 @@ async function run(outFile: string): Promise<void> {
   console.log(`\n\n═══ SUMMARY ═══`)
   console.log(`service under construction: ${s.buildServiceKey}`)
   for (const r of s.record) {
-    console.log(`${r.step.padEnd(34)} strip:${r.stripSays.padEnd(30)} cards:${r.cards.join(',')}`)
+    console.log(
+      `${r.step.padEnd(28)} strip:${r.stripSays.padEnd(30)} cards:${r.cards.join(',') || '-'}`,
+    )
   }
   console.log(`\nwrote ${outFile}`)
   console.log(

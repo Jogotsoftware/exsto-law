@@ -177,3 +177,77 @@ On the same `commercial_lease_review` service, before any fix:
   template used `{{governing_jurisdiction}}` eight times and the approved questionnaire
   never asked for it (`missingForTokens: []` — the coverage gate exempts system tokens
   by design, so nothing caught it).
+
+---
+
+## F. After the fix — what the same harness shows (2026-07-30)
+
+Re-run against the fixed code, with the reseeded playbook live in the Pacheco tenant.
+
+### F1. The strip now names what the builder is actually doing
+
+A complete build (`trademark_clearance_search`), strip versus reality at every step:
+
+| step | strip shows | model proposed | match |
+|---|---|---|---|
+| after shell | Step 2 · Document template | TEMPLATE | ✅ |
+| after template | Step 3 · Client intake | QUESTIONNAIRE | ✅ |
+| after questionnaire | Step 4 · Billing | COST | ✅ |
+| after billing | Step 5 · Workflow | gate questions, then the workflow | ✅ |
+
+Before the fix the same four steps read Client intake / Client intake / **Workflow** /
+**Workflow** against TEMPLATE / QUESTIONNAIRE / **COST** / WORKFLOW — wrong at two of
+four, and frozen from step 4 onward.
+
+### F2. The builder now knows what is already on the attorney's screen
+
+In a build where it proposed two documents in one turn and only one was approved, the
+next turn produced **no new card** and said, unprompted:
+
+> "The engagement letter card is still open for your approval — approve that and I'll
+> build the intake form from both documents' fields."
+
+That is the `AWAITING THE ATTORNEY` line doing its job: before the fix the brief could
+not represent a pending card at all, and the model either re-proposed or moved on.
+
+### F3. Jurisdiction is on the intake
+
+The approved questionnaire of a fresh document-drafting build:
+
+```
+client_name, client_address, client_email, trademark, goods_services, governing_jurisdiction
+```
+
+Both before-runs — the live lease-review build and the founder's prod LLC build — omitted
+it entirely.
+
+### F4. Drift detection does not cry wolf
+
+Run against that same live service, where the template genuinely merges every client
+field, `templateDriftSuggestions` returned `[]`. The detector is quiet when the
+questionnaire and the documents actually agree.
+
+### What is NOT proven live
+
+The full end-to-end transcript of **approve billing → revise the intake → approve the
+revision → resume at the workflow** was not captured in one run. Four attempts ended on
+harness limitations rather than on the code under test (a fixed card-order assumption; a
+scripted revision that didn't fit the service; the builder proposing a template before
+the shell existed on one run). The resume behaviour itself is covered deterministically
+by `tests/vertical/sb-fix-1-builder.test.ts` — the BUILD BRIEF text the model receives at
+that exact turn, and `currentBuildPhase`'s backwards move — plus F2 above, which is the
+same mechanism observed working on live data.
+
+Two other things held constant that a stricter A/B would separate: the after-runs use a
+different service concept from the before-run (substrate rows cannot be hard deleted, and
+the retired first fixture changes the model's reuse decision), and the playbook was
+reseeded to prod before the after-runs, so they exercise the code change and the prompt
+change together rather than in isolation.
+
+### Adjacent bug seen while verifying (not fixed here)
+
+On one run the builder called `propose_template` for a service whose shell had never been
+approved, and the write correctly refused with `Service not found`. The playbook already
+states the shell comes first ("Nothing can bind to a service that doesn't exist"), so this
+is a compliance flake rather than a missing rule — but it is the same family as the
+defects above (the builder acting without checking what exists) and is worth a look.
