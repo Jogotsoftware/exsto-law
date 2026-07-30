@@ -15,8 +15,7 @@
 // end (the substrate keeps the history — these are append-only effective-dated
 // facts — but the LIVE config is restored to exactly what it was before).
 //
-// Run: pnpm tsx verticals/legal/demo/context-settings-verify.ts
-import 'dotenv/config'
+// Run: node --env-file=.env.local --import tsx verticals/legal/demo/context-settings-verify.ts
 import {
   getAiContextConfig,
   updateAiContextConfig,
@@ -27,6 +26,7 @@ import {
   DRAFTING_BASE_GUIDANCE,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
+import { Client } from 'pg'
 
 // Resolved fresh at the top of the run rather than hardcoded (the slug is the
 // stable identifier; the id is not something to remember between sessions).
@@ -55,40 +55,55 @@ function check(label: string, ok: boolean, detail?: string): void {
   }
 }
 
-async function main(): Promise<void> {
-  const { withActionContext } = await import('@exsto/substrate')
-
-  // Resolve the tenant + a human actor without hardcoding either.
-  const bootstrap: ActionContext = {
-    tenantId: '00000000-0000-0000-0000-000000000001',
-    actorId: '00000000-0000-0000-0001-000000000001',
-  }
-  const resolved = await withActionContext(bootstrap, async (client) => {
+// Resolve the tenant + a human actor by NAME, not by a remembered id.
+//
+// This one lookup uses a direct read-only connection rather than
+// withActionContext: RLS scopes `tenant` to app.tenant_id, so resolving a
+// tenant BY SLUG is a chicken-and-egg problem inside a tenant context. It is a
+// read of two identity rows and nothing else — every actual operation below
+// goes through the action layer with the resolved context.
+async function resolveTarget(): Promise<{
+  tenantId: string
+  tenantName: string
+  actorId: string
+  actorName: string
+}> {
+  const client = new Client({ connectionString: process.env.DATABASE_URL })
+  await client.connect()
+  try {
     const t = await client.query<{ id: string; name: string }>(
       `SELECT id, name FROM tenant WHERE public_slug = $1`,
       [PACHECO_SLUG],
     )
-    return t.rows[0] ?? null
-  })
-  if (!resolved) throw new Error(`No tenant with slug "${PACHECO_SLUG}".`)
-  console.log(`Tenant: ${resolved.name} (${resolved.id})`)
-
-  const actor = await withActionContext(
-    { tenantId: resolved.id, actorId: bootstrap.actorId },
-    async (client) => {
-      const a = await client.query<{ id: string; display_name: string }>(
-        `SELECT id, display_name FROM actor
+    const tenant = t.rows[0]
+    if (!tenant) throw new Error(`No tenant with slug "${PACHECO_SLUG}".`)
+    const a = await client.query<{ id: string; display_name: string }>(
+      `SELECT id, display_name FROM actor
         WHERE tenant_id = $1 AND actor_type = 'human' AND display_name ILIKE '%Pacheco%'
         ORDER BY created_at LIMIT 1`,
-        [resolved.id],
-      )
-      return a.rows[0] ?? null
-    },
-  )
-  if (!actor) throw new Error('No human actor found in the Pacheco tenant.')
-  console.log(`Actor:  ${actor.display_name} (${actor.id})\n`)
+      [tenant.id],
+    )
+    const actor = a.rows[0]
+    if (!actor) throw new Error('No human actor found in the Pacheco tenant.')
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      actorId: actor.id,
+      actorName: actor.display_name,
+    }
+  } finally {
+    await client.end()
+  }
+}
 
-  const ctx: ActionContext = { tenantId: resolved.id, actorId: actor.id }
+async function main(): Promise<void> {
+  const { withActionContext } = await import('@exsto/substrate')
+
+  const target = await resolveTarget()
+  console.log(`Tenant: ${target.tenantName} (${target.tenantId})`)
+  console.log(`Actor:  ${target.actorName} (${target.actorId})\n`)
+
+  const ctx: ActionContext = { tenantId: target.tenantId, actorId: target.actorId }
 
   // Snapshot everything we are about to touch, so cleanup restores it exactly.
   const before = await getAiContextConfig(ctx)
