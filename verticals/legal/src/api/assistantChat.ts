@@ -71,6 +71,8 @@ import {
   startBuildSession,
   findOpenBuildSessionForActor,
   closeStaleBuildSessionsForActor,
+  getBuildSessionServiceKey,
+  setBuildSessionService,
 } from './buildSession.js'
 import { isOpenChatSession, startChatSession } from './chatSession.js'
 import { containsMachinery, stripMachinerySpans } from './assistantMachinery.js'
@@ -101,6 +103,7 @@ import { getAttentionFeed, renderAttentionSnapshot } from '../queries/attentionF
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 import { buildBuildBriefText } from './buildBrief.js'
+import type { BuildArtifact } from './buildOrder.js'
 
 // When the build-wizard is on AND the attorney's message reads like a request to
 // build/create a service (or one of its parts), FORCE-load the orchestrator playbook
@@ -173,6 +176,12 @@ export interface AssistantChatInput {
   // approved). Injects the live BUILD BRIEF — everything already approved for this
   // service plus its open items — into the volatile system block (WP4.2).
   buildServiceKey?: string
+  // SB-FIX-1 (1): the proposal cards already on the attorney's screen, unapproved.
+  // Card state lives on the client (nothing is persisted until approval), so the
+  // client sends it and the BUILD BRIEF states it — otherwise the model cannot tell
+  // "not proposed yet" from "proposed, awaiting them" and re-proposes after every
+  // detour (docs/diagnostics/SB-FIX-1-REPRO.md §C3).
+  pendingArtifacts?: BuildArtifact[]
   // Phase 5 (UI-BUILDER-FIX-1): the open service_build_session this build turn
   // belongs to. Omitted on a build's first turn — the server starts a fresh
   // session and returns its id on `done`. Ignored when buildMode is false.
@@ -1525,7 +1534,7 @@ export async function assistantChat(
       attorneySettings?.customInstructions,
     )
     const buildBrief = buildWizardEnabled()
-      ? await buildBuildBriefText(ctx, input.buildServiceKey)
+      ? await buildBuildBriefText(ctx, input.buildServiceKey, input.pendingArtifacts ?? [])
       : ''
     // FB-H — on an UNSCOPED chat, open with the pressing-work landscape in the
     // volatile half (scoped turns already carry matter/client context).
@@ -1628,6 +1637,16 @@ export async function assistantChat(
           buildSessionId = started.buildSessionId
           await closeStaleBuildSessionsForActor(ctx, buildSessionId)
         }
+      }
+      // SB-FIX-1 (1): bind the session to the service as soon as the shell exists.
+      // The session is started BEFORE the shell is approved, so its key is null then;
+      // nothing ever came back to fill it in, which left every prod session unbound
+      // (docs/diagnostics/SB-FIX-1-REPRO.md §C4). Stamp only on an actual change —
+      // the attribute is append-only, so an unconditional write per turn would be
+      // pure supersession noise.
+      const key = (input.buildServiceKey ?? '').trim()
+      if (buildSessionId && key && (await getBuildSessionServiceKey(ctx, buildSessionId)) !== key) {
+        await setBuildSessionService(ctx, buildSessionId, key)
       }
     } catch (err) {
       console.error('assistantChat: failed to resolve build session', err)
@@ -1845,7 +1864,7 @@ export async function* assistantChatStream(
       attorneySettings?.customInstructions,
     )
     const buildBrief = buildWizardEnabled()
-      ? await buildBuildBriefText(ctx, input.buildServiceKey)
+      ? await buildBuildBriefText(ctx, input.buildServiceKey, input.pendingArtifacts ?? [])
       : ''
     // FB-H — on an UNSCOPED chat, open with the pressing-work landscape in the
     // volatile half (scoped turns already carry matter/client context).
@@ -2166,6 +2185,12 @@ export async function* assistantChatStream(
           buildSessionId = started.buildSessionId
           await closeStaleBuildSessionsForActor(ctx, buildSessionId)
         }
+      }
+      // SB-FIX-1 (1) — same stamp as the non-streaming path above; this is the one
+      // the app actually goes through.
+      const key = (input.buildServiceKey ?? '').trim()
+      if (buildSessionId && key && (await getBuildSessionServiceKey(ctx, buildSessionId)) !== key) {
+        await setBuildSessionService(ctx, buildSessionId, key)
       }
     } catch (err) {
       console.error('assistantChatStream: failed to resolve build session', err)

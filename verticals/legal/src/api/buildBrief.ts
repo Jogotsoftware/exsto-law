@@ -20,7 +20,14 @@ import {
   type ServiceCompleteness,
 } from './services.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
-import { loadServiceTemplateTokens } from './intakeAuthoring.js'
+import { loadServiceTemplateTokens, templateDriftFieldIds } from './intakeAuthoring.js'
+import { getQuestionnaire } from './services.js'
+import {
+  BUILD_PHASES,
+  buildPhaseNumber,
+  currentBuildPhase,
+  type BuildArtifact,
+} from './buildOrder.js'
 
 // Everything the brief renders, loaded in one place so the formatter is pure
 // (and unit-testable without a database).
@@ -34,9 +41,33 @@ export interface BuildBriefParts {
   templates: Array<{ documentKind: string; tokens: string[] }>
   lifecycle: { graph: Lifecycle; version: number } | null
   completeness: ServiceCompleteness | null
+  // SB-FIX-1 (1) — the artifacts already PROPOSED and still sitting unapproved in
+  // front of the attorney. The brief is otherwise derived purely from persisted
+  // state, and a proposed card persists nothing, so without this the model cannot
+  // tell "not proposed yet" from "proposed, awaiting the attorney" — and after any
+  // detour it re-derives its position from approvals alone and proposes the same
+  // card again (REPRO §C3: a cost card shown three times, a workflow card silently
+  // abandoned). Card state lives on the client, so the client sends it.
+  pendingArtifacts: BuildArtifact[]
+  // SB-FIX-1 (2) — intake questions no document template merges.
+  templateDrift: string[]
 }
 
 const MAX_BRIEF_CHARS = 4000
+
+// Which build phases are DONE, read off the live artifacts the brief already loaded.
+// Derived, never stored — same doctrine as the rest of this file. 'enable' is done
+// only once the service is actually active.
+function approvedArtifacts(parts: BuildBriefParts): BuildArtifact[] {
+  const done: BuildArtifact[] = []
+  if (parts.service) done.push('service')
+  if (parts.templates.length) done.push('template')
+  if (parts.questionnaireFieldIds.length) done.push('questionnaire')
+  if (parts.service?.cost) done.push('billing')
+  if (parts.lifecycle) done.push('workflow')
+  if (parts.service?.isActive) done.push('enable')
+  return done
+}
 
 // Render the brief as the compact block the volatile system prompt carries.
 // Pure — no DB. Kept terse: the model needs identifiers and structure, not prose.
@@ -93,6 +124,43 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
         : `Open items before Enable: ${parts.completeness.missing.join('; ')}`,
     )
   }
+  // SB-FIX-1 (2) — the reverse half of the variable contract. Loud, because the
+  // failure is silent by nature: the client answers a question that reaches no
+  // document and nobody finds out until a matter runs.
+  const drift = parts.templateDrift ?? []
+  if (drift.length) {
+    lines.push(
+      `DRIFT — the intake collects ${drift.map((d) => `"${d}"`).join(', ')} but no ` +
+        `template merges ${drift.length === 1 ? 'it' : 'them'} ` +
+        `(${drift.map((d) => `{{${d}}}`).join(', ')} appear in no document body). ` +
+        `Before Enable: re-propose the template with ${drift.length === 1 ? 'that token' : 'those tokens'} ` +
+        `placed where they belong, or tell the attorney in one line why the ` +
+        `${drift.length === 1 ? 'answer is' : 'answers are'} collected without ` +
+        `appearing in the document. Do not leave it unsaid.`,
+    )
+  }
+  // SB-FIX-1 (1) — where the build IS, stated rather than re-derived from prose.
+  // The pending line comes first and is unambiguous: a card already on screen is
+  // never re-proposed, and a revision detour ENDS by returning to it.
+  const approved = approvedArtifacts(parts)
+  const pendingNow = parts.pendingArtifacts ?? []
+  if (pendingNow.length) {
+    lines.push(
+      `AWAITING THE ATTORNEY — you already proposed ${pendingNow.join(', ')} and ` +
+        `${pendingNow.length === 1 ? 'that card is' : 'those cards are'} still on ` +
+        `screen unapproved. Do NOT propose ${pendingNow.length === 1 ? 'it' : 'them'} ` +
+        `again. If the attorney has just sent you somewhere else (a change to an earlier piece), ` +
+        `handle that, and when it is approved come back and pick up ` +
+        `${pendingNow.length === 1 ? 'that card' : 'those cards'} — not the step ` +
+        `before it.`,
+    )
+  }
+  const phase = currentBuildPhase(approved, pendingNow)
+  lines.push(
+    `Where this build is: step ${buildPhaseNumber(phase)} of ${BUILD_PHASES.length} — ` +
+      `${phase.label}. The order is ${BUILD_PHASES.map((p) => p.label).join(' → ')}. ` +
+      `Do the current step; never restart at an earlier one just because a detour ended.`,
+  )
   const text = lines.join('\n')
   return text.length > MAX_BRIEF_CHARS ? `${text.slice(0, MAX_BRIEF_CHARS)} …[truncated]` : text
 }
@@ -106,7 +174,12 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
 export async function loadBuildBriefParts(
   ctx: ActionContext,
   serviceKey: string,
+  pendingArtifacts: BuildArtifact[] = [],
 ): Promise<BuildBriefParts> {
+  // The pending list arrives from the client (card state lives there), so it is
+  // filtered to the known artifacts before it can reach the prompt text — a request
+  // body must never be able to write free prose into the system block.
+  const pending = pendingArtifacts.filter((a) => BUILD_PHASES.some((p) => p.artifact === a))
   const service = await listServicesIncludingInactive(ctx)
     .then((all) => all.find((s) => s.serviceKey === serviceKey) ?? null)
     .catch(() => null)
@@ -118,16 +191,26 @@ export async function loadBuildBriefParts(
       templates: [],
       lifecycle: null,
       completeness: null,
+      pendingArtifacts: pending,
+      templateDrift: [],
     }
   }
-  const [questionnaireFieldIds, templateTokens, lifecycle, completeness] = await Promise.all([
-    collectQuestionnaireFieldIds(ctx, serviceKey).catch(() => [] as string[]),
-    loadServiceTemplateTokens(ctx, serviceKey).catch(() => ({ templates: [], tokens: [] })),
-    getServiceLifecycle(ctx, serviceKey).catch(() => null),
-    serviceCompleteness(ctx, serviceKey).catch(() => null),
-  ])
+  const [questionnaireFieldIds, templateTokens, lifecycle, completeness, schema] =
+    await Promise.all([
+      collectQuestionnaireFieldIds(ctx, serviceKey).catch(() => [] as string[]),
+      loadServiceTemplateTokens(ctx, serviceKey).catch(() => ({ templates: [], tokens: [] })),
+      getServiceLifecycle(ctx, serviceKey).catch(() => null),
+      serviceCompleteness(ctx, serviceKey).catch(() => null),
+      getQuestionnaire(ctx, serviceKey).catch(() => null),
+    ])
+  // SB-FIX-1 (2) — only meaningful once the service HAS documents to drift from.
+  const templateDrift = templateTokens.templates.length
+    ? templateDriftFieldIds(schema, templateTokens.tokens)
+    : []
   return {
     serviceKey,
+    pendingArtifacts: pending,
+    templateDrift,
     service: {
       displayName: service.displayName,
       description: service.description,
@@ -151,8 +234,9 @@ export async function loadBuildBriefParts(
 export async function buildBuildBriefText(
   ctx: ActionContext,
   serviceKey: string | undefined,
+  pendingArtifacts: BuildArtifact[] = [],
 ): Promise<string> {
   const key = (serviceKey ?? '').trim()
   if (!key) return ''
-  return formatBuildBrief(await loadBuildBriefParts(ctx, key))
+  return formatBuildBrief(await loadBuildBriefParts(ctx, key, pendingArtifacts))
 }

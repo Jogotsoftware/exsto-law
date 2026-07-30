@@ -33,6 +33,7 @@ import { submitAction, withActionContext, type ActionContext } from '@exsto/subs
 import {
   KNOWN_FIELD_TYPES,
   validateIntakeSchema,
+  type IntakeSchema,
   getQuestionnaire,
   listServiceDocumentTemplates,
   type QuestionnaireDoc,
@@ -40,6 +41,10 @@ import {
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
 import { isSystemToken, isAutoInternalToken } from './tokenClasses.js'
+import {
+  GOVERNING_JURISDICTION_FIELD,
+  GOVERNING_JURISDICTION_FIELD_ID,
+} from './intakeFieldLibrary.js'
 import {
   listQuestionnaireTemplates,
   type QuestionnaireSchema,
@@ -291,6 +296,124 @@ export function coerceSystemFieldsInternal(schema: unknown): {
     }
   }
   return { schema: copy, coerced }
+}
+
+// ─── SB-FIX-1 (2): questionnaire → template drift ───────────────────────────
+// The variable contract has always been enforced in ONE direction: a questionnaire
+// that fails to cover a template token is REFUSED (propose_questionnaire's hard
+// gate). The reverse was never enforced at all — adding an intake question that no
+// document merges produced a `unusedFields` list that was rendered on the card and
+// then forgotten. So a mid-build questionnaire edit ("also ask how many years are
+// left on the lease") silently left the template behind: the client answers a
+// question whose answer reaches no document, and nobody is told.
+//
+// This is the detector for that direction. A drifted field is one the CLIENT fills
+// (internal/attorney-filled fields are firm-side by design and legitimately unused
+// by any template) whose id no template token references and which the platform
+// does not resolve itself. Repeater member fields are excluded: they are carried
+// into documents as a roster, not as one flat {{token}} each.
+//
+// Deliberately NOT a hard gate. A form may legitimately collect triage facts a
+// document never merges ("what are you worried about?" on a review service), and
+// blocking Enable on those would deadlock a correct build. It is loud instead:
+// an open item in the BUILD BRIEF the model reads every turn, and a suggestion on
+// get_service_completeness — with the playbook requiring the builder to either add
+// the token or tell the attorney why the field isn't needed in the document.
+export function templateDriftFieldIds(
+  schema: IntakeSchema | null | undefined,
+  templateTokens: readonly string[],
+): string[] {
+  if (!schema) return []
+  const referenced = new Set(templateTokens.map((t) => t.toLowerCase()))
+  const drifted: string[] = []
+  for (const section of schema.sections ?? []) {
+    for (const field of section.fields ?? []) {
+      const id = (field.id ?? '').toLowerCase()
+      if (!id || field.internal === true) continue
+      if (referenced.has(id) || isSystemToken(id)) continue
+      drifted.push(field.id)
+    }
+  }
+  return drifted
+}
+
+// The one-line, attorney-language rendering of the drift, shared by the BUILD
+// BRIEF and get_service_completeness so both say the same thing.
+export function templateDriftSuggestions(
+  schema: IntakeSchema | null | undefined,
+  templateTokens: readonly string[],
+  opts: { hasTemplates: boolean },
+): string[] {
+  if (!opts.hasTemplates) return [] // nothing to drift from yet
+  const drifted = templateDriftFieldIds(schema, templateTokens)
+  if (!drifted.length) return []
+  return [
+    `The intake asks the client for ${drifted.map((d) => `"${d}"`).join(', ')}, but no document ` +
+      `template uses ${drifted.length === 1 ? 'that answer' : 'those answers'} — ` +
+      `${drifted.map((d) => `{{${d}}}`).join(', ')} ${drifted.length === 1 ? 'appears' : 'appear'} ` +
+      `in no template body, so what the client types goes nowhere. Before Enable, either ` +
+      `re-propose the template with ${drifted.length === 1 ? 'that token' : 'those tokens'} in ` +
+      `the right place, or tell the attorney plainly why the ` +
+      `${drifted.length === 1 ? 'question is' : 'questions are'} collected without appearing in ` +
+      `the document.`,
+  ]
+}
+
+// ─── SB-FIX-1 (3): governing jurisdiction is a DEFAULT, not a judgment call ──
+// Every document-drafting service is jurisdiction-sensitive — the governing-law
+// clause, the formation statute, the enforceability of half the boilerplate all
+// turn on which state's law applies. Before this, the builder was only ASKED to
+// add the question "when the service is jurisdiction-sensitive" (a conditional in
+// the propose_questionnaire schema) and separately nudged about it at Review &
+// publish — so when the model didn't notice, the service silently fell back to the
+// firm's home jurisdiction for every client. That is exactly what happened in the
+// prod build of 2026-07-24: the operating-agreement template used
+// {{governing_jurisdiction}} eight times and the approved questionnaire never
+// asked for it (build session 0f4f7d3d, assistant.turn 13:17:47).
+//
+// Prose alone cannot hold this, because governing_jurisdiction is a SYSTEM token
+// (it resolves from the matter fact, not the raw answer — intakeFieldLibrary.ts),
+// so the variable-contract gate that forces coverage for every OTHER token
+// deliberately exempts it. Nothing was left to catch the omission.
+//
+// So the default is enforced in code: a document-drafting service whose proposed
+// questionnaire omits the reusable field gets it INJECTED, and the tool ack tells
+// the model it was added. The attorney can still delete it in the editor — this
+// sets the default, it does not remove their choice. Pure + deep-copying, like
+// coerceSystemFieldsInternal above.
+export function ensureJurisdictionField(
+  schema: unknown,
+  opts: { jurisdictionSensitive: boolean },
+): { schema: unknown; added: boolean } {
+  if (!opts.jurisdictionSensitive || !schema || typeof schema !== 'object') {
+    return { schema, added: false }
+  }
+  const copy = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>
+  const sections = Array.isArray(copy.sections) ? (copy.sections as Record<string, unknown>[]) : []
+  const alreadyAsked = sections.some((s) => {
+    const fields = Array.isArray(s?.fields) ? (s.fields as Record<string, unknown>[]) : []
+    return fields.some((f) => f?.id === GOVERNING_JURISDICTION_FIELD_ID)
+  })
+  if (alreadyAsked) return { schema: copy, added: false }
+  // Land it in the first CLIENT-FACING section (the client answers it), not an
+  // attorney-only "Firm use" section where they would never see it.
+  const target = sections.find((s) => {
+    const fields = Array.isArray(s?.fields) ? (s.fields as Record<string, unknown>[]) : []
+    return fields.some((f) => f?.internal !== true)
+  })
+  const field = JSON.parse(JSON.stringify(GOVERNING_JURISDICTION_FIELD)) as ServiceField
+  if (target) {
+    ;(target.fields as ServiceField[]).push(field)
+  } else {
+    sections.push({
+      id: 'governing_law',
+      title: 'Governing law',
+      title_i18n: { es: 'Ley aplicable' },
+      fields: [field],
+    })
+    copy.sections = sections
+  }
+  return { schema: copy, added: true }
 }
 
 // Reasoning summary the approve route carries from the chat turn that produced the

@@ -139,6 +139,34 @@ export async function setBuildSessionService(
   })
 }
 
+// SB-FIX-1 (1) — the service key a session is currently stamped with, so the caller
+// can stamp it ONCE when it becomes known instead of re-writing it every turn.
+//
+// Why this was needed: setBuildSessionService above existed but was called from
+// NOWHERE, and the key is written at session start — a moment when the client has
+// deliberately just reset buildServiceKeyRef to null for the new build. So every
+// service_build_session row in prod carried service_key = NULL, which meant
+// findOpenBuildSessionForActor (it matches on that key) could never match and the
+// anti-fragmentation fallback was dead code, and every build thread in the history
+// picker titled itself "Build: new service".
+export async function getBuildSessionServiceKey(
+  ctx: ActionContext,
+  buildSessionId: string,
+): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{ key: string | null }>(
+      `SELECT a.value #>> '{}' AS key
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+        WHERE a.tenant_id = $1 AND a.entity_id = $2
+          AND akd.kind_name = 'build_session_service_key'
+        ORDER BY a.valid_from DESC LIMIT 1`,
+      [ctx.tenantId, buildSessionId],
+    )
+    return r.rows[0]?.key ?? null
+  })
+}
+
 export async function closeBuildSession(
   ctx: ActionContext,
   buildSessionId: string,

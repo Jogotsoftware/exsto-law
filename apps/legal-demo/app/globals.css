@@ -18186,6 +18186,52 @@ a.li-cal-agenda-card:hover {
   background: #f4f6fb;
   color: #48546e;
 }
+/* SB-FIX-1 (4): the quiet build menu. Same trigger footprint and colour as the ✕ it
+   replaced, so the strip's visual weight is unchanged; the popover borrows the
+   muted-link treatment of QuestionBatch's ←Back rather than a button look. */
+.li-uac-buildstrip-more {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+}
+.li-uac-buildstrip-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 178px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(23 33 61 / 10%);
+}
+.li-uac-buildstrip-menu button {
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: #48546e;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.li-uac-buildstrip-menu button:hover {
+  background: #f4f6fb;
+  color: var(--li-navy);
+}
+/* The destructive one stays quiet — muted, not red. It is separated by a hairline
+   so it reads as a different kind of choice without shouting. */
+.li-uac-buildstrip-menu button.is-quiet {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid #f2f4f8;
+  color: var(--li-muted-2);
+  border-radius: 0 0 7px 7px;
+}
 .li-uac-buildstrip-segs {
   display: flex;
   gap: 4px;

@@ -435,3 +435,21 @@ entries into the gap map in §3 and marks closed ones fixed.
 `PrepareSignature` import) · `apps/legal-demo/components/esign/EsignComposer.tsx` (the cutover
 target `prepare_envelope` should point at) · `docs/design/esign-unify/DESIGN.md` (the ES-1..ES-6
 plan this stale finding sits under).
+
+- **2026-07-30 (SB-FIX-1):** the builder's own state and controls got smarter; two edges
+  are not reachable from chat.
+  - `POST /api/attorney/services/[serviceKey]/discard-draft` (retires an abandoned
+    half-built draft, behind the build strip's new ⋯ menu) has **no MCP tool and no
+    `ClientTool`** — the attorney can discard a draft by clicking, but cannot ask the
+    assistant to ("scrap that service I started"). `legal.service.retire` exists as an
+    MCP tool (`mcp/tools/serviceLibraryTools.ts:121`) but is not registered in
+    `buildAttorneyClientTools`, so chat cannot reach it either.
+    Pointer: `apps/legal-demo/app/api/attorney/services/[serviceKey]/discard-draft/route.ts`.
+  - The build strip's **Start over / Leave build** controls are UI-only. The playbook
+    now tells the model to point at them (`build-service.md`, "If the attorney wants
+    out"), but the assistant cannot perform either itself — "start this build over" in
+    chat still does nothing structural.
+  - Already wired, for the record (no gap): `governing_jurisdiction` auto-injection and
+    the template-drift open item both surface to the model through existing surfaces —
+    the `propose_questionnaire` ack, `get_service_completeness`'s `suggestions`, and the
+    BUILD BRIEF (`api/buildBrief.ts`) — so no new tool was needed for either.

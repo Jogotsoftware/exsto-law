@@ -1,3 +1,4 @@
+import type { BuildArtifact } from '@exsto/legal/build-order'
 import { readDevSession } from './auth'
 import { SessionExpiredError } from './mcpAttorney'
 
@@ -28,6 +29,9 @@ export interface AssistantStreamInput {
   // The service under construction in the active build — the server injects the
   // live BUILD BRIEF for it into the model's context (WP4.2).
   buildServiceKey?: string
+  // SB-FIX-1 (1): the proposal cards still awaiting the attorney, so the BUILD
+  // BRIEF can tell the model what it has already put on screen.
+  pendingArtifacts?: BuildArtifact[]
   buildSessionId?: string
   // The saved conversation this GENERAL (non-build) turn continues (WP-D2).
   // Absent on a conversation's first turn; the server mints one and returns it
