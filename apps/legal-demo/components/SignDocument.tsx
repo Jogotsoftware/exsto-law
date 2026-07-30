@@ -21,6 +21,7 @@ import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import {
@@ -62,6 +63,10 @@ export interface SignerDocView {
   bodyMarkdown: string
   isFile?: boolean
   fileName?: string | null
+  /** DOC-RENDER-2 — the version's persisted base font; the signer reads the
+   *  document in the SAME face/size the attorney reviewed and the PDF uses. */
+  fontFamily?: string | null
+  fontSize?: number | null
   fields: SignField[]
   placements?: FieldPlacement[]
 }
@@ -72,6 +77,8 @@ export interface SignableDoc {
   // surface renders the file inline instead of markdown.
   isFile?: boolean
   fileName?: string | null
+  fontFamily?: string | null
+  fontSize?: number | null
   signerName: string | null
   signerEmail: string | null
   signerTitle: string | null
@@ -155,6 +162,8 @@ export function SignDocument({
               bodyMarkdown: doc.bodyMarkdown,
               isFile: doc.isFile,
               fileName: doc.fileName,
+              fontFamily: doc.fontFamily,
+              fontSize: doc.fontSize,
               fields: doc.fields,
               placements: doc.placements ?? [],
             },
@@ -953,6 +962,10 @@ function SignerDoc({
         <DocumentSheet variant="fit">
           <div
             className="doc-rendered li-rev-doc"
+            style={{
+              fontFamily: docFontCss(normalizeDocFontFamily(view.fontFamily)),
+              fontSize: `${normalizeDocFontSize(view.fontSize)}pt`,
+            }}
             dangerouslySetInnerHTML={{ __html: renderDocumentHtml(view.bodyMarkdown) }}
           />
         </DocumentSheet>
