@@ -138,6 +138,14 @@ export interface TemplateEsignRole {
    *  time. Meaningless for a `presigned` role — there is no interactive
    *  signing moment to offer the choice at — so parse drops it there. */
   allowAddNextSigner?: boolean
+  /** MULTI-PARTY-1 — this ONE role stands for EVERY party on the matter (each
+   *  contact linked via matter_contact — e.g. all LLC members captured at
+   *  intake). At draft generation the role's execution block is replicated per
+   *  party with indexed marker keys (`key_1`, `key_2`, …); at prepare/send the
+   *  role expands into one signature request per party, each resolved to its
+   *  contact's name/email. Only meaningful for a signing role — parse drops it
+   *  for receives_copy/needs_to_view and for a presigned attorney row. */
+  repeatPerParty?: boolean
 }
 
 // A merge-field token reference on a role, normalized to the token grammar
@@ -193,6 +201,10 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
   // screen), and only needs_to_sign can gate/hold completion in the first place.
   const allowAddNextSigner =
     o.allowAddNextSigner === true && recipientRole === 'needs_to_sign' && !presigned
+  // MULTI-PARTY-1 — only a role that actually signs can meaningfully repeat per
+  // party, and a presigned attorney row is one specific person by definition.
+  const repeatPerParty =
+    o.repeatPerParty === true && recipientRole === 'needs_to_sign' && !presigned
   return {
     key,
     label,
@@ -202,6 +214,7 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
     ...(fields ? { fields } : {}),
     ...(presigned ? { presigned: true } : {}),
     ...(allowAddNextSigner ? { allowAddNextSigner: true } : {}),
+    ...(repeatPerParty ? { repeatPerParty: true } : {}),
   }
 }
 

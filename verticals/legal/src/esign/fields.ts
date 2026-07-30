@@ -154,6 +154,19 @@ export function parseMarkerLine(line: string): MarkerLine | null {
 export interface EsignRoleKeyLike {
   key: string
   recipientRole?: string
+  /** MULTI-PARTY-1 — the role expands per matter party; its markers may carry
+   *  indexed keys (`key_1`, `key_2`, …) as well as the base key. */
+  repeatPerParty?: boolean
+}
+
+// MULTI-PARTY-1 — marker keys for a repeat-per-party role: the base key itself
+// (the authored template block) or the base key plus a numeric suffix (the
+// per-party blocks generation expands to). Shared by the drift check and the
+// send-time expansion so "which markers belong to this role" is one rule.
+export function isRepeatMarkerKey(markerKey: string, roleKey: string): boolean {
+  if (markerKey === roleKey) return true
+  if (!markerKey.startsWith(`${roleKey}_`)) return false
+  return /^[0-9]+$/.test(markerKey.slice(roleKey.length + 1))
 }
 
 export interface EsignMarkerRoleDrift {
@@ -169,10 +182,21 @@ export function computeMarkerRoleDrift(
   const markerKeys = new Set(fields.map((f) => f.signerKey))
   const signMarkerKeys = new Set(fields.filter((f) => f.type === 'sign').map((f) => f.signerKey))
   const roleKeys = new Set(roles.map((r) => r.key))
-  const markerKeysWithoutRole = [...markerKeys].filter((k) => !roleKeys.has(k)).sort()
+  // A repeat-per-party role owns its base key AND every indexed variant
+  // (`member`, `member_1`, `member_2`, …) — those markers are not orphans.
+  const repeatRoleKeys = roles.filter((r) => r.repeatPerParty === true).map((r) => r.key)
+  const ownedByRepeat = (k: string): boolean =>
+    repeatRoleKeys.some((rk) => isRepeatMarkerKey(k, rk))
+  const markerKeysWithoutRole = [...markerKeys]
+    .filter((k) => !roleKeys.has(k) && !ownedByRepeat(k))
+    .sort()
   const rolesWithoutSignMarker = roles
     .filter((r) => (r.recipientRole ?? 'needs_to_sign') === 'needs_to_sign')
-    .filter((r) => !signMarkerKeys.has(r.key))
+    .filter((r) =>
+      r.repeatPerParty === true
+        ? ![...signMarkerKeys].some((k) => isRepeatMarkerKey(k, r.key))
+        : !signMarkerKeys.has(r.key),
+    )
     .map((r) => r.key)
   return { markerKeysWithoutRole, rolesWithoutSignMarker }
 }
@@ -195,6 +219,8 @@ export interface EsignRoleEmailCoverageLike {
   label?: string
   bind: string
   fields?: { email?: string }
+  /** MULTI-PARTY-1 — emails come from the matter's party contacts at send. */
+  repeatPerParty?: boolean
 }
 
 export interface EsignRoleEmailGap {
@@ -206,7 +232,7 @@ export function computeSignerEmailGaps(
   roles: readonly EsignRoleEmailCoverageLike[],
 ): EsignRoleEmailGap[] {
   return roles
-    .filter((r) => r.bind === 'manual' && !r.fields?.email)
+    .filter((r) => r.bind === 'manual' && !r.fields?.email && r.repeatPerParty !== true)
     .map((r) => ({ key: r.key, label: r.label || r.key }))
 }
 

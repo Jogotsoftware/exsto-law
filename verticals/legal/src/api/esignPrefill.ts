@@ -120,6 +120,51 @@ async function contactIdentity(
   return { name, email, title, contactEntityId }
 }
 
+// MULTI-PARTY-1 — the matter's party contacts: targets of its open
+// matter_contact links (matter → contact), in link order (intake order — the
+// matter.open party loop links members in the order they were entered). This is
+// the list a repeatPerParty role expands over, and the party COUNT the draft
+// generation uses to replicate the execution block, so recipients and markers
+// always agree.
+async function matterPartyIdentities(
+  client: DbClient,
+  tenantId: string,
+  matterEntityId: string,
+): Promise<ResolvedIdentity[]> {
+  const res = await client.query<{ id: string }>(
+    `SELECT r.target_entity_id AS id
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       JOIN entity c ON c.id = r.target_entity_id
+      WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+        AND rkd.kind_name = 'matter_contact'
+        AND (r.valid_to IS NULL OR r.valid_to > now())
+        AND c.status = 'active'
+      ORDER BY r.recorded_at ASC`,
+    [tenantId, matterEntityId],
+  )
+  const out: ResolvedIdentity[] = []
+  const seen = new Set<string>()
+  for (const row of res.rows) {
+    if (seen.has(row.id)) continue
+    seen.add(row.id)
+    out.push(await contactIdentity(client, tenantId, row.id))
+  }
+  return out
+}
+
+// Public read of the same list (count + identities) for the draft-generation
+// expansion (generateDraft) — one traversal rule for "who are this matter's
+// parties", shared with the recipient expansion above.
+export async function listMatterPartyContacts(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<ResolvedIdentity[]> {
+  return withActionContext(ctx, async (client) =>
+    matterPartyIdentities(client, ctx.tenantId, matterEntityId),
+  )
+}
+
 // A named contact-role relationship pointing at the matter (contact_role:<name>
 // binds). No such kind is seeded today; when a firm defines one (kind.define /
 // a future migration), this resolves it with no code change — configuration as
@@ -194,9 +239,38 @@ export async function assembleRecipientRows(
   roles: TemplateEsignConfig['roles'],
   resolveBind: EsignBindResolver,
   fieldValue?: EsignFieldValueLookup,
+  // MULTI-PARTY-1 — the matter's party contacts (matter_contact links, intake
+  // order). A role with repeatPerParty expands into one row per party with
+  // indexed signer keys (`key_1` … `key_N`) matching the indexed markers the
+  // draft-generation expansion wrote into the body; zero parties degrades to a
+  // single unresolved `key_1` row the attorney fills. Omitted → repeat roles
+  // expand over an empty list (the degraded row), so callers that never deal
+  // with parties are unchanged.
+  parties?: ResolvedIdentity[],
 ): Promise<ResolvedEsignRecipient[]> {
   const out: ResolvedEsignRecipient[] = []
   for (const role of roles) {
+    if (role.repeatPerParty === true) {
+      const list = parties && parties.length > 0 ? parties : [{ ...EMPTY_IDENTITY }]
+      for (let n = 0; n < list.length; n++) {
+        const party = list[n]!
+        out.push({
+          signerKey: `${role.key}_${n + 1}`,
+          label: `${role.label} ${n + 1}`,
+          role: role.recipientRole,
+          order: role.order,
+          bind: role.bind,
+          resolved: !!party.email,
+          name: party.name,
+          email: party.email,
+          title: party.title,
+          contactEntityId: party.contactEntityId,
+          presigned: false,
+          allowAddNext: role.allowAddNextSigner === true && role.recipientRole === 'needs_to_sign',
+        })
+      }
+      continue
+    }
     const bound: ResolvedIdentity =
       role.bind === 'manual' ? { ...EMPTY_IDENTITY } : await resolveBind(role.bind)
     // Field bindings win over the bind-resolved slot, per slot. Only a non-empty
@@ -313,6 +387,10 @@ export async function resolveTemplateRecipients(
       }
       return { ...EMPTY_IDENTITY }
     }
-    return assembleRecipientRows(config.roles, resolveBind, fieldValue)
+    // MULTI-PARTY-1 — party contacts are only fetched when a role repeats.
+    const parties = config.roles.some((r) => r.repeatPerParty === true)
+      ? await matterPartyIdentities(client, ctx.tenantId, matterEntityId)
+      : undefined
+    return assembleRecipientRows(config.roles, resolveBind, fieldValue, parties)
   })
 }

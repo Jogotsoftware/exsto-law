@@ -109,12 +109,14 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       last_activity_at: Date
     }>(
       `WITH
-       -- A contact's matters come from three relationship paths:
+       -- A contact's matters come from four relationship paths:
        --   • client_of (the LIVE intake path: contact -client_of-> matter),
        --   • matter_has_client (legacy booking: matter -> contact),
+       --   • matter_contact (MULTI-PARTY-1: matter -> contact, the many-to-many
+       --     party link legal.matter.link_contact / matter.open write),
        --   • the client parent (contact -contact_of-> client <-matter_of- matter).
        -- client_of was previously omitted, so intake contacts showed no matters and
-       -- the wrong CRM status. Union all three, dedup on (contact, matter).
+       -- the wrong CRM status. Union all four, dedup on (contact, matter).
        contact_matter AS (
          SELECT r.source_entity_id AS contact_id, r.target_entity_id AS matter_id
          FROM relationship r
@@ -126,6 +128,12 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          FROM relationship r
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
          WHERE r.tenant_id = $1 AND rkd.kind_name = 'matter_has_client'
+         UNION
+         SELECT r.target_entity_id AS contact_id, r.source_entity_id AS matter_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+         WHERE r.tenant_id = $1 AND rkd.kind_name = 'matter_contact'
+           AND (r.valid_to IS NULL OR r.valid_to > now())
          UNION
          SELECT co.source_entity_id AS contact_id, mo.source_entity_id AS matter_id
          FROM relationship co
@@ -318,15 +326,16 @@ export async function getContact(
        FROM entity e
        WHERE e.tenant_id = $1
          AND e.id IN (
-           -- The contact's matters via either live or legacy link, in either
-           -- direction: client_of (contact -> matter) or matter_has_client
-           -- (matter -> contact). client_of was previously missed here too.
+           -- The contact's matters via live, legacy, or party link, in either
+           -- direction: client_of (contact -> matter), matter_has_client
+           -- (matter -> contact), or matter_contact (matter -> contact,
+           -- MULTI-PARTY-1). client_of was previously missed here too.
            SELECT CASE WHEN r.source_entity_id = $2 THEN r.target_entity_id ELSE r.source_entity_id END
            FROM relationship r
            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
            WHERE r.tenant_id = $1
              AND (r.valid_to IS NULL OR r.valid_to > now())
-             AND rkd.kind_name IN ('client_of', 'matter_has_client')
+             AND rkd.kind_name IN ('client_of', 'matter_has_client', 'matter_contact')
              AND (r.source_entity_id = $2 OR r.target_entity_id = $2)
          )
        ORDER BY e.created_at DESC`,

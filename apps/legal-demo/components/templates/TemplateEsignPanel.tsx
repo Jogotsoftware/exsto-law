@@ -451,11 +451,37 @@ export function TemplateEsignPanel({
                 </label>
               )}
 
+              {/* MULTI-PARTY-1 — variable signer count: one role stands for
+                  every party on the matter (all LLC members, all partners).
+                  The document's single {{sign:key}} block is replicated per
+                  party at drafting, and send creates one signature request per
+                  party, each resolved to their contact captured at intake. */}
+              {role.recipientRole === 'needs_to_sign' && !role.presigned && (
+                <label className="li-tplsign-presign">
+                  <input
+                    type="checkbox"
+                    checked={role.repeatPerParty === true}
+                    onChange={(e) => patchRole(i, { repeatPerParty: e.target.checked })}
+                  />
+                  <span>
+                    One signature request per party — this role repeats for every contact on the
+                    matter (e.g. each LLC member captured at intake), however many there are.
+                  </span>
+                </label>
+              )}
+
               {/* ESIGN-FIELDS-1 — identity from merge fields (drag targets), or
                   (Phase 2, service context) one "collect at intake" toggle in
                   place of the three slots. Attorney identity never comes from
-                  intake, so the attorney row always keeps the slots. */}
-              {onCollectAtIntake && role.bind !== 'attorney_of_record' ? (
+                  intake, so the attorney row always keeps the slots. A
+                  repeat-per-party role needs neither: identity comes from the
+                  matter's party contacts at send. */}
+              {role.repeatPerParty === true ? (
+                <p className="li-tplsign-hint">
+                  Each party’s name and email come from the contacts captured at intake — no
+                  per-signer identity bindings needed.
+                </p>
+              ) : onCollectAtIntake && role.bind !== 'attorney_of_record' ? (
                 <CollectAtIntakeToggle
                   role={role}
                   fieldIds={signerIntakeFieldIds(role.key)}

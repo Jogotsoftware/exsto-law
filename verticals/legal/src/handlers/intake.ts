@@ -19,6 +19,8 @@ import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 import { dispatchClientDelivery } from './clientDelivery.js'
 import { normalizeJurisdiction } from '../api/jurisdictions.js'
 import { GOVERNING_JURISDICTION_FIELD_ID } from '../api/intakeFieldLibrary.js'
+import { extractIntakeParties, type PartySchemaLike } from '../api/intakeParties.js'
+import { resolveQuestionnaireDoc } from '../api/services.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // intake.submit — steps 1–3 of the intake flow (REQ-INTAKE-01..04, 07).
@@ -334,6 +336,29 @@ export function resolveGoverningLawStamp(
   return typeof answer === 'string' ? normalizeJurisdiction(answer) : null
 }
 
+// MULTI-PARTY-1 — the service's resolved questionnaire schema, for party
+// extraction. Same config-first/repo-fallback resolution getQuestionnaire uses
+// (resolveQuestionnaireDoc is the shared pure resolver); returns null when the
+// service has no questionnaire, which extractIntakeParties treats as
+// "legacy 'members' answer key only".
+async function loadIntakeSchemaForParties(
+  client: DbClient,
+  tenantId: string,
+  serviceKey: string,
+): Promise<PartySchemaLike | null> {
+  const res = await client.query<{ transitions: Record<string, unknown> | null }>(
+    `SELECT transitions FROM workflow_definition
+      WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
+      LIMIT 1`,
+    [tenantId, serviceKey],
+  )
+  const transitions = res.rows[0]?.transitions ?? undefined
+  return resolveQuestionnaireDoc(
+    transitions as Parameters<typeof resolveQuestionnaireDoc>[0],
+    serviceKey,
+  )
+}
+
 registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as MatterOpenPayload
 
@@ -572,6 +597,74 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     targetEntityId: clientParentId,
     relationshipKindId: matterOfId,
   })
+
+  // MULTI-PARTY-1 — every person captured by a repeating intake group (LLC
+  // members, partners, additional signers) becomes a REAL client_contact linked
+  // to this matter via matter_contact (the same many-to-many storage
+  // legal.matter.link_contact writes), not a merge-field string. Existing
+  // contacts dedupe by email (the intake.submit rule); a party who IS the
+  // primary client links too — they are genuinely a party to the matter, and
+  // the CRM traversals dedupe on (contact, matter). Schema-driven: the party
+  // rows are read from the service's own questionnaire repeater fields.
+  const parties = extractIntakeParties(
+    await loadIntakeSchemaForParties(client, ctx.tenantId, p.service_key),
+    intakeResponses,
+  )
+  if (parties.length > 0) {
+    const contactKindId = await lookupKindId(
+      client,
+      'entity_kind_definition',
+      ctx.tenantId,
+      'client_contact',
+    )
+    const matterContactId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'matter_contact',
+    )
+    const linked = new Set<string>()
+    for (const party of parties) {
+      let contactId = party.email
+        ? await findContactByEmail(client, ctx.tenantId, party.email)
+        : null
+      if (!contactId) {
+        contactId = await insertEntity(
+          client,
+          ctx.tenantId,
+          actionId,
+          contactKindId,
+          party.name ?? party.email ?? 'Contact',
+        )
+        const attrs: Array<{ kind: string; value: unknown }> = []
+        if (party.name) attrs.push({ kind: 'full_name', value: party.name })
+        if (party.email) attrs.push({ kind: 'email', value: party.email })
+        if (party.phone) attrs.push({ kind: 'phone', value: party.phone })
+        for (const a of attrs) {
+          const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+          await insertAttribute(client, {
+            tenantId: ctx.tenantId,
+            actionId,
+            entityId: contactId,
+            attributeKindId: akId,
+            value: a.value,
+            confidence: 1.0,
+            sourceType: 'human',
+            sourceRef: ctx.actorId,
+          })
+        }
+      }
+      if (linked.has(contactId)) continue
+      linked.add(contactId)
+      await insertRelationship(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        sourceEntityId: matterEntityId,
+        targetEntityId: contactId,
+        relationshipKindId: matterContactId,
+      })
+    }
+  }
 
   await insertEvent(client, {
     tenantId: ctx.tenantId,
