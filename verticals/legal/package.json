@@ -18,7 +18,11 @@
       "types": "./dist/esign/executionBlock.d.ts",
       "import": "./dist/esign/executionBlock.js"
     },
-    "./templates/*": "./templates/*"
+    "./templates/*": "./templates/*",
+    "./build-order": {
+      "types": "./dist/api/buildOrder.d.ts",
+      "import": "./dist/api/buildOrder.js"
+    }
   },
   "files": [
     "dist",

@@ -39,6 +39,15 @@ import { CostProposalCard, type CostProposal } from '@/components/CostProposalCa
 import { EnableProposalCard, type EnableProposal } from '@/components/EnableProposalCard'
 import { KindProposalCard, type KindProposal } from '@/components/KindProposalCard'
 import { QuestionBatch } from '@/components/QuestionBatch'
+// SB-FIX-1 (1) — the ONE build order, shared with the server's BUILD BRIEF. Imported
+// from the pure '@exsto/legal/build-order' subpath (like '@exsto/legal/esign'), never
+// the package root: the root barrel pulls server-only code into the client bundle.
+import {
+  BUILD_PHASES,
+  buildPhaseNumber,
+  currentBuildPhase,
+  type BuildArtifact,
+} from '@exsto/legal/build-order'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
@@ -54,6 +63,7 @@ import {
   PaperclipIcon,
   FileTextIcon,
   XIcon,
+  MoreHorizontalIcon,
   CopyIcon,
   CheckIcon,
   LayersIcon,
@@ -273,14 +283,16 @@ interface MatterFlow {
 // Approvals can land out of canonical order (the wizard sometimes drafts the
 // document before the intake form); the strip shows the FIRST phase not yet
 // approved, and "Step n of 6" counts approvals + the one in progress.
-const BUILD_PHASES: Array<{ artifact: string; label: string }> = [
-  { artifact: 'service', label: 'Define service' },
-  { artifact: 'questionnaire', label: 'Client intake' },
-  { artifact: 'template', label: 'Document template' },
-  { artifact: 'workflow', label: 'Workflow' },
-  { artifact: 'billing', label: 'Billing' },
-  { artifact: 'enable', label: 'Review & publish' },
-]
+// A card's `artifact` is a loose string and includes 'kind', which is approvable but
+// is not one of the six build phases. Narrow before touching phase state.
+const asBuildArtifact = (a: string): BuildArtifact | null =>
+  BUILD_PHASES.some((p) => p.artifact === a) ? (a as BuildArtifact) : null
+
+// SB-FIX-1 (1): the build order is no longer declared here. This list used to have
+// questionnaire/template swapped AND workflow/billing swapped relative to the
+// playbook the model actually follows, so the strip named the wrong phase for most
+// of every build (docs/diagnostics/SB-FIX-1-REPRO.md §C1). It now comes from the one
+// place that owns it, shared with the BUILD BRIEF: verticals/legal/src/api/buildOrder.ts.
 
 type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'feature' | 'other'
 
@@ -1037,6 +1049,26 @@ export function UnifiedAssistantChat({
   // progress strip's phase label, "Step n of 6" and gradient segments. A Set in
   // state (not a ref) because the strip must re-render on approval.
   const [approvedPhases, setApprovedPhases] = useState<Set<string>>(new Set())
+  // SB-FIX-1 (1): which artifacts have been PROPOSED and are still sitting on screen
+  // unapproved. Approval state lives only here — nothing is persisted until the
+  // attorney acts — so this set is the only thing that can tell the server the
+  // difference between "not proposed yet" and "proposed, waiting on them". Without
+  // it the builder re-proposed a card the attorney already had open after every
+  // detour (docs/diagnostics/SB-FIX-1-REPRO.md §C3).
+  const [pendingArtifacts, setPendingArtifactsState] = useState<Set<BuildArtifact>>(new Set())
+  // Mirrored in a ref because `send` reads it from inside a callback that was created
+  // before the latest render — the same reason buildServiceKeyRef is a ref.
+  const pendingArtifactsRef = useRef<Set<BuildArtifact>>(new Set())
+  const setPendingArtifacts = useCallback(
+    (update: (prev: Set<BuildArtifact>) => Set<BuildArtifact>): void => {
+      setPendingArtifactsState((prev) => {
+        const next = update(prev)
+        pendingArtifactsRef.current = next
+        return next
+      })
+    },
+    [],
+  )
   // WP-L: the guided "Create a new matter" chip flow (local — see MatterFlow).
   const [matterFlow, setMatterFlow] = useState<MatterFlow | null>(null)
   // Typed answer for the matter flow's free-text steps (name/email).
@@ -1595,6 +1627,7 @@ export function UnifiedAssistantChat({
     continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
     setBuildMode(false) // a different thread is not the in-progress build
     setApprovedPhases(new Set())
+    setPendingArtifacts(() => new Set()) // SB-FIX-1 (1): no cards are on screen either
     setMatterFlow(null)
     setMatterFlowText('')
     setDraftPicker(null)
@@ -1659,6 +1692,7 @@ export function UnifiedAssistantChat({
     chatSessionIdRef.current = null
     setBuildMode(false)
     setApprovedPhases(new Set())
+    setPendingArtifacts(() => new Set()) // SB-FIX-1 (1): no cards are on screen either
     setMatterFlow(null)
     setMatterFlowText('')
     setDraftPicker(null)
@@ -1710,6 +1744,7 @@ export function UnifiedAssistantChat({
     continuedRef.current.clear()
     setBuildMode(false)
     setApprovedPhases(new Set())
+    setPendingArtifacts(() => new Set()) // SB-FIX-1 (1): no cards are on screen either
     setMatterFlow(null)
     setMatterFlowText('')
     setDraftPicker(null)
@@ -1749,6 +1784,7 @@ export function UnifiedAssistantChat({
     pendingContinuationRef.current = null // a queued continuation dies with its conversation
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
     setApprovedPhases(new Set())
+    setPendingArtifacts(() => new Set()) // SB-FIX-1 (1): no cards are on screen either
     setMatterFlow(null)
     setMatterFlowText('')
     setDraftPicker(null)
@@ -1783,6 +1819,7 @@ export function UnifiedAssistantChat({
     if (!buildWizard || busy || !modelId) return
     setBuildMode(true)
     setApprovedPhases(new Set()) // fresh build ⇒ the strip starts at phase 1
+    setPendingArtifacts(() => new Set()) // SB-FIX-1 (1): and no cards are pending
     setMatterFlow(null)
     setMatterFlowText('')
     setDraftPicker(null)
@@ -2289,6 +2326,13 @@ export function UnifiedAssistantChat({
             // The service under construction (WP4.2): the server injects the live
             // BUILD BRIEF for it. Harmless when no build is active (undefined).
             buildServiceKey: buildServiceKeyRef.current ?? undefined,
+            // SB-FIX-1 (1): the cards still awaiting the attorney, so the BUILD BRIEF
+            // can say "you already proposed this" instead of the model re-deriving its
+            // position from approvals alone and proposing it again.
+            pendingArtifacts:
+              buildMode && pendingArtifactsRef.current.size
+                ? [...pendingArtifactsRef.current]
+                : undefined,
             // Phase 5: THIS build's session — messages persist to it server-side.
             // Absent on a build's first turn; the server mints one and returns it
             // on `done`. Cleared whenever a build starts/ends/switches services.
@@ -2631,6 +2675,38 @@ export function UnifiedAssistantChat({
     }
     setStreaming(null)
     setBusy(false)
+    // SB-FIX-1 (1): every card this turn put on screen is now awaiting the attorney.
+    // Recorded after the turn commits (not per-chunk) so a dropped stream can't leave
+    // a phantom pending card. handleApproved clears each one as it is acted on.
+    {
+      const proposed: BuildArtifact[] = []
+      if (partial.serviceProposals.length) proposed.push('service')
+      if (partial.templateProposals.length) proposed.push('template')
+      if (partial.questionnaireProposals.length) proposed.push('questionnaire')
+      if (partial.costProposals.length) proposed.push('billing')
+      if (partial.workflowProposals.length) proposed.push('workflow')
+      if (partial.enableProposals.length) proposed.push('enable')
+      if (proposed.length) {
+        setPendingArtifacts((prev) => {
+          const next = new Set(prev)
+          for (const a of proposed) next.add(a)
+          return next
+        })
+        // SB-FIX-1 (1): a NEW card for an artifact is a NEW approval opportunity.
+        // continuedRef exists to stop one approval firing two continuations, but it
+        // is keyed serviceKey:artifact and was only ever cleared on a whole new
+        // thread — so the SECOND approval of the same artifact (exactly what a
+        // mid-build revision is) hit the guard and fired NO continuation, leaving the
+        // build silently stalled until the attorney typed something. Releasing the
+        // key here keeps the double-fire protection (the card also disables its own
+        // button) without banning revisions.
+        for (const a of proposed) {
+          for (const key of [...continuedRef.current]) {
+            if (key.endsWith(`:${a}`)) continuedRef.current.delete(key)
+          }
+        }
+      }
+    }
     // A continuation that arrived while this turn was mid-stream was QUEUED, not
     // dropped (WP5.2 — the silent busy-skip stalled builds right after an approval).
     // Fire it now that the turn is committed.
@@ -2710,6 +2786,72 @@ export function UnifiedAssistantChat({
            always starts fresh); it just reads as open until closed. */
     })
   }, [])
+
+  // ── SB-FIX-1 (4): the quiet way out of a build ────────────────────────────
+  // Three understated choices behind a ⋯ on the build strip. Start over and Leave
+  // are both freely reversible (nothing is destroyed; a half-built service stays a
+  // private draft), so neither asks for confirmation — a dialog on a reversible act
+  // is the loudness this was meant to avoid. Only the destructive one confirms.
+  const [buildMenuOpen, setBuildMenuOpen] = useState(false)
+  const buildMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!buildMenuOpen) return
+    const onDocClick = (e: MouseEvent): void => {
+      if (!buildMenuRef.current?.contains(e.target as Node)) setBuildMenuOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setBuildMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [buildMenuOpen])
+
+  // Leave the builder. The conversation stays in the transcript either way; only the
+  // build chrome and the session end. `discard` additionally retires the draft service
+  // the build had already created, so an abandoned build doesn't leave a half-built
+  // service sitting in the firm's Services list.
+  const leaveBuild = useCallback(
+    (discard: boolean): void => {
+      setBuildMenuOpen(false)
+      const serviceKey = buildServiceKeyRef.current
+      if (discard && serviceKey) {
+        if (
+          !window.confirm(
+            `Discard the draft service you were building? It has not gone live, and this removes it from your Services list. The conversation stays.`,
+          )
+        ) {
+          return
+        }
+        void fetch(`/api/attorney/services/${encodeURIComponent(serviceKey)}/discard-draft`, {
+          method: 'POST',
+        }).catch(() => {
+          /* best-effort: a failed discard leaves the draft, which is the safe
+             direction — the attorney can still retire it from its own page. */
+        })
+      }
+      setBuildMode(false)
+      setPendingArtifacts(() => new Set())
+      buildServiceKeyRef.current = null
+      pendingContinuationRef.current = null
+      closeBuildSession('abandoned') // Phase 5: leaving a build seals its session
+    },
+    [closeBuildSession, setPendingArtifacts],
+  )
+
+  // Start the whole build again from the opening question. The previous attempt's
+  // draft service (if any) is left alone — restarting is not discarding, and silently
+  // retiring what they already approved would be a surprise.
+  // Not memoised: enterBuildMode is a plain function declaration in this component
+  // body, so a useCallback here would either capture a stale one or need a dep list
+  // that changes every render. A menu click handler needs neither.
+  const restartBuild = (): void => {
+    setBuildMenuOpen(false)
+    enterBuildMode()
+  }
 
   // The CURRENT question batch (beta feedback: one question per API round-trip made
   // the build crawl). When an assistant turn asks SEVERAL ask_build_question cards,
@@ -2881,6 +3023,20 @@ export function UnifiedAssistantChat({
         next.add(info.artifact)
         return next
       })
+      // SB-FIX-1 (1): the card is no longer on screen awaiting them. Clearing it here
+      // is what lets the next turn's BUILD BRIEF stop saying "you already proposed
+      // this" — and what lets the progress strip move off a revision back to the
+      // forward march.
+      // 'kind' is an approvable card but not a build phase, so it clears nothing.
+      const approvedArtifact = asBuildArtifact(info.artifact)
+      if (approvedArtifact) {
+        setPendingArtifacts((prev) => {
+          if (!prev.has(approvedArtifact)) return prev
+          const next = new Set(prev)
+          next.delete(approvedArtifact)
+          return next
+        })
+      }
       // Remember which service this build is assembling — every subsequent message
       // carries it so the server injects the live BUILD BRIEF (WP4.2).
       if (info.serviceKey) buildServiceKeyRef.current = info.serviceKey
@@ -3042,10 +3198,13 @@ export function UnifiedAssistantChat({
     }
   }
 
-  // WP-L: the comp's six-phase progress strip — the first not-yet-approved phase
-  // is the one in progress.
-  const buildStageIdxRaw = BUILD_PHASES.findIndex((p) => !approvedPhases.has(p.artifact))
-  const buildStageIdx = buildStageIdxRaw === -1 ? BUILD_PHASES.length - 1 : buildStageIdxRaw
+  // WP-L: the comp's six-phase progress strip. SB-FIX-1 (1) — the phase is now
+  // whichever card is actually in front of the attorney, falling back to the first
+  // not-yet-approved phase. That is what lets the strip move BACKWARDS when they go
+  // back to revise something already approved; the old "first unapproved" derivation
+  // was monotonic and simply could not (REPRO §C2).
+  const buildPhase = currentBuildPhase(approvedPhases, pendingArtifacts)
+  const buildStageIdx = buildPhaseNumber(buildPhase) - 1
   // Turns the transcript actually shows (hidden drivers excluded).
   const visibleTurns = turns.filter((t) => !t.hiddenFromUi)
   // The comp's model menu lists only connected, available models.
@@ -3471,19 +3630,49 @@ export function UnifiedAssistantChat({
             <span className="li-uac-buildstrip-phase">
               ·&nbsp;{BUILD_PHASES[buildStageIdx]!.label}
             </span>
-            <span className="li-uac-buildstrip-step">Step {buildStageIdx + 1} of 6</span>
-            <button
-              type="button"
-              className="li-uac-buildstrip-exit"
-              onClick={() => {
-                setBuildMode(false)
-                closeBuildSession('abandoned') // Phase 5: exiting build seals the session
-              }}
-              title="Exit builder (the conversation stays)"
-              aria-label="Exit builder"
-            >
-              <XIcon size={14} />
-            </button>
+            <span className="li-uac-buildstrip-step">
+              Step {buildStageIdx + 1} of {BUILD_PHASES.length}
+            </span>
+            {/* SB-FIX-1 (4): the way out of a stuck build. Deliberately understated —
+                same weight as QuestionBatch's ←Back, no red, no border, no confirm
+                dialog for the reversible choices. It replaces the old ✕, which only
+                ever did one of these three things and looked like a Cancel button. */}
+            <div className="li-uac-buildstrip-more" ref={buildMenuRef}>
+              <button
+                type="button"
+                className="li-uac-buildstrip-exit"
+                onClick={() => setBuildMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={buildMenuOpen}
+                aria-label="Build options"
+                title="Build options"
+              >
+                <MoreHorizontalIcon size={16} />
+              </button>
+              {buildMenuOpen && (
+                <div className="li-uac-buildstrip-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => restartBuild()}>
+                    Start over
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => leaveBuild(false)}>
+                    Leave build
+                  </button>
+                  {/* Only offered while the service is still a private draft — once
+                      it is live, "discard" would mean taking something down, which is
+                      a different decision and belongs on the service page. */}
+                  {buildServiceKeyRef.current && !approvedPhases.has('enable') && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="is-quiet"
+                      onClick={() => leaveBuild(true)}
+                    >
+                      Leave and discard draft
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <div className="li-uac-buildstrip-segs" aria-hidden="true">
             {BUILD_PHASES.map((p, i) => (

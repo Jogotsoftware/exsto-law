@@ -32,6 +32,7 @@ import {
 } from './services.js'
 import type { GenerationMode } from './generateDraft.js'
 import { GOVERNING_JURISDICTION_FIELD_ID } from './intakeFieldLibrary.js'
+import { loadServiceTemplateTokens, templateDriftSuggestions } from './intakeAuthoring.js'
 
 const SERVICE_CONTEXT_TOOL_DEF = {
   name: 'get_service_context',
@@ -386,7 +387,17 @@ async function buildCompletenessSuggestions(
 ): Promise<string[]> {
   const service = await getService(ctx, serviceKey)
   if (!service) return []
-  return jurisdictionSuggestions(service)
+  // SB-FIX-1 (2) — the reverse half of the variable contract, surfaced next to the
+  // jurisdiction nudge: intake questions no document merges. Read-only and
+  // fail-quiet, same as the nudge (a suggestion is never worth a thrown tool error).
+  const drift = await loadServiceTemplateTokens(ctx, serviceKey)
+    .then((t) =>
+      templateDriftSuggestions(service.intakeSchema ?? null, t.tokens, {
+        hasTemplates: t.templates.length > 0,
+      }),
+    )
+    .catch(() => [] as string[])
+  return [...jurisdictionSuggestions(service), ...drift]
 }
 
 // Read-only completeness tool. Returns { serviceKey, ready, missing, suggestions }

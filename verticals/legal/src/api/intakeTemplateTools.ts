@@ -30,6 +30,7 @@ import type { ClientTool } from '../adapters/claude.js'
 import { DOCUMENT_STYLE_BRIEF } from '../templates/documentStyle.js'
 import {
   coerceSystemFieldsInternal,
+  ensureJurisdictionField,
   loadQuestionnaireContext,
   loadServiceTemplateTokens,
   validateProposedQuestionnaire,
@@ -44,6 +45,7 @@ import {
   getQuestionnaire,
   isPromptArtifactDocKind,
 } from './services.js'
+import { GOVERNING_JURISDICTION_FIELD_ID } from './intakeFieldLibrary.js'
 import { parseTemplateEsignConfig, type TemplateEsignConfig } from '../queries/templates.js'
 
 // A questionnaire proposal captured this turn — the proposed schema plus the model's
@@ -143,7 +145,7 @@ const PROPOSE_QUESTIONNAIRE_TOOL_DEF = {
       schema: {
         type: 'object',
         description:
-          'The intake schema: { title?, sections: [{ id, title, title_i18n?, fields: [{ id, label, type, required?, options?, memberFields?, internal?, label_i18n?, options_i18n? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context. VISIBILITY: a document token the CLIENT does not provide — one the ATTORNEY fills during review, or a system/AI-review output (e.g. a review summary, findings, requested changes, the attorney name) — MUST be marked `internal: true` (and required:false). Internal fields still cover their {{token}} (the variable contract is satisfied) but are HIDDEN from the client booking form and never asked of the client. Group internal fields in their own section. SYSTEM tokens (firm/attorney identity, letter_date/today, matter_number, fee slots) are platform-resolved and already excluded from the coverage target — do NOT create fields for them; a client-facing field with a system-token id is coerced to internal automatically. Only fields the CLIENT actually fills at intake are left client-facing. JURISDICTION: when the service is jurisdiction-sensitive (it drafts a document whose legal effect depends on which state\'s law governs), add a CLIENT-FACING field with id "governing_jurisdiction" — type "select", options = the 50 states + DC, allow_unknown: true (never invent a different id or a hardcoded state; this id is what stamps the matter\'s actual governing-law fact and fills the {{governing_jurisdiction}} token). SPANISH (REQUIRED for client-facing text): the firm serves Spanish-speaking clients — for EVERY client-facing (non-internal) field include `label_i18n: { "es": "<natural Spanish label>" }`, for every select/checkbox include `options_i18n: { "es": [<Spanish options, SAME order/length as options>] }`, and every section gets `title_i18n: { "es": "<Spanish title>" }`. Answers/ids stay English (they merge into documents); only the QUESTION text the client reads is translated. Internal fields need no Spanish.',
+          'The intake schema: { title?, sections: [{ id, title, title_i18n?, fields: [{ id, label, type, required?, options?, memberFields?, internal?, label_i18n?, options_i18n? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context. VISIBILITY: a document token the CLIENT does not provide — one the ATTORNEY fills during review, or a system/AI-review output (e.g. a review summary, findings, requested changes, the attorney name) — MUST be marked `internal: true` (and required:false). Internal fields still cover their {{token}} (the variable contract is satisfied) but are HIDDEN from the client booking form and never asked of the client. Group internal fields in their own section. SYSTEM tokens (firm/attorney identity, letter_date/today, matter_number, fee slots) are platform-resolved and already excluded from the coverage target — do NOT create fields for them; a client-facing field with a system-token id is coerced to internal automatically. Only fields the CLIENT actually fills at intake are left client-facing. JURISDICTION (ALWAYS, for any service that drafts a document): include a CLIENT-FACING field with id "governing_jurisdiction" — type "select", options = the 50 states + DC, allow_unknown: true. This is a standing default, not a judgment call: every drafted document has a governing law, and without this question the matter falls back to the firm\'s home state for every client. Never invent a different id and never hardcode a state; this exact id is what stamps the matter\'s governing-law fact and fills the {{governing_jurisdiction}} token. If you omit it on a document-drafting service the platform adds it for you and tells you so — do not then add a second copy. SPANISH (REQUIRED for client-facing text): the firm serves Spanish-speaking clients — for EVERY client-facing (non-internal) field include `label_i18n: { "es": "<natural Spanish label>" }`, for every select/checkbox include `options_i18n: { "es": [<Spanish options, SAME order/length as options>] }`, and every section gets `title_i18n: { "es": "<Spanish title>" }`. Answers/ids stay English (they merge into documents); only the QUESTION text the client reads is translated. Internal fields need no Spanish.',
       },
       summary: {
         type: 'string',
@@ -190,11 +192,20 @@ export function buildProposeQuestionnaireTool(
       // P13 CODE-ENFORCEMENT: a client-facing field whose id is a system token
       // (attorney/firm identity, dates, matter facts) is coerced to internal:true
       // BEFORE validation/capture — the client can never be asked for system data.
-      const { schema: safeSchema, coerced } = coerceSystemFieldsInternal(args.schema)
+      const { schema: coercedSchema, coerced } = coerceSystemFieldsInternal(args.schema)
       // The template tokens are the contract target — one read, shared with the
       // validation (and carried onto the card as the coverage line). System
       // tokens are already excluded (loadServiceTemplateTokens).
-      const { tokens: templateTokens } = await loadServiceTemplateTokens(ctx, serviceKey)
+      const { tokens: templateTokens, templates } = await loadServiceTemplateTokens(ctx, serviceKey)
+      // SB-FIX-1 (3): a service that drafts documents is jurisdiction-sensitive by
+      // definition, so the reusable governing-law question is a DEFAULT rather than
+      // something the model has to notice. Injected here, before validation, so the
+      // capture and the card the attorney sees both already carry it. The presence of
+      // document templates is the signal — read for the coverage check anyway.
+      const { schema: safeSchema, added: jurisdictionAdded } = ensureJurisdictionField(
+        coercedSchema,
+        { jurisdictionSensitive: templates.length > 0 },
+      )
       const validation = validateProposedQuestionnaire(safeSchema, templateTokens)
       if (!validation.ok) {
         return `The proposed questionnaire is not valid and was NOT captured. Fix these and call propose_questionnaire AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
@@ -229,7 +240,12 @@ export function buildProposeQuestionnaireTool(
       const coercedNote = coerced.length
         ? ` NOTE: ${coerced.join(', ')} ${coerced.length === 1 ? 'is a system-resolved field' : 'are system-resolved fields'} (attorney/firm identity, dates, matter facts) — ${coerced.length === 1 ? 'it was' : 'they were'} set internal:true automatically; the platform fills these and the client is never asked for them.`
         : ''
-      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage}${coercedNote} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence (mention the coverage if any tokens are uncovered); NEVER repeat the fields in prose.`
+      // SB-FIX-1 (3): say it plainly, so the model neither re-adds it nor tells the
+      // attorney the form asks something it doesn't.
+      const jurisdictionNote = jurisdictionAdded
+        ? ` NOTE: this service drafts documents, so the standard "Which state's law governs this matter?" question (${GOVERNING_JURISDICTION_FIELD_ID}) was added to the form for you — every drafting service asks it, so the governing law comes from the client instead of defaulting to the firm's home state. It is on the card; do not add a second one.`
+        : ''
+      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage}${coercedNote}${jurisdictionNote} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence (mention the coverage if any tokens are uncovered); NEVER repeat the fields in prose.`
     },
   }
 }
