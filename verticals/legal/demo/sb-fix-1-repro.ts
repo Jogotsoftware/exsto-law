@@ -303,10 +303,10 @@ async function answer(s: DriveState, step: string, answers: Record<string, strin
 }
 
 const WALKTHROUGH =
-  'This is a service for a commercial lease review. The client books it from my site, ' +
-  'uploads their lease and tells me what they are worried about, I have the AI review it ' +
-  'against my checklist, I read the review and send them my write-up, and they pay a flat ' +
-  '$450 when I send it. There is also an engagement letter they sign up front.'
+  'This is a service for a trademark clearance search. The client books it from my site, ' +
+  'tells me the mark they want to use and what goods or services it is for, I run the ' +
+  'clearance search and write them a clearance opinion letter, and they pay a flat $600 ' +
+  'when I send it. There is also an engagement letter they sign up front.'
 
 async function run(outFile: string): Promise<void> {
   const attorneyId = await resolveAttorney()
@@ -336,7 +336,21 @@ async function run(outFile: string): Promise<void> {
     await answer(s, `1${'abc'[i]}-confirm`, answers)
   }
 
-  await approve(s, 'service', '2-after-shell-approved')
+  // The reuse-first rule means the model may skip the shell and build onto an
+  // existing service. Approve a shell if it proposed one; otherwise adopt the key
+  // its first card names, so the drive reaches the part being tested either way.
+  if ((s.pending.serviceProposals ?? []).length) {
+    await approve(s, 'service', '2-after-shell-approved')
+  } else {
+    const adopted =
+      (s.pending.templateProposals ?? [])[0]?.serviceKey ??
+      (s.pending.questionnaireProposals ?? [])[0]?.serviceKey ??
+      null
+    if (!adopted) throw new Error('no shell proposed and no card names a service to adopt')
+    s.buildServiceKey = adopted
+    s.approvedPhases.add('service')
+    console.log(`(reused existing service ${adopted} — no shell proposed)`)
+  }
   await approve(s, 'template', '3-after-template-approved')
   await approve(s, 'questionnaire', '4-after-questionnaire-approved')
 
@@ -357,8 +371,8 @@ async function run(outFile: string): Promise<void> {
   await turn(
     s,
     '6-GO-BACK-TO-INTAKE',
-    'hold on — go back to the intake form. I also need it to ask them how many years are ' +
-      'left on the lease term.',
+    'hold on — go back to the intake form. I also need it to ask whether they have ' +
+      'already started using the mark, and if so the date they first used it in commerce.',
   )
   for (let i = 0; i < 2 && !(s.pending.questionnaireProposals ?? []).length; i++) {
     const qs = s.pending.buildQuestions ?? []

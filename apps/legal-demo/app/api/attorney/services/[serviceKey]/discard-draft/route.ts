@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getService, listServicesIncludingInactive, retireService } from '@exsto/legal'
+import { getService, retireService } from '@exsto/legal'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 
 export const runtime = 'nodejs'
@@ -34,18 +34,18 @@ export async function POST(
   }
 
   try {
-    // getService is active-only, so a hit here means the service is LIVE — refuse.
-    if (await getService(ctxOrError, serviceKey)) {
+    // getService returns the current version whatever its status (it filters on
+    // valid_to, not on active), so read isActive explicitly rather than treating a
+    // hit as "live" — a disabled draft is exactly what this route is for.
+    const service = await getService(ctxOrError, serviceKey)
+    if (!service) {
+      return NextResponse.json({ error: 'No such service draft.' }, { status: 404 })
+    }
+    if (service.isActive) {
       return NextResponse.json(
         { error: 'That service is live. Take it down from its own page instead of discarding it.' },
         { status: 409 },
       )
-    }
-    // Confirm the draft actually exists before retiring, so a stale client key
-    // reports honestly instead of silently succeeding.
-    const all = await listServicesIncludingInactive(ctxOrError)
-    if (!all.some((s) => s.serviceKey === serviceKey)) {
-      return NextResponse.json({ error: 'No such service draft.' }, { status: 404 })
     }
     await retireService(ctxOrError, serviceKey)
     return NextResponse.json({ ok: true, serviceKey })

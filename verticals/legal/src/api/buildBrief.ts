@@ -83,6 +83,16 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
     return lines.join('\n')
   }
   const s = parts.service
+  // SB-FIX-1 (1): the artifact lines below say "none yet" when nothing is APPROVED.
+  // On its own that reads identically whether a card was never proposed or is sitting
+  // on the attorney's screen right now — which is exactly the confusion that made the
+  // model re-propose. So each line that would say "none yet" says "awaiting approval"
+  // instead when its card is pending.
+  const pendingNow = parts.pendingArtifacts ?? []
+  const awaiting = (a: BuildArtifact, none: string): string =>
+    pendingNow.includes(a)
+      ? `${none.split(':')[0]}: PROPOSED — the card is on the attorney's screen awaiting approval. Do not propose it again.`
+      : none
   lines.push(
     `Shell (approved): ${s.displayName} — route=${s.route}, generation_mode=${s.generationMode}, status=${s.isActive ? 'ACTIVE (live)' : 'disabled draft'}`,
   )
@@ -94,12 +104,12 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
       )
     }
   } else {
-    lines.push('Templates: none yet.')
+    lines.push(awaiting('template', 'Templates: none yet.'))
   }
   lines.push(
     parts.questionnaireFieldIds.length
       ? `Questionnaire (approved) fields: ${parts.questionnaireFieldIds.join(', ')}`
-      : 'Questionnaire: none yet.',
+      : awaiting('questionnaire', 'Questionnaire: none yet.'),
   )
   if (parts.lifecycle) {
     const steps = parts.lifecycle.graph
@@ -110,12 +120,12 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
       .join(' → ')
     lines.push(`Workflow (approved, v${parts.lifecycle.version}): ${steps}`)
   } else {
-    lines.push('Workflow: none yet.')
+    lines.push(awaiting('workflow', 'Workflow: none yet.'))
   }
   lines.push(
     s.cost
       ? `Billing (approved): ${s.cost.type} ${s.cost.amount}${s.cost.hours ? ` (${s.cost.hours}h)` : ''}`
-      : 'Billing: not set yet.',
+      : awaiting('billing', 'Billing: not set yet.'),
   )
   if (parts.completeness) {
     lines.push(
@@ -132,9 +142,9 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
     lines.push(
       `DRIFT — the intake collects ${drift.map((d) => `"${d}"`).join(', ')} but no ` +
         `template merges ${drift.length === 1 ? 'it' : 'them'} ` +
-        `(${drift.map((d) => `{{${d}}}`).join(', ')} appear in no document body). ` +
+        `(${drift.map((d) => `{{${d}}}`).join(', ')} ${drift.length === 1 ? 'appears' : 'appear'} in no document body). ` +
         `Before Enable: re-propose the template with ${drift.length === 1 ? 'that token' : 'those tokens'} ` +
-        `placed where they belong, or tell the attorney in one line why the ` +
+        `placed where ${drift.length === 1 ? 'it belongs' : 'they belong'}, or tell the attorney in one line why the ` +
         `${drift.length === 1 ? 'answer is' : 'answers are'} collected without ` +
         `appearing in the document. Do not leave it unsaid.`,
     )
@@ -143,7 +153,6 @@ export function formatBuildBrief(parts: BuildBriefParts): string {
   // The pending line comes first and is unambiguous: a card already on screen is
   // never re-proposed, and a revision detour ENDS by returning to it.
   const approved = approvedArtifacts(parts)
-  const pendingNow = parts.pendingArtifacts ?? []
   if (pendingNow.length) {
     lines.push(
       `AWAITING THE ATTORNEY — you already proposed ${pendingNow.join(', ')} and ` +

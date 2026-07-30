@@ -118,6 +118,19 @@ describe('the BUILD BRIEF states position and pending work', () => {
     expect(text).toContain('{{lease_years_remaining}}')
   })
 
+  // The artifact lines say "none yet" when nothing is APPROVED, which reads the same
+  // whether a card was never proposed or is on screen right now — the exact ambiguity
+  // that made the model re-propose.
+  it('says a pending artifact is AWAITING APPROVAL, not "none yet"', () => {
+    const text = formatBuildBrief(briefParts({ pendingArtifacts: ['workflow'] }))
+    expect(text).not.toContain('Workflow: none yet.')
+    expect(text).toContain("Workflow: PROPOSED — the card is on the attorney's screen")
+  })
+
+  it('still says "none yet" for an artifact that genuinely has no card', () => {
+    expect(formatBuildBrief(briefParts())).toContain('Workflow: none yet.')
+  })
+
   it('says nothing about drift or pending cards when there is none', () => {
     const text = formatBuildBrief(briefParts())
     expect(text).not.toContain('DRIFT')
