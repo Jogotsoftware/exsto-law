@@ -8,6 +8,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 
@@ -21,6 +22,10 @@ interface DraftPayload {
   recordedAt: string
   bodyMarkdown: string
   firmName: string | null
+  // DOC-RENDER-2 — the persisted per-document base font; the share page shows
+  // the client the SAME face/size the attorney reviewed and the PDF exports.
+  fontFamily?: string | null
+  fontSize?: number | null
 }
 
 function humanizeKind(k: string): string {
@@ -133,6 +138,12 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
         <DocumentSheet variant="full" watermark={watermark ?? undefined}>
           <article
             className="doc-rendered li-rev-doc"
+            // DOC-RENDER-2: same persisted-font treatment as the review reader,
+            // so review, share, and PDF all show one document.
+            style={{
+              fontFamily: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+              fontSize: `${normalizeDocFontSize(draft.fontSize)}pt`,
+            }}
             dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
           />
         </DocumentSheet>

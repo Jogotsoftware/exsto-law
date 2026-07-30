@@ -9,6 +9,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { formatDate } from '@/lib/datetime'
 import { BackButton } from '@/components/BackButton'
 import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
@@ -66,6 +67,12 @@ export default function TaskWindowPage({
   const [task, setTask] = useState<Task | null>(null)
   const [env, setEnv] = useState<EnvelopeStatus | null>(null)
   const [executedMarkdown, setExecutedMarkdown] = useState<string | null>(null)
+  // DOC-RENDER-2 — the executed version's persisted base font (legal.draft.get
+  // already returns it; render the executed copy exactly as the reader would).
+  const [executedFont, setExecutedFont] = useState<{
+    fontFamily: string | null
+    fontSize: number | null
+  }>({ fontFamily: null, fontSize: null })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [resend, setResend] = useState(false)
@@ -109,11 +116,19 @@ export default function TaskWindowPage({
   const onEnvLoaded = useCallback((e: EnvelopeStatus) => {
     setEnv(e)
     if (e.status === 'completed' && e.executedDocumentVersionId) {
-      callAttorneyMcp<{ draft: { bodyMarkdown: string } | null }>({
+      callAttorneyMcp<{
+        draft: { bodyMarkdown: string; fontFamily: string | null; fontSize: number | null } | null
+      }>({
         toolName: 'legal.draft.get',
         input: { documentVersionId: e.executedDocumentVersionId },
       })
-        .then((r) => setExecutedMarkdown(r.draft?.bodyMarkdown ?? null))
+        .then((r) => {
+          setExecutedMarkdown(r.draft?.bodyMarkdown ?? null)
+          setExecutedFont({
+            fontFamily: r.draft?.fontFamily ?? null,
+            fontSize: r.draft?.fontSize ?? null,
+          })
+        })
         .catch(() => setExecutedMarkdown(null))
     }
   }, [])
@@ -264,6 +279,10 @@ export default function TaskWindowPage({
                   <DocumentSheet variant="fit">
                     <div
                       className="doc-rendered li-rev-doc"
+                      style={{
+                        fontFamily: docFontCss(normalizeDocFontFamily(executedFont.fontFamily)),
+                        fontSize: `${normalizeDocFontSize(executedFont.fontSize)}pt`,
+                      }}
                       dangerouslySetInnerHTML={{ __html: renderDocumentHtml(executedMarkdown) }}
                     />
                   </DocumentSheet>
