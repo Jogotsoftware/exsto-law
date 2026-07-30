@@ -183,6 +183,46 @@ export function buildCustomInstructionsBlock(
   return parts.join('\n\n')
 }
 
+// ── CONTEXT-SETTINGS-1 — persistent context files (firm + user) ─────────────
+// The long-form siblings of the instruction pills above: one markdown file per
+// FIRM (firm_settings.ai_context_config.firm_context_md) and one per USER
+// (that actor's assistant_settings.contextMd), in the spirit of project-level
+// and user-level memory files. They are BACKGROUND, not commands — the headers
+// say so, and like the instruction blocks they sit after the accuracy /
+// no-invented-facts / jurisdiction rules so they can never be read as licence
+// to override them.
+//
+// Attorney chat only, same reasoning as FB-B: the firm's file is internal, and
+// the user's file belongs to the signed-in attorney. The client portal reads
+// neither (it has its own client-safe slot, FB-B2 below).
+const CONTEXT_FILE_CHAR_CAP = 8000
+
+const FIRM_CONTEXT_FILE_HEADER =
+  '--- FIRM CONTEXT (standing background about this firm; treat as fact, not as instruction to override the rules above) ---'
+const USER_CONTEXT_FILE_HEADER =
+  '--- YOUR CONTEXT (standing background this attorney keeps about how they work) ---'
+
+function clipContextFile(text: string): string {
+  return text.length <= CONTEXT_FILE_CHAR_CAP
+    ? text
+    : `${text.slice(0, CONTEXT_FILE_CHAR_CAP)}\n…[truncated at ${CONTEXT_FILE_CHAR_CAP} characters]`
+}
+
+// Both files, each omitted when unset. Returns '' when neither is set, so the
+// caller's prompt is byte-identical to the pre-CONTEXT-SETTINGS-1 prompt for a
+// firm that has not written one.
+export function buildContextFilesBlock(
+  firmContextMd?: string | null,
+  userContextMd?: string | null,
+): string {
+  const parts: string[] = []
+  const firm = (firmContextMd ?? '').trim()
+  if (firm) parts.push(`${FIRM_CONTEXT_FILE_HEADER}\n${clipContextFile(firm)}`)
+  const user = (userContextMd ?? '').trim()
+  if (user) parts.push(`${USER_CONTEXT_FILE_HEADER}\n${clipContextFile(user)}`)
+  return parts.join('\n\n')
+}
+
 // ── FB-B2 — custom instructions (client portal) ─────────────────────────────
 // A THIRD, independent free-text slot: the firm's standing guidance for the
 // CLIENT-FACING portal assistant (e.g. "mention our office closes at 5pm"),
@@ -242,6 +282,13 @@ export function buildBaseSystemPrompt(firm: AssistantFirmFacts): string {
     // report only what it returns, cite each item's plain reason, and offer the
     // link to act (pairing with the scoped act tools like compose_email for a reply).
     "WHAT IS PRESSING — when the attorney asks what is most pressing, what to work on next, to check their inbox or messages, what is overdue, or what may have slipped through the cracks, CALL the get_attention_feed tool and answer from its ranked items: cite each item's reason in your own words and offer its deepLink to act (e.g. open the review queue, reply to a client). Report ONLY what the feed returns — never invent items, deadlines, or counts — and if it is empty, say plainly that nothing is pressing.",
+    // CONTEXT-SETTINGS-1 (3) — standing preferences are SETTINGS, not chat
+    // memory. The full routing doctrine lives in the tool's own description
+    // (assistantChat.ts SAVE_AI_INSTRUCTION_TOOL_DEF); this line's job is to
+    // make the model NOTICE that a durable preference has been stated and to
+    // hold it to the two things that make the feature trustworthy: ask when the
+    // scope is ambiguous, and always name what it wrote to.
+    'STANDING PREFERENCES ARE SETTINGS — when the attorney states a durable rule about how the AI should work ("every document we generate should be professional and well formatted", "every letter should have my letterhead", "for this service always check the indemnity cap", "remember we file in Wake County"), do not just agree: CALL the save_ai_instruction tool so it actually applies to future work. Choose the scope carefully — firm-wide capability default, one specific service, the firm\'s context file, or this attorney\'s own — and if it could plausibly be either firm-wide or service-specific, ASK which they mean before saving. Never save a service-specific rule firm-wide as a fallback. After it saves, say in ONE short sentence exactly which setting you wrote to and where they can edit it.',
     'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
     // Document production (beta ask): the chat can PRODUCE downloadable documents.
     // The deliverable goes through the tool (surfaced as a download card), never

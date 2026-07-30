@@ -20,6 +20,7 @@ import {
   setServiceCost,
   resolveReviewConfig,
   updateDocumentTemplate,
+  updateDraftingInstructions,
   updateDraftingPrompt,
   updateQuestionnaire,
   updateReviewConfig,
@@ -218,6 +219,32 @@ const promptUpdateTool: Tool<
   }),
 }
 
+// CONTEXT-SETTINGS-1 — the SERVICE-SPECIFIC drafting instructions. This is the
+// layer the per-service prompt box now edits: the universal rules, the firm's
+// standing generation instructions and the fixed input slots are composed
+// around it at generation time, so the attorney's textarea holds only what is
+// genuinely custom about this service. legal.service.prompt.get above still
+// returns the FULL assembled prompt (plus instructionsText) for the Advanced
+// preview; legal.service.prompt.update remains the advanced full-prompt
+// override. Attorney-only, like its siblings.
+const instructionsUpdateTool: Tool<
+  { serviceKey: string; documentKind: string; instructionsText: string },
+  { prompt: DraftingPromptDoc }
+> = {
+  name: 'legal.service.instructions.update',
+  description:
+    "Save a service's OWN drafting instructions for one document kind — just the service-specific guidance, in plain words, with no mustache slots and no boilerplate. The platform composes the universal drafting rules, the firm's standing instructions from Settings → AI Context, and the input slots around it at generation time. Pass an empty string to clear them (meaning: the firm defaults are enough for this service). Writes a NEW immutable service version; the drafting worker uses it immediately. Use this, not legal.service.prompt.update, unless the attorney genuinely wants to author the entire prompt template themselves.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    prompt: await updateDraftingInstructions(
+      ctx,
+      input.serviceKey,
+      input.documentKind,
+      input.instructionsText,
+    ),
+  }),
+}
+
 // AI document-review config (transitions.review). The attorney preconfigures the
 // review prompt (config-first, bundled default fallback — resolved inside the
 // review worker), toggles the redline pass, and force-applies skills. NEITHER is
@@ -328,6 +355,7 @@ registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
 registerTool(promptGetTool)
 registerTool(promptUpdateTool)
+registerTool(instructionsUpdateTool)
 registerTool(reviewGetTool)
 registerTool(reviewUpdateTool)
 registerTool(templateGetTool)

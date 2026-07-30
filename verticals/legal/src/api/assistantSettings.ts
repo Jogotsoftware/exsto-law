@@ -35,6 +35,19 @@ export interface AssistantSettings {
   // it finds) — every reader (assistantPrompt.ts's block builders) accepts
   // both, so an old string value keeps rendering correctly with zero backfill.
   customInstructions?: string | string[]
+  // CONTEXT-SETTINGS-1 — this user's PERSISTENT CONTEXT FILE: free-form
+  // markdown they keep about how they work, the user-level analogue of a
+  // user-scope memory file (the firm-level twin is firm_context_md on the
+  // firm_settings ai_context_config attribute, api/aiContextConfig.ts).
+  //
+  // Distinct from customInstructions above, which are short imperative pills
+  // ("keep drafts short"). This is BACKGROUND — longer, prose, and read as
+  // context rather than as commands. Riding the existing per-actor payload
+  // rather than a new store keeps the AI-context program's "one store per
+  // scope" shape and needs no migration: the payload is a single JSON
+  // attribute, so a new key is additive and an older stored payload simply
+  // has none.
+  contextMd?: string | null
 }
 
 // Tolerant of both payload shapes (see the customInstructions comment above):
@@ -150,4 +163,44 @@ export async function setAssistantSettings(
     },
   })
   return { settingsEntityId: entityId }
+}
+
+// CONTEXT-SETTINGS-1 — merge a partial change into THIS actor's settings
+// without clobbering knobs another surface set. Every caller that only wants to
+// touch one field (the chat's save_ai_instruction tool, the Context Settings
+// page) goes through here rather than composing a whole payload itself.
+export async function patchAssistantSettings(
+  ctx: ActionContext,
+  patch: Partial<AssistantSettings>,
+): Promise<AssistantSettings> {
+  const current = (await getAssistantSettings(ctx)) ?? {}
+  const next: AssistantSettings = { ...current, ...patch }
+  await setAssistantSettings(ctx, next)
+  return next
+}
+
+// The user-level persistent context file, capped so a runaway paste can never
+// dominate a prompt (same cap as the firm-level file).
+export const USER_CONTEXT_MD_CHAR_CAP = 8000
+
+function clampContextMd(text: string): string {
+  const trimmed = text.trim()
+  return trimmed.length > USER_CONTEXT_MD_CHAR_CAP
+    ? trimmed.slice(0, USER_CONTEXT_MD_CHAR_CAP)
+    : trimmed
+}
+
+// Append one line/paragraph to this user's context file. Append, not replace:
+// "also, I always…" said in chat must never wipe what is already there.
+export async function appendUserContextMd(
+  ctx: ActionContext,
+  addition: string,
+): Promise<{ contextMd: string | null }> {
+  const add = addition.trim()
+  if (!add) throw new Error('Nothing to append to your context file.')
+  const current = (await getAssistantSettings(ctx)) ?? {}
+  const existing = typeof current.contextMd === 'string' ? current.contextMd.trim() : ''
+  const contextMd = clampContextMd(existing ? `${existing}\n${add}` : add)
+  await setAssistantSettings(ctx, { ...current, contextMd })
+  return { contextMd: contextMd || null }
 }

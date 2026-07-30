@@ -22,6 +22,11 @@ export * from './reviseDraftJob.js'
 export * from './formattingDirectives.js'
 export * from './notes.js'
 export * from './emailDraftingConfig.js'
+// CONTEXT-SETTINGS-1 — firm AI Context settings (per-capability standing
+// instructions + the firm's persistent context file) and the chat-side scope
+// router that writes a spoken instruction into the right one.
+export * from './aiContextConfig.js'
+export * from './aiInstructionRouting.js'
 export * from './generateEmail.js'
 export * from './composeEmailStream.js'
 export * from './transcriptExtraction.js'
