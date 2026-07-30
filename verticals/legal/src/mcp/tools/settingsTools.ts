@@ -17,6 +17,14 @@ import {
   listEngagementLetters,
   setDefaultEngagementLetter,
   removeEngagementLetter,
+  getAiContextConfig,
+  updateAiContextConfig,
+  effectiveBaseGuidance,
+  saveAiInstruction,
+  type AiContextConfigDoc,
+  type UpdateAiContextConfigInput,
+  type SaveAiInstructionInput,
+  type SaveAiInstructionResult,
   getEmailDraftingConfig,
   updateEmailDraftingConfig,
   getFirmProfile,
@@ -226,6 +234,54 @@ registerTool({
     config: await updateEmailDraftingConfig(ctx, input),
   }),
 } satisfies Tool<UpdateEmailDraftingConfigInput, { config: EmailDraftingConfigDoc }>)
+
+// ── AI Context settings (CONTEXT-SETTINGS-1) ─────────────────────────────────
+// The firm's standing instructions per AI capability (document generation,
+// document review), optional overrides of the platform's universal rules, and
+// the firm's persistent context file. Firm-wide, on the firm_settings
+// singleton. NOT client-portal-callable (clientPolicy.ts is default-deny) —
+// this is internal firm configuration.
+
+registerTool({
+  name: 'legal.firm.ai_context.get',
+  description:
+    "Get the firm's AI Context settings: standing instructions and the in-force base guidance for document generation and document review, plus the firm's persistent context file and the config version. The base guidance returned is what the model actually receives — the firm's override when one is saved, otherwise the platform's built-in universal rules.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => {
+    const config = await getAiContextConfig(ctx)
+    return {
+      config,
+      effectiveBaseGuidance: {
+        documentGeneration: effectiveBaseGuidance('document_generation', config),
+        documentReview: effectiveBaseGuidance('document_review', config),
+      },
+    }
+  },
+} satisfies Tool<
+  Record<string, never>,
+  {
+    config: AiContextConfigDoc
+    effectiveBaseGuidance: { documentGeneration: string; documentReview: string }
+  }
+>)
+
+registerTool({
+  name: 'legal.firm.ai_context.update',
+  description:
+    "Save the firm's AI Context settings. Every field is independent: omit one to leave it unchanged, pass null to clear it (a cleared base guidance falls back to the platform's built-in universal rules). The `append*` fields ADD one instruction/line instead of replacing the list — use those when acting on something said in conversation, and the replace fields only when the attorney is editing the settings wholesale. Document generation and document review pick up the new settings on their next run.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    config: await updateAiContextConfig(ctx, input),
+  }),
+} satisfies Tool<UpdateAiContextConfigInput, { config: AiContextConfigDoc }>)
+
+registerTool({
+  name: 'legal.firm.ai_instruction.save',
+  description:
+    'Route ONE standing instruction stated in conversation to the right settings scope and save it there (append, never replace). Scopes: firm_document_generation, firm_document_review, firm_assistant_chat, firm_context, my_assistant_chat, my_context, service_document_generation, service_document_review. The two service scopes REQUIRE serviceKey (and service_document_generation also requires documentKind) — a service-scoped instruction is never saved firm-wide as a fallback. Returns the scope it wrote to and where the attorney can see it.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => await saveAiInstruction(ctx, input),
+} satisfies Tool<SaveAiInstructionInput, SaveAiInstructionResult>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 

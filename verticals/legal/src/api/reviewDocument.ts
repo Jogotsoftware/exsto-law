@@ -18,6 +18,7 @@ import {
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
 import { resolveMatterJurisdiction } from './matterJurisdiction.js'
+import { composeContextBlocks, getAiContextConfig } from './aiContextConfig.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // AI document review (document-review services). The attorney preconfigures a
@@ -50,11 +51,17 @@ const MAX_DOCUMENT_TEXT_CHARS = 200_000
 
 export interface ReviewConfig {
   enabled: boolean
-  // Attorney-configured prompt; null → the bundled repo default.
+  // Attorney-configured FULL prompt override; null → the bundled repo default.
+  // Advanced use — the ordinary per-service layer is `instructions` below.
   prompt: string | null
   promptVersion: number | null
   redline: boolean
   skillSlugs: string[]
+  // CONTEXT-SETTINGS-1 — this service's own review instructions ("this is a
+  // contract review for medical employee agreements; I look for X, Y, Z").
+  // Slot-free: composed around the universal review rules and the firm's
+  // standing review instructions at run time, never pasted into the prompt box.
+  instructions: string | null
 }
 
 interface RawReviewConfig {
@@ -63,6 +70,7 @@ interface RawReviewConfig {
   prompt_version?: unknown
   redline?: unknown
   skill_slugs?: unknown
+  instructions?: unknown
 }
 
 // Pure parser (exported for tests): absent/garbage config ⇒ disabled — review
@@ -77,6 +85,8 @@ export function parseReviewConfig(raw: unknown): ReviewConfig {
     skillSlugs: Array.isArray(r.skill_slugs)
       ? r.skill_slugs.filter((s): s is string => typeof s === 'string' && !!s.trim())
       : [],
+    instructions:
+      typeof r.instructions === 'string' && r.instructions.trim() ? r.instructions.trim() : null,
   }
 }
 
@@ -128,6 +138,9 @@ export interface UpdateReviewConfigInput {
   prompt?: string | null
   redline?: boolean
   skillSlugs?: string[]
+  // CONTEXT-SETTINGS-1 — this service's own review instructions. Same merge
+  // contract: undefined leaves them alone, null/'' clears them.
+  instructions?: string | null
 }
 
 // Write a service's review config as a new immutable version (the upsert
@@ -159,6 +172,15 @@ export async function updateReviewConfig(
     nextVersion = promptChanged ? (existing.promptVersion ?? 0) + 1 : existing.promptVersion
   }
 
+  // Instructions: same undefined-vs-null contract as the prompt above.
+  let instructions = existing.instructions
+  if (input.instructions !== undefined) {
+    instructions =
+      typeof input.instructions === 'string' && input.instructions.trim()
+        ? input.instructions.trim()
+        : null
+  }
+
   const review = {
     enabled: input.enabled !== undefined ? input.enabled === true : existing.enabled,
     prompt,
@@ -167,6 +189,7 @@ export async function updateReviewConfig(
     skill_slugs: (input.skillSlugs ?? existing.skillSlugs).filter(
       (s) => typeof s === 'string' && !!s.trim(),
     ),
+    instructions,
   }
 
   await submitAction(ctx, {
@@ -297,6 +320,13 @@ export async function extractDocumentText(buf: Buffer, contentType: string): Pro
 
 export interface AssembleReviewArgs {
   basePrompt: string
+  // CONTEXT-SETTINGS-1 — the stacked context blocks (universal review rules →
+  // firm context file → the firm's standing review instructions → this
+  // service's own review instructions), PREPENDED to the base prompt. They lead
+  // because they are rules and background the model should read before the
+  // task; prepending also leaves the base prompt's trailing output/trace
+  // contract as the final word, which the adapter's parser depends on.
+  contextBlocks?: string
   documentText: string
   intakeResponses: Record<string, unknown> | null
   originalFilename: string
@@ -316,7 +346,11 @@ export function assembleReviewPrompt(args: AssembleReviewArgs): string {
   // filename). A raw-string second arg to replaceAll honors `$&`/`` $` ``/`$'`/`$$`
   // special replacement patterns, so a document containing e.g. `$'` would
   // splice the rest of the prompt into itself. `() => value` is inserted verbatim.
-  let prompt = args.basePrompt
+  let prompt = (
+    args.contextBlocks?.trim()
+      ? `${args.contextBlocks.trim()}\n\n${args.basePrompt}`
+      : args.basePrompt
+  )
     .replaceAll('{{document_text}}', () => args.documentText)
     .replaceAll('{{intake_responses_json}}', () =>
       JSON.stringify(args.intakeResponses ?? {}, null, 2),
@@ -442,6 +476,17 @@ export async function runDocumentReview(
   // adapter parses. A capability rubric (ADR 0046) is layered on as attorney GUIDANCE
   // (below), never as the base prompt, so it can't drop the trace contract.
   const basePrompt = config.prompt ?? loadReviewPrompt()
+  // CONTEXT-SETTINGS-1 — the firm's AI Context layers for the review
+  // capability, plus this service's own review instructions. Read once here
+  // and prepended in assembleReviewPrompt below. No user-level context file:
+  // review runs on the durable worker as the tenant's AI agent actor, with no
+  // "current user" to attribute one to.
+  const aiContext = await getAiContextConfig(agentCtx)
+  const contextBlocks = composeContextBlocks({
+    capability: 'document_review',
+    config: aiContext,
+    serviceInstructions: config.instructions,
+  })
   const guidance =
     [input.guidance?.trim(), rubricOverride ? `Focus this review on: ${rubricOverride}` : null]
       .filter(Boolean)
@@ -483,6 +528,7 @@ export async function runDocumentReview(
 
   const prompt = assembleReviewPrompt({
     basePrompt,
+    contextBlocks,
     documentText,
     intakeResponses: matter.questionnaireResponses ?? null,
     originalFilename: filename,

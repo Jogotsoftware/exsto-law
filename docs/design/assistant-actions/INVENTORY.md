@@ -435,3 +435,18 @@ entries into the gap map in §3 and marks closed ones fixed.
 `PrepareSignature` import) · `apps/legal-demo/components/esign/EsignComposer.tsx` (the cutover
 target `prepare_envelope` should point at) · `docs/design/esign-unify/DESIGN.md` (the ES-1..ES-6
 plan this stale finding sits under).
+
+- **2026-07-30 (CONTEXT-SETTINGS-1):** the AI Context settings landed WIRED for chat — `save_ai_instruction`
+  (`assistantChat.ts`, routing doctrine in the tool description + `assistantPrompt.ts`) lets the assistant
+  route a spoken standing instruction to any of eight scopes and report which it wrote to, and
+  `legal.firm.ai_context.get/update` + `legal.firm.ai_instruction.save` (`settingsTools.ts`) expose the
+  same over MCP. Two deltas the SERVICE BUILDER still doesn't know about:
+  - `transitions.drafting.instructions[kind]` is the new per-service drafting layer (the prompt box now
+    holds only this; the universal rules and slots are composed server-side). `propose_template`'s
+    authoring path seeds it via `defaultDraftingInstructions` (`templateAuthoring.ts:504`), but there is no
+    authoring tool for the model to WRITE or revise a service's instructions during a build — it can only
+    fall back to `legal.service.prompt.update`, which puts the service back in hand-authored full-prompt
+    mode and off the composed layers. A `propose_service_instructions` (or a field on `propose_template`)
+    is the missing shape.
+  - `transitions.review.instructions` is the review twin. `legal.service.review.update` accepts it, but
+    it is absent from every build-wizard schema, so a builder conversation cannot set it either.
