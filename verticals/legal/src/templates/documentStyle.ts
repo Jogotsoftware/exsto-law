@@ -26,6 +26,7 @@ STRUCTURE
 - Number articles/sections per the formatting and drafting standards (Article/Section numbering), rendering each article heading as a Title Case markdown H2 (\`## Article I — Definitions\`) and sections as H3 (\`### Section 1.1 Defined Terms\`).
 - Break long provisions into numbered sub-clauses instead of dense paragraphs. Use numbered lists for enumerated obligations, conditions, or representations; use bulleted lists only for genuinely parallel, non-sequential items.
 - End any document that gets signed with an execution block built ONLY from the canonical markers ({{sign:key}}, {{date:key}}, {{name:key}}, {{title:key}}) — never underscore/dash-drawn lines.
+- When the signer count varies per matter (all LLC members, all partners — a repeat-per-party signer role), emit exactly ONE execution block using that role's base key ({{sign:member}}, {{name:member}}, {{date:member}}); the platform replicates it once per actual party. Never write out member_1/member_2/… blocks yourself.
 
 TYPOGRAPHY
 - Put a defined term in **bold** (\`**Term**\`) at its first (defining) use, and bold party names in the preamble.

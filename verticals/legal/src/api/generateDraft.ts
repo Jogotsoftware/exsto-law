@@ -9,13 +9,19 @@ import { enqueueJob } from '@exsto/worker-runtime'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadDraftingPrompt } from '../templates/loader.js'
 import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
-import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
+import {
+  getDraftingPrompt,
+  getDocumentTemplate,
+  getDocumentTemplateEsignConfig,
+  resolveDocumentTemplateDoc,
+} from './services.js'
+import { listMatterPartyContacts } from './esignPrefill.js'
 import { getMatter } from '../queries/matters.js'
 import { getFirmDefaultRate, getClientRate, formatRateUsd } from './rates.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { isSpanishDocumentKind, spanishDocumentKind, baseDocumentKind } from './documentLanguage.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
-import { canonicalizeExecutionLines } from '../esign/executionBlock.js'
+import { canonicalizeExecutionLines, expandRepeatSignerBlocks } from '../esign/executionBlock.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
 import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
 import { findUnresolvedTokens } from './tokenClasses.js'
@@ -266,6 +272,32 @@ export async function runDraftGeneration(
     input.generationMode ??
     (await resolveGenerationMode(agentCtx, m.serviceKey, input.documentKind))
 
+  // MULTI-PARTY-1 — repeat-per-party signature blocks. When this document's
+  // e-sign config marks a role repeatPerParty, the authored SINGLE execution
+  // block ({{sign:member}} …) is replicated per matter party with indexed keys
+  // ({{sign:member_1}} …) at DRAFT time — the moment the party count is known —
+  // so the body the attorney reviews/approves physically carries one signature
+  // block per actual signer, and the send-time recipient expansion
+  // (esignPrefill) emits the matching keys. Applied to BOTH generation paths.
+  // Best-effort: an expansion failure must never fail drafting.
+  const applyRepeatSignerExpansion = async (markdown: string): Promise<string> => {
+    if (!m.serviceKey) return markdown
+    try {
+      const esignKind = baseDocumentKind(input.documentKind)
+      const config = await getDocumentTemplateEsignConfig(agentCtx, m.serviceKey, esignKind)
+      const repeatRoles = (config?.roles ?? []).filter((r) => r.repeatPerParty === true)
+      if (repeatRoles.length === 0) return markdown
+      const parties = await listMatterPartyContacts(agentCtx, input.matterEntityId)
+      const count = Math.max(1, parties.length)
+      let out = markdown
+      for (const role of repeatRoles) out = expandRepeatSignerBlocks(out, role.key, count)
+      return out
+    } catch (err) {
+      console.error('[draft.generate] repeat-signer expansion skipped:', err)
+      return markdown
+    }
+  }
+
   if (generationMode === 'template_merge') {
     const service = await readServiceGeneration(agentCtx, m.serviceKey)
     // Firm identity fills {{firm_name}}/{{attorney_name}} — tokens the editors
@@ -303,7 +335,7 @@ export async function runDraftGeneration(
     // execution line (a printed name/role + an inline `Date: ____` rule). Split
     // it so the trailing rule becomes a whole-line ruled signature/date line
     // everywhere it renders — never literal broken underscores.
-    const canonicalMarkdown = canonicalizeExecutionLines(markdown)
+    const canonicalMarkdown = await applyRepeatSignerExpansion(canonicalizeExecutionLines(markdown))
 
     const merged = await submitAction(agentCtx, {
       actionKindName: 'draft.merge',
@@ -428,10 +460,14 @@ export async function runDraftGeneration(
 
   const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, task: 'draft_generate' })
 
+  // MULTI-PARTY-1 — replicate a repeat-per-party role's execution block per
+  // actual party (the AI is told to emit ONE block with the role's base key).
+  const draftMarkdown = await applyRepeatSignerExpansion(result.documentMarkdown)
+
   // Generation-integrity fix — the platform's own honesty net: every raw
   // {{token}} the model left behind, recorded regardless of what its own
   // `ambiguities` list says (see PersistTraceArgs.unresolvedTokens).
-  const unresolvedTokens = findUnresolvedTokens(result.documentMarkdown)
+  const unresolvedTokens = findUnresolvedTokens(draftMarkdown)
 
   const reasoningTraceId = await persistReasoningTrace(agentCtx, {
     prompt,
@@ -471,7 +507,7 @@ export async function runDraftGeneration(
     payload: {
       matter_entity_id: input.matterEntityId,
       document_kind: input.documentKind,
-      document_markdown: result.documentMarkdown,
+      document_markdown: draftMarkdown,
       model_identity: result.modelIdentity,
       reasoning_trace_id: reasoningTraceId,
       jurisdiction: jurisdiction?.code ?? null,

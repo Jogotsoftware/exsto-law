@@ -467,3 +467,18 @@ plan this stale finding sits under).
     the template-drift open item both surface to the model through existing surfaces —
     the `propose_questionnaire` ack, `get_service_completeness`'s `suggestions`, and the
     BUILD BRIEF (`api/buildBrief.ts`) — so no new tool was needed for either.
+- **2026-07-30 (MULTI-PARTY-1):** multi-party services work end to end (repeating intake
+  group → real matter contacts → repeat-per-party signature expansion). What IS wired for
+  chat: `propose_questionnaire`'s description now mandates a `members_repeater` (with
+  per-person name+email memberFields) for any multi-person service, and
+  `propose_template`'s `esign_config` schema accepts `repeatPerParty` on a role — the
+  builder can author the whole shape conversationally. Remaining gaps:
+  - `legal.matter.link_contact` (MCP `mcp/tools/companyTools.ts:134`) still has **no
+    `ClientTool`** — the attorney cannot say "add Maria as a party on this matter" in
+    chat; parties link only via intake (`handlers/intake.ts` matter.open party loop) or
+    the MCP tool. Same for reading a matter's party list (`matter_contact` traversal,
+    `api/esignPrefill.ts:listMatterPartyContacts`).
+  - The service Templates tab's per-role "One signature request per party" toggle
+    (`components/templates/TemplateEsignPanel.tsx`) is UI + builder-proposal only; there
+    is no chat verb to flip it on an EXISTING service's role after the fact
+    (`legal.service.template.esign.update` exists as MCP but is not a `ClientTool`).

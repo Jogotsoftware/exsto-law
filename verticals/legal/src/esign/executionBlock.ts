@@ -30,6 +30,7 @@ export {
   parseMarkerLine,
   computeMarkerRoleDrift,
   computeSignerEmailGaps,
+  isRepeatMarkerKey,
   labelFor,
   type EsignField,
   type EsignFieldType,
@@ -185,6 +186,60 @@ export function renderSigMarkersForPreview(markdown: string): string {
   })
   if (!changed) return markdown
   return out.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MULTI-PARTY-1 — repeat-per-party execution blocks. A template authors ONE
+// block for a repeating role ({{sign:member}} / {{name:member}} / {{date:member}});
+// at draft generation, when the matter's party count is known, that block is
+// replicated once per party with INDEXED keys ({{sign:member_1}}, {{sign:member_2}},
+// …) so the reviewed/approved body physically carries one signature block per
+// actual signer — the send-time recipient expansion (esignPrefill) emits the
+// matching `key_<n>` signer keys. Pure and defensive:
+//   • no base-key marker in the body → returned unchanged (nothing to expand;
+//     covers a body that was already expanded to indexed keys),
+//   • count < 1 → treated as 1 (the block still becomes `key_1` so recipients
+//     and markers always agree).
+// The expansion span is the contiguous line range from the FIRST to the LAST
+// line containing a base-key marker — authored blocks keep a role's markers
+// together (buildExecutionBlock's shape), so the span is the block.
+// ─────────────────────────────────────────────────────────────────────────
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function expandRepeatSignerBlocks(
+  markdown: string,
+  roleKey: string,
+  partyCount: number,
+): string {
+  if (!markdown || !roleKey) return markdown
+  const baseTag = new RegExp(
+    `\\{\\{\\s*(${MARKER_TYPE_PATTERN})\\s*:\\s*${escapeRegExp(roleKey)}\\s*\\}\\}`,
+    'g',
+  )
+  const lines = markdown.split('\n')
+  let first = -1
+  let last = -1
+  for (let i = 0; i < lines.length; i++) {
+    baseTag.lastIndex = 0
+    if (baseTag.test(lines[i]!)) {
+      if (first === -1) first = i
+      last = i
+    }
+  }
+  if (first === -1) return markdown
+  const count = Math.max(1, Math.floor(partyCount))
+  const block = lines.slice(first, last + 1)
+  const copies: string[] = []
+  for (let n = 1; n <= count; n++) {
+    const copy = block.map((line) =>
+      line.replace(baseTag, (_m, type: string) => `{{${type}:${roleKey}_${n}}}`),
+    )
+    copies.push(copy.join('\n'))
+  }
+  const out = [...lines.slice(0, first), copies.join('\n\n'), ...lines.slice(last + 1)]
+  return out.join('\n')
 }
 
 export interface ExecutionSigner {

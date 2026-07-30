@@ -62,6 +62,11 @@ interface ServiceField {
   // document's {{token}} is covered, but NEVER shown to the client on the booking
   // form and never asked of them. The client view filters these out.
   internal?: boolean
+  // MULTI-PARTY-1 — members_repeater: the per-person sub-fields each repeated
+  // entry asks (name/email/role/…). Absent → the legacy hardcoded LLC-member
+  // row shape renders instead.
+  memberFields?: ServiceField[]
+  minItems?: number
 }
 
 interface ServiceSection {
@@ -155,11 +160,11 @@ interface MemberRow {
   // Client-only stable identity for React keys. Stripped before sending to
   // the booking submit handler.
   id: string
-  name: string
-  address: StructuredAddress | null
-  capital_contribution: string
-  ownership_percentage: string
-  is_manager: boolean
+  // MULTI-PARTY-1 — the row's answers keyed by member sub-field id. A service
+  // with configured memberFields renders/validates those; the legacy fallback
+  // (no memberFields) uses the fixed keys name / address /
+  // capital_contribution / ownership_percentage / is_manager.
+  values: Record<string, unknown>
 }
 
 // A file staged through /api/client/intake/uploads for a file_upload field.
@@ -261,14 +266,20 @@ function formatFileSize(bytes: number): string {
 }
 
 function emptyMember(): MemberRow {
-  return {
-    id: newMemberId(),
-    name: '',
-    address: null,
-    capital_contribution: '',
-    ownership_percentage: '',
-    is_manager: false,
-  }
+  return { id: newMemberId(), values: {} }
+}
+
+// Typed accessors over a member row's loose value bag.
+function memberStr(m: MemberRow, key: string): string {
+  const v = m.values[key]
+  return typeof v === 'string' ? v : typeof v === 'number' ? String(v) : ''
+}
+function memberAddress(m: MemberRow, key: string): StructuredAddress | null {
+  const v = m.values[key]
+  return v && typeof v === 'object' ? (v as StructuredAddress) : null
+}
+function memberBool(m: MemberRow, key: string): boolean {
+  return m.values[key] === true
 }
 
 export default function BookPage() {
@@ -612,9 +623,31 @@ export default function BookPage() {
         if (!field.required) continue
         if (field.type === 'members_repeater') {
           if (members.length === 0) return t('error.member_required')
+          const subs = (field.memberFields ?? []).filter((s) => !s.internal)
           for (const m of members) {
-            if (!m.name.trim()) return t('error.member_name')
-            if (!m.address?.formatted_address?.trim()) return t('error.member_address')
+            if (subs.length > 0) {
+              // MULTI-PARTY-1 — configured sub-fields validate on their own
+              // required flags, exactly like top-level fields.
+              for (const sub of subs) {
+                if (!sub.required) continue
+                const label = fieldLabelOf(sub, lang, t)
+                if (sub.type === 'address_autocomplete') {
+                  if (!memberAddress(m, sub.id)?.formatted_address?.trim()) {
+                    return t('error.fill_field', { field: label })
+                  }
+                  continue
+                }
+                const v = m.values[sub.id]
+                if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
+                  return t('error.fill_field', { field: label })
+                }
+              }
+            } else {
+              // Legacy fixed shape (no memberFields configured).
+              if (!memberStr(m, 'name').trim()) return t('error.member_name')
+              if (!memberAddress(m, 'address')?.formatted_address?.trim())
+                return t('error.member_address')
+            }
           }
           continue
         }
@@ -803,10 +836,19 @@ export default function BookPage() {
   // doors (signed-in portal submit and the anonymous intake-gate finalize).
   function buildSubmitPayload() {
     if (!selectedService) return null
-    const responsesToSubmit = selectedService.intakeSchema.sections.some((s) =>
-      s.fields.some((f) => f.type === 'members_repeater'),
-    )
-      ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
+    // MULTI-PARTY-1 — repeater rows submit under the FIELD'S OWN id (so the
+    // server's schema-driven party extraction finds them); the legacy fixed key
+    // 'members' is also written for old readers when the field isn't named that.
+    const repeaterField = selectedService.intakeSchema.sections
+      .flatMap((s) => s.fields)
+      .find((f) => f.type === 'members_repeater')
+    const memberRows = members.map((m) => m.values)
+    const responsesToSubmit = repeaterField
+      ? {
+          ...intakeResponses,
+          [repeaterField.id]: memberRows,
+          ...(repeaterField.id !== 'members' ? { members: memberRows } : {}),
+        }
       : intakeResponses
 
     // Staged file tokens for the SELECTED service's file_upload fields only —
@@ -2141,6 +2183,11 @@ function FieldRenderer({
   ) : null
 
   if (field.type === 'members_repeater') {
+    const subs = (field.memberFields ?? []).filter((s) => !s.internal)
+    const setMemberValue = (idx: number, key: string, value: unknown) =>
+      setMembers((prev) =>
+        prev.map((x, i) => (i === idx ? { ...x, values: { ...x.values, [key]: value } } : x)),
+      )
     return (
       <div className="bk-field bk-field-wide">
         <span className="bk-label">
@@ -2151,72 +2198,125 @@ function FieldRenderer({
         {members.map((m, idx) => (
           <fieldset key={m.id} className="bk-member">
             <legend className="bk-member-legend">{t('member.label', { n: idx + 1 })}</legend>
-            <div className="bk-member-grid">
-              <div className="bk-field">
-                <label className="bk-label">{t('member.fullname')}</label>
-                <input
-                  className="bk-input bk-input-bare"
-                  value={m.name}
-                  onChange={(e) =>
-                    setMembers((prev) =>
-                      prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)),
+            {subs.length > 0 ? (
+              // MULTI-PARTY-1 — CONFIG-DRIVEN member row: render the service's
+              // own per-person sub-fields (name, email, role, …) instead of the
+              // legacy hardcoded LLC shape, so any multi-party service can ask
+              // exactly what it needs — and capture each person's email, which
+              // is what makes them a linkable, signable contact.
+              <div className="bk-member-grid">
+                {subs.map((sub) => {
+                  const subLabel = fieldLabelOf(sub, lang, t)
+                  if (sub.type === 'address_autocomplete') {
+                    return (
+                      <AddressAutocomplete
+                        key={sub.id}
+                        label={subLabel}
+                        required={sub.required === true}
+                        value={memberAddress(m, sub.id)}
+                        onChange={(addr) => setMemberValue(idx, sub.id, addr)}
+                      />
                     )
                   }
-                />
+                  if (sub.type === 'yes_no' || sub.type === 'true_false') {
+                    return (
+                      <label key={sub.id} className="bk-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={memberBool(m, sub.id)}
+                          onChange={(e) => setMemberValue(idx, sub.id, e.target.checked)}
+                        />
+                        <span>{subLabel}</span>
+                      </label>
+                    )
+                  }
+                  if (sub.type === 'select' && (sub.options?.length ?? 0) > 0) {
+                    return (
+                      <div key={sub.id} className="bk-field">
+                        <label className="bk-label">{subLabel}</label>
+                        <select
+                          className="bk-input bk-input-bare"
+                          value={memberStr(m, sub.id)}
+                          onChange={(e) => setMemberValue(idx, sub.id, e.target.value)}
+                        >
+                          <option value="">—</option>
+                          {(sub.options ?? []).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {optionLabelOf(sub, opt, lang, t)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  }
+                  const isEmail = /email/i.test(sub.id)
+                  return (
+                    <div key={sub.id} className="bk-field">
+                      <label className="bk-label">{subLabel}</label>
+                      <input
+                        className="bk-input bk-input-bare"
+                        type={
+                          sub.type === 'number' ? 'number' : sub.type === 'date' ? 'date' : 'text'
+                        }
+                        inputMode={
+                          sub.type === 'number' ? 'decimal' : isEmail ? 'email' : undefined
+                        }
+                        value={memberStr(m, sub.id)}
+                        onChange={(e) => setMemberValue(idx, sub.id, e.target.value)}
+                      />
+                    </div>
+                  )
+                })}
               </div>
-              <div className="bk-field">
-                <label className="bk-label">{t('member.capital')}</label>
-                <input
-                  className="bk-input bk-input-bare"
-                  type="number"
-                  inputMode="decimal"
-                  value={m.capital_contribution}
-                  onChange={(e) =>
-                    setMembers((prev) =>
-                      prev.map((x, i) =>
-                        i === idx ? { ...x, capital_contribution: e.target.value } : x,
-                      ),
-                    )
-                  }
+            ) : (
+              // Legacy fixed LLC-member shape (services with no memberFields).
+              <>
+                <div className="bk-member-grid">
+                  <div className="bk-field">
+                    <label className="bk-label">{t('member.fullname')}</label>
+                    <input
+                      className="bk-input bk-input-bare"
+                      value={memberStr(m, 'name')}
+                      onChange={(e) => setMemberValue(idx, 'name', e.target.value)}
+                    />
+                  </div>
+                  <div className="bk-field">
+                    <label className="bk-label">{t('member.capital')}</label>
+                    <input
+                      className="bk-input bk-input-bare"
+                      type="number"
+                      inputMode="decimal"
+                      value={memberStr(m, 'capital_contribution')}
+                      onChange={(e) => setMemberValue(idx, 'capital_contribution', e.target.value)}
+                    />
+                  </div>
+                  <div className="bk-field">
+                    <label className="bk-label">{t('member.ownership')}</label>
+                    <input
+                      className="bk-input bk-input-bare"
+                      type="number"
+                      inputMode="decimal"
+                      value={memberStr(m, 'ownership_percentage')}
+                      onChange={(e) => setMemberValue(idx, 'ownership_percentage', e.target.value)}
+                    />
+                  </div>
+                  <label className="bk-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={memberBool(m, 'is_manager')}
+                      onChange={(e) => setMemberValue(idx, 'is_manager', e.target.checked)}
+                    />
+                    <span>{t('member.manager')}</span>
+                  </label>
+                </div>
+                <AddressAutocomplete
+                  label={t('member.address')}
+                  required
+                  value={memberAddress(m, 'address')}
+                  onChange={(addr) => setMemberValue(idx, 'address', addr)}
                 />
-              </div>
-              <div className="bk-field">
-                <label className="bk-label">{t('member.ownership')}</label>
-                <input
-                  className="bk-input bk-input-bare"
-                  type="number"
-                  inputMode="decimal"
-                  value={m.ownership_percentage}
-                  onChange={(e) =>
-                    setMembers((prev) =>
-                      prev.map((x, i) =>
-                        i === idx ? { ...x, ownership_percentage: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </div>
-              <label className="bk-checkbox">
-                <input
-                  type="checkbox"
-                  checked={m.is_manager}
-                  onChange={(e) =>
-                    setMembers((prev) =>
-                      prev.map((x, i) => (i === idx ? { ...x, is_manager: e.target.checked } : x)),
-                    )
-                  }
-                />
-                <span>{t('member.manager')}</span>
-              </label>
-            </div>
-            <AddressAutocomplete
-              label={t('member.address')}
-              required
-              value={m.address}
-              onChange={(addr) =>
-                setMembers((prev) => prev.map((x, i) => (i === idx ? { ...x, address: addr } : x)))
-              }
-            />
+              </>
+            )}
             {members.length > 1 && (
               <button
                 type="button"
