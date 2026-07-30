@@ -39,7 +39,6 @@ import {
   setServiceLifecycleAI,
   createCostAI,
   setServiceActive,
-  listServicesIncludingInactive,
   type AssistantChatReply,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
