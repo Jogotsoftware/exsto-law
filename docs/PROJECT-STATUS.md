@@ -2,7 +2,7 @@
 
 **Purpose of this file:** a single, self-contained snapshot of the product for use OUTSIDE this repo — specifically, Joe pastes this into Claude web (or a fresh Claude Code session with no prior context) to get accurate help drafting the next prompt for Claude Code. It has no access to the codebase, so this file needs to say everything relevant on its own.
 
-**Keep it current.** This is a living document, not an append-only log — when something here ships, gets fixed, or changes, EDIT this file in place (update the section, don't just add a new dated bullet at the bottom). Last updated: 2026-07-27.
+**Keep it current.** This is a living document, not an append-only log — when something here ships, gets fixed, or changes, EDIT this file in place (update the section, don’t just add a new dated bullet at the bottom). Last updated: 2026-07-30.
 
 ---
 
@@ -37,8 +37,10 @@ This list is at the level Claude web needs — "this exists and works," not file
 
 ---
 
-## 3. Recently shipped (last ~30 merged PRs, most recent first, all on `main`, no open PRs as of 2026-07-27)
+## 3. Recently shipped (last ~30 merged PRs, most recent first, all on `main`, no open PRs as of 2026-07-30)
 
+- MULTI-PARTY-1 — services involving multiple parties work end to end: the repeating intake group is now config-driven (each service declares its own per-person fields, including the email that makes someone signable), captured people become real matter contacts (`matter_contact`, now readable by the CRM), and a signature role can expand into one signature block + one signature request per actual party instead of a static count (#509)
+- SB-FIX-1 — four service-builder defects fixed (#508)
 - DOC-RENDER-2 — a draft's persisted per-document font now reaches every reader (share link, e-sign signing pane, executed copy), matching review + PDF; first pass of the one-modal-per-concern audit landed as `docs/diagnostics/MODAL-AUDIT.md`; the leaked markup stored in the prod Operating Agreement template was healed through the action layer (#505)
 - Untrack Netlify CLI link state, gitignore `.netlify/` (#504)
 - DOC-RENDER-1 — fixed the raw-markup leak (two bugs: a display-side plain-text stripper, and the template editor's save path persisting chip markup) and unified every document surface onto the shared `DocumentSheet` (#503)
@@ -66,11 +68,11 @@ This list is at the level Claude web needs — "this exists and works," not file
 
 These are real, reproduced gaps found by using the product, not a code guess:
 
-1. **Multi-member/multi-party intake capture is missing.** Building a multi-member LLC service, the builder didn't generate questionnaire fields for the additional members, and didn't add captured members as real matter contacts. Standing rule needed: any service that can involve multiple people (multi-member LLC, partnership, multi-party agreement, extra signers) should propose per-person intake fields AND create them as real contacts on the matter.
+1. ~~**Multi-member/multi-party intake capture is missing.**~~ **FIXED 2026-07-30 (MULTI-PARTY-1, PR #509).** The repeating intake group (`members_repeater`) existed but the booking form ignored its configured `memberFields` and rendered a hardcoded LLC-member row, so a service could never ask for other members' emails; and nothing turned captured people into contacts. Now: the member row is config-driven (each service declares the per-person sub-fields it needs), `matter.open` creates each captured person as a real `client_contact` and links them to the matter via the existing `matter_contact` relationship, the CRM contact↔matter traversals read that link (it had been write-only, so party contacts showed no matters), and the builder's `propose_questionnaire` now *requires* a repeating group with per-person name + email for any service that can involve more than one person. Proven in the Pacheco tenant: a 3-member intake produced 3 linked contacts, each showing the matter on their CRM record.
 2. **Service-builder wizard loses its place.** Revising a questionnaire after a later step (billing) was already approved caused the wizard to lose track of where it was in the build.
 3. **Template and questionnaire drift out of sync.** Adding/changing an intake field doesn't automatically add the matching merge token to the associated document template.
 4. **No subtle way to restart/quit the builder wizard mid-build.** Needs an elegant, low-key control (not a jarring Cancel button) — design not yet chosen.
-5. **No dynamic per-signer signature blocks.** When the number of signers varies (e.g. LLC member count), the builder can't generate that many signature fields — it currently asks the attorney to pick a static fallback instead.
+5. ~~**No dynamic per-signer signature blocks.**~~ **FIXED 2026-07-30 (MULTI-PARTY-1, PR #509).** A template e-sign role can now be marked "one signature request per party" (`repeatPerParty`). The template author writes ONE execution block using the role's key; when the matter is drafted — the moment the party count is actually known — that block is replicated per party with indexed markers, so the attorney reviews and approves the real N signature blocks, and sending expands the role into one signature request per party resolved from the matter's linked contacts. The builder can propose this shape itself and is explicitly told not to hardcode member_1/member_2 roles or pick a static fallback. Proven in the Pacheco tenant: 3 members → 3 signature blocks in the approved document → 3 resolved recipients on the e-sign step.
 6. **The workflow's e-sign step has no real in-place UI.** Asking "where do I add the signature spots" sends the attorney to a totally separate, disconnected e-sign composer page requiring manual re-entry of everyone as a recipient, instead of a pop-out modal pre-wired with the matter's contacts and the approved document.
 7. **STANDING RULE — jurisdiction/governing-state must always be an intake question by default**, not something the builder only notices and flags conditionally per template.
 8. ~~**Template rendering is broadly poor.**~~ **FIXED 2026-07-27 (DOC-RENDER-1, PR #503).** The raw-markup leak turned out to be two separate bugs, and *not* the ones assumed: generation was never emitting broken HTML — the stored body was valid, and the malformation came entirely from a thumbnail helper that stripped markdown characters and printed the body as text. Separately, the template editor's *save* path was persisting TipTap's chip markup instead of `{{token}}`. Both fixed. All document surfaces (builder card, template gallery, service Templates tab, e-sign signing pane, executed-copy review, client-portal engagement gate, share link, review reader) now render through the shared `DocumentSheet`, with a new `DocumentThumb` for cards and a new `fit` variant for readers in a narrow column; the competing `.doc-paper` / bespoke-thumbnail CSS families were deleted so the drift can't recur.
