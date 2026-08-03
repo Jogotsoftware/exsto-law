@@ -482,3 +482,16 @@ plan this stale finding sits under).
     (`components/templates/TemplateEsignPanel.tsx`) is UI + builder-proposal only; there
     is no chat verb to flip it on an EXISTING service's role after the fact
     (`legal.service.template.esign.update` exists as MCP but is not a `ClientTool`).
+- **2026-08-03 (ESIGN-STEP-1 trace, docs-only):** the 2026-07-24 "e-sign step is a dead
+  end" report traced to an ASSISTANT-GUIDANCE gap, not a platform gap (full evidence:
+  `docs/diagnostics/ESIGN-STEP-1-TRACE.md`). Asked "where do I add the signature spots"
+  mid-BUILD (no matter open yet), the assistant deferred to the page the founder was
+  already on (`/attorney/esign/compose`, the standalone ad-hoc composer) instead of
+  routing by context: field placement lives on the TEMPLATE (Templates tab →
+  TemplateEsignPanel per-role bindings, #496), and at run time the workflow step opens
+  the pre-wired composer modal itself (`EsignWorkflowStep`, #451). Gap: the attorney
+  system prompt / esign-related skills carry no "signature spots: template at build
+  time, step modal at run time — the compose page is only for ad-hoc PDFs outside a
+  matter" routing note, so the model answers from whatever surface it happens to see in
+  `page_context`. Cheap fix next chatbot session: one paragraph in the relevant
+  firm-admin/esign skill (reseed after edit).
