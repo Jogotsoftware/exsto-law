@@ -70,10 +70,6 @@ export default function AdminModulesPage() {
   return (
     <main style={{ maxWidth: 860 }}>
       <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Modules</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Turn feature bundles on or off for a firm. Disabling hides the feature&apos;s UI but keeps
-        its data.
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
 
       <label style={{ display: 'block', marginBottom: 'var(--space-4)' }}>

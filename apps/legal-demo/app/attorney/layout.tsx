@@ -14,10 +14,14 @@ export default function AttorneyLayout({ children }: { children: ReactNode }) {
       <div className="li-shell">
         <AttorneyRail />
         <div className="li-main-col">
-          <AttorneyTopBar />
-          <main id="main" className="li-main" tabIndex={-1}>
-            <div className="li-main-inner">{children}</div>
-          </main>
+          {/* UIWALK-1: the top bar lives INSIDE the scroll region so it slides
+              away with the page on scroll (it was pinned above it before). */}
+          <div className="li-scrollcol">
+            <AttorneyTopBar />
+            <main id="main" className="li-main" tabIndex={-1}>
+              <div className="li-main-inner">{children}</div>
+            </main>
+          </div>
         </div>
       </div>
       {/* Floating beta-feedback assistant — inside the gate, so attorneys only. */}

@@ -2471,7 +2471,8 @@ export function UnifiedAssistantChat({
             onMeta: (meta) => {
               if (!live() || turnModelId !== AUTO_MODEL_ID) return
               const hit = models?.find((m) => m.provider === 'anthropic' && m.model === meta.model)
-              setAutoResolvedLabel(hit?.label ?? meta.model)
+              // Neutral labels only — never surface a raw model id.
+              setAutoResolvedLabel(hit?.label ?? null)
             },
             onDone: (d) => {
               if (!live()) return
@@ -3434,11 +3435,7 @@ export function UnifiedAssistantChat({
               ))}
             </div>
             {selected && !selected.supportsWorkRate && (
-              <p className="uac-hint">
-                {selected.providerLabel === 'Claude'
-                  ? 'Not adjustable on Haiku.'
-                  : 'Not adjustable for this model.'}
-              </p>
+              <p className="uac-hint">Not adjustable for this model.</p>
             )}
           </div>
 
@@ -3459,7 +3456,7 @@ export function UnifiedAssistantChat({
             </button>
           </div>
           {selected?.webSearchInherent && (
-            <p className="uac-hint">{selected.providerLabel} always searches the web.</p>
+            <p className="uac-hint">This model always searches the web.</p>
           )}
           {selected && !selected.supportsWebSearch && (
             <p className="uac-hint">Web search isn’t available for this model.</p>

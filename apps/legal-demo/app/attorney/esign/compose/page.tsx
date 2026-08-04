@@ -20,11 +20,6 @@ function ComposerFromParams(): ReactElement {
       <div className="li-esign-head">
         <div>
           <h1 className="li-esign-title">eSign</h1>
-          <p className="li-esign-sub">
-            {source.kind === 'document'
-              ? 'Confirm the document, add recipients with roles, place fields, and send.'
-              : 'Upload a PDF, add recipients with roles, and send — signers get a secure signing link, viewers a read-only link, copy recipients the executed document.'}
-          </p>
         </div>
       </div>
       <div className="li-esign-wiz-card">

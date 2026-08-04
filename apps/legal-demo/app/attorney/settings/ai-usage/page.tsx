@@ -65,12 +65,14 @@ const fmtTokens = (n: number): string =>
       ? `${(n / 1_000).toFixed(1)}k`
       : String(n)
 
+// Neutral tier names — no user-visible model/vendor names anywhere in the
+// product (founder direction 2026-08-04). Matches the assistant model catalog.
 function humanModel(model: string): string {
-  if (/opus/i.test(model)) return 'Claude Opus'
-  if (/sonnet/i.test(model)) return 'Claude Sonnet'
-  if (/haiku/i.test(model)) return 'Claude Haiku'
-  if (/fable/i.test(model)) return 'Claude Fable'
-  return model
+  if (/opus|fable/i.test(model)) return 'Advanced'
+  if (/sonnet/i.test(model)) return 'Standard'
+  if (/haiku/i.test(model)) return 'Fast'
+  if (/sonar/i.test(model)) return 'Web Research'
+  return 'Other'
 }
 
 function humanSource(source: string): string {
@@ -267,7 +269,7 @@ export default function AiUsagePage(): React.ReactElement {
           <p className="li-set-hint" style={{ maxWidth: 720 }}>
             Cost is an estimate from published list prices (input, output, and prompt-cache tokens),
             not your actual Anthropic invoice. Covers the chat assistant and document drafting;
-            Perplexity research turns aren&rsquo;t counted (that provider doesn&rsquo;t report token
+            Web-research turns aren&rsquo;t counted (that provider doesn&rsquo;t report token
             usage). Each source counts only from when its token tracking went live, so older
             activity &mdash; and any drafting before this release &mdash; isn&rsquo;t included.
           </p>

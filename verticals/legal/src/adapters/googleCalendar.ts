@@ -507,6 +507,11 @@ export interface WorkspaceEvent {
   htmlLink: string | null
   attendeeEmails: string[]
   status: string
+  // Which of the attorney's calendars the event lives on. Writes to an event
+  // must target this calendar — patching an event on a secondary calendar via
+  // the booking calendar's id 404s. Null only for legacy callers that never
+  // learned it (writes then fall back to the booking calendar).
+  calendarId: string | null
 }
 
 export async function listCalendarEvents(
@@ -546,7 +551,9 @@ export async function listCalendarEvents(
           orderBy: 'startTime',
           maxResults: 250,
         })
-        return (res.data.items ?? []).filter((e) => e.status !== 'cancelled').map(mapGoogleEvent)
+        return (res.data.items ?? [])
+          .filter((e) => e.status !== 'cancelled')
+          .map((e) => ({ ...mapGoogleEvent(e), calendarId }))
       } catch {
         // One unreadable calendar must not blank out the whole view.
         return [] as WorkspaceEvent[]
@@ -584,6 +591,18 @@ function mapGoogleEvent(e: {
     htmlLink: e.htmlLink ?? null,
     attendeeEmails: (e.attendees ?? []).map((a) => a.email ?? '').filter((x) => x.includes('@')),
     status: e.status ?? 'confirmed',
+    calendarId: null,
+  }
+}
+
+// A Google Meet link request for events.insert — Google mints the link when
+// conferenceDataVersion: 1 rides along on the call.
+function meetConferenceData(): calendar_v3.Schema$ConferenceData {
+  return {
+    createRequest: {
+      requestId: `exsto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      conferenceSolutionKey: { type: 'hangoutsMeet' },
+    },
   }
 }
 
@@ -629,6 +648,8 @@ export interface CreateEventInput {
   matterId: string
   matterReschedulePath: string // e.g. /book/reschedule/<matter_id>
   bookingBaseUrl: string // e.g. https://exsto-law.netlify.app
+  // Attach a Google Meet link to the event (video consultation).
+  includeMeet?: boolean
 }
 
 export interface CreatedEvent {
@@ -670,12 +691,14 @@ ${input.descriptionHtml}
     guestsCanInviteOthers: false,
     guestsCanSeeOtherGuests: false,
     visibility: 'private',
+    ...(input.includeMeet ? { conferenceData: meetConferenceData() } : {}),
   }
 
   const res = await calendar.events.insert({
     calendarId: creds.calendarId,
     requestBody: event,
     sendUpdates: 'all', // triggers Google's invite emails to all attendees
+    ...(input.includeMeet ? { conferenceDataVersion: 1 } : {}),
   })
 
   return {
@@ -699,6 +722,8 @@ export interface CreateCalendarEventInput {
   attorneyEmail: string
   // Guests to invite. Empty = a private hold on the attorney's own calendar.
   attendeeEmails: string[]
+  // Attach a Google Meet link to the event (video call).
+  includeMeet?: boolean
 }
 
 export async function createCalendarEvent(input: CreateCalendarEventInput): Promise<CreatedEvent> {
@@ -726,12 +751,14 @@ export async function createCalendarEvent(input: CreateCalendarEventInput): Prom
     guestsCanInviteOthers: false,
     guestsCanSeeOtherGuests: false,
     visibility: 'private',
+    ...(input.includeMeet ? { conferenceData: meetConferenceData() } : {}),
   }
 
   const res = await calendar.events.insert({
     calendarId: creds.calendarId,
     requestBody: event,
     sendUpdates: hasGuests ? 'all' : 'none',
+    ...(input.includeMeet ? { conferenceDataVersion: 1 } : {}),
   })
 
   return {
@@ -747,11 +774,12 @@ export async function rescheduleEvent(
   newStartIso: string,
   newEndIso: string,
   actorId?: string | null,
+  calendarId?: string | null,
 ): Promise<void> {
   const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   await calendar.events.patch({
-    calendarId: creds.calendarId,
+    calendarId: calendarId || creds.calendarId,
     eventId,
     sendUpdates: 'all',
     requestBody: {
@@ -761,15 +789,40 @@ export async function rescheduleEvent(
   })
 }
 
+// Patch arbitrary editable fields on one of the attorney's own Google events
+// (any calendar of theirs — not just app-managed events). Only the provided
+// fields change.
+export async function updateEventFields(
+  tenantId: string,
+  eventId: string,
+  fields: { summary?: string; startIso?: string; endIso?: string },
+  actorId?: string | null,
+  calendarId?: string | null,
+): Promise<void> {
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+  const requestBody: calendar_v3.Schema$Event = {}
+  if (fields.summary !== undefined) requestBody.summary = fields.summary
+  if (fields.startIso !== undefined) requestBody.start = { dateTime: fields.startIso }
+  if (fields.endIso !== undefined) requestBody.end = { dateTime: fields.endIso }
+  await calendar.events.patch({
+    calendarId: calendarId || creds.calendarId,
+    eventId,
+    sendUpdates: 'all',
+    requestBody,
+  })
+}
+
 export async function cancelEvent(
   tenantId: string,
   eventId: string,
   actorId?: string | null,
+  calendarId?: string | null,
 ): Promise<void> {
   const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   await calendar.events.delete({
-    calendarId: creds.calendarId,
+    calendarId: calendarId || creds.calendarId,
     eventId,
     sendUpdates: 'all',
   })

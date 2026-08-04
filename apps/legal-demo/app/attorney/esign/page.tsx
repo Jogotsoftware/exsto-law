@@ -153,9 +153,6 @@ export default function EsignPage() {
       <div className="li-esign-head">
         <div>
           <h1 className="li-esign-title">eSign</h1>
-          <p className="li-esign-sub">
-            Send documents for signature and track every envelope end to end.
-          </p>
         </div>
         <button
           type="button"

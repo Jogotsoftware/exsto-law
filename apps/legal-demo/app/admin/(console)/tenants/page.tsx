@@ -83,9 +83,6 @@ export default function AdminTenantsPage() {
   return (
     <main style={{ maxWidth: 960 }}>
       <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Tenants</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Every firm on the platform. Bootstrap a new one, or change a firm&apos;s status.
-      </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 

@@ -100,6 +100,8 @@ interface FirmProfileSetPayload {
   // instructions for the CLIENT PORTAL assistant. Independent of
   // assistant_instructions above; same array-of-pills shape.
   portal_assistant_instructions?: unknown
+  // UIWALK-1 (migration 0196) — the firm's top-bar color as '#rrggbb'; '' clears.
+  firm_header_color?: string | null
 }
 
 const PROFILE_FIELDS = [
@@ -112,6 +114,7 @@ const PROFILE_FIELDS = [
   'attorney_name',
   'assistant_instructions',
   'portal_assistant_instructions',
+  'firm_header_color',
 ] as const
 
 type ProfileField = (typeof PROFILE_FIELDS)[number]
@@ -168,6 +171,16 @@ export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown)
     return normalizeInstructionsPills(raw)
   }
   const text = typeof raw === 'string' ? raw.trim() : ''
+  if (kind === 'firm_header_color' && text) {
+    // Store only a well-formed hex color — anything else would be injected
+    // verbatim into an inline style on every page's header.
+    if (!/^#[0-9a-fA-F]{6}$/.test(text)) {
+      throw new Error(
+        `firm_header_color must be a hex color like #1b2a4a (got "${text}"); leave empty to clear.`,
+      )
+    }
+    return text.toLowerCase()
+  }
   if (kind === 'firm_jurisdiction' && text) {
     const code = normalizeJurisdiction(text)
     if (!code) {
@@ -185,7 +198,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color.',
     )
   }
 

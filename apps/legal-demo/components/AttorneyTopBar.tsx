@@ -50,16 +50,34 @@ export function AttorneyTopBar(): React.JSX.Element {
   // hardcoded FIRM_NAME literal: this bar renders for every firm's attorneys,
   // not just Pacheco's. Falls back to the product tagline while loading / if
   // a firm has not set a name yet — never a hardcoded firm literal.
+  // UIWALK-1: the bar also carries the firm's chosen header color (Settings →
+  // Firm Details) and, when one is uploaded, the firm logo (the same logo the
+  // invoice template owns) in place of the wordmark.
   const [firmName, setFirmName] = useState<string | null>(null)
+  const [headerColor, setHeaderColor] = useState<string | null>(null)
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    callAttorneyMcp<{ settings: { firmName: string | null } }>({ toolName: 'legal.settings.get' })
+    callAttorneyMcp<{ settings: { firmName: string | null; headerColor: string | null } }>({
+      toolName: 'legal.settings.get',
+    })
       .then((r) => {
-        if (!cancelled) setFirmName(r.settings.firmName)
+        if (cancelled) return
+        setFirmName(r.settings.firmName)
+        setHeaderColor(r.settings.headerColor)
       })
       .catch(() => {
         /* leave the fallback tagline showing */
+      })
+    callAttorneyMcp<{ template: { logoDataUrl: string | null } }>({
+      toolName: 'legal.firm.get_invoice_template',
+    })
+      .then((r) => {
+        if (!cancelled) setLogoDataUrl(r.template.logoDataUrl)
+      })
+      .catch(() => {
+        /* no logo — the wordmark shows */
       })
     return () => {
       cancelled = true
@@ -111,8 +129,14 @@ export function AttorneyTopBar(): React.JSX.Element {
   }
 
   return (
-    <header className="li-topbar">
-      <div className="li-topbar-firm">{firmName ?? PRODUCT_TAGLINE}</div>
+    <header className="li-topbar" style={headerColor ? { background: headerColor } : undefined}>
+      <div className="li-topbar-firm">
+        {logoDataUrl ? (
+          <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="li-topbar-logo" />
+        ) : (
+          (firmName ?? PRODUCT_TAGLINE)
+        )}
+      </div>
       <div className="li-topbar-spacer" />
 
       <SearchBar />

@@ -30,9 +30,6 @@ export default function AdminAuditPage() {
   return (
     <main style={{ maxWidth: 1040 }}>
       <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Control-Plane Audit</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Every cross-tenant control-plane operation: who did what, against which tenant.
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
       {!entries && !error && (
         <div className="loading-block" role="status">

@@ -6,9 +6,9 @@
 // its old CollapsibleSection body rather than reinventing chrome.
 import type { ReactNode } from 'react'
 
-// The comp's settings header: h1 section title + "Firm-wide configuration ·
-// Settings" subtitle, with an optional right-aligned action (Users page's
-// "+ Invite user" button).
+// The settings header: h1 section title with an optional right-aligned action
+// (Users page's "+ Invite user" button). No subtitle — page subtitles were
+// stripped product-wide (founder direction 2026-08-04).
 export function SettingsHeader({
   title,
   actions,
@@ -20,7 +20,6 @@ export function SettingsHeader({
     <div className="li-set-header">
       <div className="li-set-header-titles">
         <h1>{title}</h1>
-        <p>Firm-wide configuration · Settings</p>
       </div>
       {actions && <div className="li-set-header-actions">{actions}</div>}
     </div>

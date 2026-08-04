@@ -89,6 +89,10 @@ export interface CreateMeetingInput {
   // flowing through the booking path (legal.booking.create_for_matter).
   contactEntityId?: string | null
   matterEntityId?: string | null
+  // Attach a Google Meet link (video call).
+  includeMeet?: boolean
+  // Extra guest emails to invite alongside the contact (if any).
+  attendeeEmails?: string[]
 }
 
 export interface CreateMeetingResult {
@@ -111,6 +115,17 @@ export async function createMeeting(
     contactEmail = contact.email || null
   }
 
+  // Contact email (server-resolved) + any extra guests, deduped.
+  const guestEmails: string[] = []
+  const seenGuests = new Set<string>()
+  for (const raw of [contactEmail ?? '', ...(input.attendeeEmails ?? [])]) {
+    const e = raw.trim()
+    if (e.includes('@') && !seenGuests.has(e.toLowerCase())) {
+      seenGuests.add(e.toLowerCase())
+      guestEmails.push(e)
+    }
+  }
+
   const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
   let googleEventId: string | null = null
   let htmlLink: string | null = null
@@ -122,7 +137,8 @@ export async function createMeeting(
       startIso: input.startIso,
       endIso: input.endIso,
       attorneyEmail: creds.accountEmail,
-      attendeeEmails: contactEmail ? [contactEmail] : [],
+      attendeeEmails: guestEmails,
+      includeMeet: input.includeMeet,
     })
     googleEventId = created.eventId
     htmlLink = created.htmlLink
@@ -137,7 +153,7 @@ export async function createMeeting(
       started_at: input.startIso,
       ended_at: input.endIso,
       all_day: false,
-      attendee_emails: contactEmail ? [contactEmail] : [],
+      attendee_emails: guestEmails,
       html_link: htmlLink,
       event_status: 'confirmed',
       matter_entity_id: input.matterEntityId ?? null,

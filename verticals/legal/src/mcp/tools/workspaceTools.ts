@@ -10,6 +10,8 @@ import {
   rescheduleBooking,
   cancelBooking,
   addBookingAttendees,
+  updateExternalEvent,
+  deleteExternalEvent,
   listMailThreads,
   openMailThread,
   replyToThread,
@@ -66,12 +68,18 @@ const busyIntervalsTool: Tool<{ fromIso: string; toIso: string }, BusyIntervalsR
 }
 
 const createConsultationTool: Tool<
-  { matterEntityId: string; startIso: string; endIso: string },
+  {
+    matterEntityId: string
+    startIso: string
+    endIso: string
+    includeMeet?: boolean
+    attendeeEmails?: string[]
+  },
   ActionResult
 > = {
   name: 'legal.booking.create_for_matter',
   description:
-    'Attorney-side: book a consultation for a matter from the Calendar tab. Creates the Google event (invites) and records booking.create.',
+    'Attorney-side: book a consultation for a matter from the Calendar tab. Creates the Google event (invites) and records booking.create. includeMeet attaches a Google Meet link; attendeeEmails invites extra guests beyond the client.',
   mode: 'write',
   handler: (ctx: ActionContext, input) => createConsultation(ctx, input),
 }
@@ -113,6 +121,57 @@ const addAttendeesTool: Tool<
     additionalProperties: false,
   },
   handler: (ctx: ActionContext, input) => addBookingAttendees(ctx, input),
+}
+
+// ── Generic Google-event writes (calendar full interactivity) ───────────────
+// Edit/delete ANY event on the attorney's own Google account, including events
+// created directly in Google with no app entity. Read-through writes to Google
+// (no substrate effect) — same posture as legal.booking.add_attendees.
+
+const eventUpdateTool: Tool<
+  {
+    googleEventId: string
+    calendarId?: string
+    summary?: string
+    startIso?: string
+    endIso?: string
+  },
+  { ok: true }
+> = {
+  name: 'legal.calendar.event_update',
+  description:
+    "Edit one of the attorney's own Google events (title and/or time), including events created directly in Google. Patches the event on the calendar it was read from (calendarId from legal.calendar.events) and notifies guests. For app-managed consultations/meetings prefer legal.booking.reschedule / legal.meeting.reschedule.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      googleEventId: { type: 'string' },
+      calendarId: { type: 'string', description: 'The calendar the event lives on.' },
+      summary: { type: 'string' },
+      startIso: { type: 'string' },
+      endIso: { type: 'string' },
+    },
+    required: ['googleEventId'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => updateExternalEvent(ctx, input),
+}
+
+const eventDeleteTool: Tool<{ googleEventId: string; calendarId?: string }, { ok: true }> = {
+  name: 'legal.calendar.event_delete',
+  description:
+    "Delete one of the attorney's own Google events (guests are notified), including events created directly in Google. For app-managed consultations/meetings prefer legal.booking.cancel / legal.meeting.cancel.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      googleEventId: { type: 'string' },
+      calendarId: { type: 'string', description: 'The calendar the event lives on.' },
+    },
+    required: ['googleEventId'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => deleteExternalEvent(ctx, input),
 }
 
 // ── Mail tab (REQ-CALMAIL-02/03) ───────────────────────────────────────────
@@ -227,6 +286,8 @@ registerTool(createConsultationTool)
 registerTool(rescheduleTool)
 registerTool(cancelTool)
 registerTool(addAttendeesTool)
+registerTool(eventUpdateTool)
+registerTool(eventDeleteTool)
 registerTool(mailThreadsTool)
 registerTool(mailThreadGetTool)
 registerTool(mailReplyTool)

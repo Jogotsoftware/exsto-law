@@ -100,9 +100,6 @@ export default function AdminAccessPage() {
   return (
     <main style={{ maxWidth: 900 }}>
       <h1 style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>Access</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Manage a firm&apos;s users and roles. Changes run as audited firm actions.
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
 
       <label style={{ display: 'block', marginBottom: '1rem' }}>

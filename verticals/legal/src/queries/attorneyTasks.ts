@@ -38,6 +38,10 @@ export interface AttorneyTask {
   contactEntityId: string | null
   date: string | null
   dateLabel: string
+  // The task's due date for due-date sorting (home Tasks panel). Sources with a
+  // real deadline (to-dos) report it; every other source falls back to its own
+  // `date` (generated/sent/requested/…) so ordering by dueDate is total.
+  dueDate: string | null
   status: string | null
   workHref: string
   viewHref?: string | null
@@ -72,6 +76,7 @@ export function normalizeDocumentReviewTask(draft: PendingDraftSummary): Attorne
     contactEntityId: null,
     date: draft.recordedAt,
     dateLabel: 'Generated',
+    dueDate: draft.recordedAt,
     status: draft.status,
     workHref: `/attorney/review/${draft.documentVersionId}`,
     viewHref: null,
@@ -92,6 +97,7 @@ export function normalizeEsignTask(sig: AwaitingAttorneySignature): AttorneyTask
     contactEntityId: sig.contactEntityId,
     date: sig.sentAt,
     dateLabel: 'Sent',
+    dueDate: sig.sentAt,
     status: null,
     workHref: `/attorney/sign/${sig.requestId}`,
     viewHref: `/attorney/esign/${sig.envelopeId}`,
@@ -132,6 +138,7 @@ export function normalizeInvoiceTask(invoice: InvoiceSummary): AttorneyTask {
     contactEntityId: null,
     date: invoice.issuedDate,
     dateLabel: 'Issued',
+    dueDate: invoice.issuedDate,
     status: invoice.status,
     workHref: '/attorney/billing',
     viewHref: null,
@@ -162,6 +169,7 @@ export function normalizePaymentReportTask(report: PaymentReport): AttorneyTask 
     contactEntityId: null,
     date: report.reportedAt,
     dateLabel: 'Reported',
+    dueDate: report.reportedAt,
     status: report.status,
     workHref: '/attorney/billing',
     viewHref: null,
@@ -183,6 +191,7 @@ export function normalizeClientRequestTask(req: AttorneyRequestItem): AttorneyTa
     contactEntityId: null,
     date: req.createdAt,
     dateLabel: 'Requested',
+    dueDate: req.createdAt,
     status: req.status,
     workHref: '/attorney/requests',
     viewHref: null,
@@ -208,6 +217,7 @@ export function normalizeWorkflowStepTask(step: WorkflowStepAwaitingAttorney): A
     contactEntityId: null,
     date: step.since,
     dateLabel: 'Waiting since',
+    dueDate: step.since,
     status: null,
     workHref: `/attorney/matters/${step.matterEntityId}`,
     viewHref: null,
@@ -232,6 +242,7 @@ export function normalizeTodoTask(task: AttorneyTodoTask): AttorneyTask {
     contactEntityId: null,
     date: hasDue ? task.dueDate : task.createdAt,
     dateLabel: hasDue ? 'Due' : 'Added',
+    dueDate: hasDue ? task.dueDate : task.createdAt,
     status: task.status,
     workHref: `/attorney/matters/${task.matterEntityId}/tasks/${task.taskId}`,
     viewHref: null,

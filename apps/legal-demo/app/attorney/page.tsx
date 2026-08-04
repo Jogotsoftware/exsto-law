@@ -1,17 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
-import {
-  WeeklyCalendar,
-  type CalendarItem,
-  type CalendarCategory,
-} from '@/components/WeeklyCalendar'
+import { CalendarWorkspace } from '@/components/CalendarWorkspace'
 import { ChevronDownIcon, ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
-import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 import { stageStyle, stageFilterLabel, STAGE_CATEGORIES, type Stage } from '@/lib/matterStage'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
@@ -38,19 +33,19 @@ function ShareBookingButton() {
   )
 }
 
-// Newly-booked consultations should appear without a manual reload. True Google
-// push-sync is out of scope; we poll the existing `legal.calendar.upcoming`
-// source on this interval — "live enough" for the dashboard.
-const CALENDAR_POLL_MS = 45_000
-
-interface RecentBooking {
-  matterEntityId: string
-  matterNumber: string
-  clientName: string
-  serviceKey: string
-  scheduledAt: string | null
-  status: string
-  bookedAt: string
+// One row of the home Tasks panel — the same rows the Task Queue aggregates
+// (legal.attorney.task_queue), sorted by due date. Mirrors the server-side
+// AttorneyTask shape (client components read it over MCP).
+interface HomeTask {
+  id: string
+  type: string
+  typeLabel: string
+  title: string
+  clientName: string | null
+  matterNumber: string | null
+  dueDate: string | null
+  dateLabel: string
+  workHref: string
 }
 
 interface MatterSummary {
@@ -106,19 +101,6 @@ function attentionKindMeta(kind: string): { label: string; fg: string; bg: strin
 // old hardcoded status→bucket map lived here and collapsed every real workflow
 // state to "New Inquiry".
 
-function timeAgo(iso: string): string {
-  const t = parseTimestamp(iso)?.getTime() ?? NaN
-  if (!Number.isFinite(t)) return '—'
-  const ms = Date.now() - t
-  const m = Math.round(ms / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.round(h / 24)
-  return `${d}d ago`
-}
-
 // Gmail-style short date for the matters table's DATE column: "Jan 12", or with a
 // year once it's not the current one. Same convention as the mail inbox.
 function formatDateShort(iso: string): string {
@@ -134,43 +116,19 @@ function formatDateShort(iso: string): string {
 }
 
 export default function AttorneyHome() {
-  const [upcoming, setUpcoming] = useState<CalendarItem[] | null>(null)
-  const [categories, setCategories] = useState<CalendarCategory[]>([])
-  const [recent, setRecent] = useState<RecentBooking[] | null>(null)
+  const [tasks, setTasks] = useState<HomeTask[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [attention, setAttention] = useState<AttentionItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [calendarError, setCalendarError] = useState<string | null>(null)
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [dashStatusFilter, setDashStatusFilter] = useState('')
   const [dashSortDir, setDashSortDir] = useState<'asc' | 'desc'>('desc')
-  const serviceNames = useServiceDisplayNames()
-
-  // Fetch the unified calendar feed (real Google events + app consultations) for a
-  // broad window; the calendar navigates within it client-side. Reused by the
-  // initial load and the live poll.
-  const refreshUpcoming = useCallback(async () => {
-    const now = Date.now()
-    const fromIso = new Date(now - 7 * 24 * 3600 * 1000).toISOString()
-    const toIso = new Date(now + 90 * 24 * 3600 * 1000).toISOString()
-    const r = await callAttorneyMcp<{ items: CalendarItem[]; source: string; error?: string }>({
-      toolName: 'legal.calendar.feed',
-      input: { fromIso, toIso },
-    })
-    setUpcoming(r.items)
-    // Surface a connected-but-failed Google read (e.g. Calendar API not enabled)
-    // instead of silently showing only app consultations.
-    setCalendarError(r.source === 'error' ? (r.error ?? 'Google calendar read failed.') : null)
-    setLastRefreshedAt(Date.now())
-  }, [])
 
   useEffect(() => {
     Promise.all([
-      refreshUpcoming(),
-      callAttorneyMcp<{ recent: RecentBooking[] }>({
-        toolName: 'legal.calendar.recent_bookings',
-        input: { limit: 10 },
-      }).then((r) => setRecent(r.recent)),
+      // The home Tasks panel — the same queue the Tasks page aggregates.
+      callAttorneyMcp<{ tasks: HomeTask[] }>({ toolName: 'legal.attorney.task_queue' }).then((r) =>
+        setTasks(r.tasks),
+      ),
       callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' }).then((m) =>
         setMatters(m.matters),
       ),
@@ -182,26 +140,18 @@ export default function AttorneyHome() {
       })
         .then((r) => setAttention(r.items))
         .catch(() => setAttention([])),
-      callAttorneyMcp<{ categories: CalendarCategory[] }>({
-        toolName: 'legal.calendar.categories.get',
-      })
-        .then((r) => setCategories(r.categories))
-        .catch(() => {
-          // Non-fatal: fall back to the built-in booking-category colors.
-        }),
     ]).catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [refreshUpcoming])
+  }, [])
 
-  // Live sync: poll the upcoming feed so newly-booked consultations appear
-  // without a manual reload. Polling-only (no Google push); clears on unmount.
-  useEffect(() => {
-    const id = setInterval(() => {
-      refreshUpcoming().catch(() => {
-        // Transient poll failure: keep the last-good data, retry next tick.
-      })
-    }, CALENDAR_POLL_MS)
-    return () => clearInterval(id)
-  }, [refreshUpcoming])
+  // Tasks panel rows: soonest due first; anything undated sinks to the end.
+  const dueTasks = useMemo(() => {
+    const list = [...(tasks ?? [])]
+    return list.sort((a, b) => {
+      const ta = a.dueDate ? (parseTimestamp(a.dueDate)?.getTime() ?? Infinity) : Infinity
+      const tb = b.dueDate ? (parseTimestamp(b.dueDate)?.getTime() ?? Infinity) : Infinity
+      return ta - tb
+    })
+  }, [tasks])
 
   const dashMatters = useMemo(() => {
     const rows = (matters ?? []).filter(
@@ -342,30 +292,36 @@ export default function AttorneyHome() {
         </section>
 
         <section className="li-dash-card">
-          <h2 className="li-dash-card-title">Recently Booked</h2>
-          {recent === null && !error && (
+          <div className="li-dash-card-head">
+            <h2 className="li-dash-card-title">Tasks</h2>
+            <Link href="/attorney/review" className="li-dash-card-link">
+              View all
+              <ChevronRightIcon size={14} />
+            </Link>
+          </div>
+          {tasks === null && !error && (
             <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
             </div>
           )}
-          {recent && recent.length === 0 && <p className="li-dash-empty">No bookings yet.</p>}
-          {recent && recent.length > 0 && (
+          {tasks && tasks.length === 0 && (
+            <p className="li-dash-empty">Nothing waiting on you right now.</p>
+          )}
+          {tasks && tasks.length > 0 && (
             <div className="li-dash-rbody">
-              {recent.map((r) => (
-                <Link
-                  key={r.matterEntityId}
-                  href={`/attorney/matters/${r.matterEntityId}`}
-                  className="li-dash-rrow"
-                >
-                  <span>
-                    <span className="li-dash-rclient">{r.clientName || r.matterNumber}</span>
+              {dueTasks.map((t) => (
+                <Link key={`${t.type}:${t.id}`} href={t.workHref} className="li-dash-rrow">
+                  <span className="li-dash-rmain">
+                    <span className="li-dash-rclient">{t.title}</span>
                     <span className="li-dash-rservice">
-                      {serviceLabel(r.serviceKey, serviceNames)}
+                      {t.typeLabel}
+                      {t.clientName ? ` · ${t.clientName}` : ''}
                     </span>
                   </span>
                   <span className="li-dash-rtime">
                     <ClockIcon size={12} />
-                    {timeAgo(r.bookedAt)}
+                    {t.dateLabel === 'Due' ? 'Due ' : ''}
+                    {formatDateShort(t.dueDate ?? '')}
                   </span>
                 </Link>
               ))}
@@ -374,37 +330,15 @@ export default function AttorneyHome() {
         </section>
       </div>
 
+      {/* UIWALK-1: the home calendar IS the Calendar page — the identical
+          component, embedded (h1 suppressed). Same views, drag-to-edit, event
+          modal, everything. */}
       <section className="li-dash-week">
         <div className="li-dash-week-head">
-          <h2 className="li-dash-card-title li-dash-week-title">This Week</h2>
+          <h2 className="li-dash-card-title li-dash-week-title">Calendar</h2>
           <ShareBookingButton />
         </div>
-        {calendarError && (
-          <div className="li-dash-week-pad">
-            <div className="alert alert-error">
-              <strong>Google connected, but the live calendar read failed.</strong> {calendarError}{' '}
-              <span className="text-muted">
-                (If you just enabled the Calendar API in Google Cloud, wait a few minutes and
-                reload.)
-              </span>
-            </div>
-          </div>
-        )}
-        {upcoming === null && !error ? (
-          <div className="li-dash-week-pad">
-            <div className="loading-block" role="status">
-              <span className="spinner" /> Loading…
-            </div>
-          </div>
-        ) : (
-          <WeeklyCalendar
-            items={upcoming ?? []}
-            loaded={upcoming !== null}
-            lastRefreshedAt={lastRefreshedAt}
-            categories={categories}
-            onChanged={refreshUpcoming}
-          />
-        )}
+        <CalendarWorkspace embedded />
       </section>
     </main>
   )

@@ -26,6 +26,9 @@ export interface TenantSettings {
   // ITEM-12 WP-2 — same array-of-pills shape and legacy-string compat as
   // assistantInstructions above.
   portalAssistantInstructions: string[] | null
+  // UIWALK-1 (migration 0196) — the firm's chosen top-bar/header color (hex,
+  // e.g. '#1b2a4a'). No default: unset renders the product's standard navy.
+  headerColor: string | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -41,6 +44,7 @@ const EMPTY: TenantSettings = {
   practiceAreas: null,
   assistantInstructions: null,
   portalAssistantInstructions: null,
+  headerColor: null,
   defaultHourlyRateUsd: null,
   defaultLlcFlatFeeUsd: null,
   updatedAt: null,
@@ -77,6 +81,7 @@ export interface FirmProfileFields {
   attorneyName: string | null
   assistantInstructions: string[] | null
   portalAssistantInstructions: string[] | null
+  headerColor: string | null
 }
 
 const PROFILE_ATTR_KINDS = [
@@ -89,6 +94,7 @@ const PROFILE_ATTR_KINDS = [
   'attorney_name',
   'assistant_instructions',
   'portal_assistant_instructions',
+  'firm_header_color',
 ] as const
 
 // Tri-state per field, read off the firm_profile singleton:
@@ -109,6 +115,7 @@ interface FirmProfileAttrReads {
   attorneyName: string | null | undefined
   assistantInstructions: string[] | null | undefined
   portalAssistantInstructions: string[] | null | undefined
+  headerColor: string | null | undefined
 }
 
 // Latest firm-identity attributes off the firm_profile singleton (all undefined
@@ -196,6 +203,7 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       attorneyName: val('attorney_name'),
       assistantInstructions: listOrTextVal('assistant_instructions'),
       portalAssistantInstructions: listOrTextVal('portal_assistant_instructions'),
+      headerColor: val('firm_header_color'),
     }
   })
 }
@@ -225,6 +233,7 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
       profile.portalAssistantInstructions,
       base.portalAssistantInstructions,
     ),
+    headerColor: field(profile.headerColor, base.headerColor),
   }
 }
 
@@ -278,6 +287,7 @@ export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFie
     attorneyName: s.attorneyName,
     assistantInstructions: s.assistantInstructions,
     portalAssistantInstructions: s.portalAssistantInstructions,
+    headerColor: s.headerColor,
   }
 }
 
@@ -299,6 +309,8 @@ export interface SetFirmProfileInput {
   // FB-B2 (migration 0178, PLANNED) — the firm's standing, client-safe
   // instructions for the CLIENT PORTAL assistant. Empty clears.
   portalAssistantInstructions?: string[] | null
+  // UIWALK-1 — hex header color; empty clears (falls back to standard navy).
+  headerColor?: string | null
 }
 
 // Write the firm profile through the core (legal.firm.set_profile — append-only
@@ -327,6 +339,7 @@ export async function setFirmProfile(
       ...(input.portalAssistantInstructions !== undefined
         ? { portal_assistant_instructions: input.portalAssistantInstructions }
         : {}),
+      ...(input.headerColor !== undefined ? { firm_header_color: input.headerColor } : {}),
     },
   })
   return getFirmProfile(ctx)
@@ -364,6 +377,7 @@ async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
       practiceAreas: null,
       assistantInstructions: null,
       portalAssistantInstructions: null,
+      headerColor: null,
       defaultHourlyRateUsd:
         r.default_hourly_rate_usd != null ? Number(r.default_hourly_rate_usd) : null,
       defaultLlcFlatFeeUsd:
