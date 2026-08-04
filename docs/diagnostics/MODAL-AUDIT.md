@@ -4,14 +4,19 @@ Standing principle (founder, 2026-07-24): document approval, document editing, d
 review, template editing, e-sign, workflow editing, and intake-form editing are each ONE
 reusable pop-out component used identically everywhere — never a second bespoke editor
 built for a new page. This file is the 1-by-1 audit of that principle. First pass
-2026-07-30 (DOC-RENDER-2 session); verified by grep of actual imports, not from memory.
-Update in place when a surface is added or consolidated.
+2026-07-30 (DOC-RENDER-2 session); second pass 2026-08-04 (MODAL-STD-1 session) —
+both verified by grep of actual imports, not from memory. Update in place when a
+surface is added or consolidated.
 
 ## Verdict summary
 
-The INNER editor for every concern is already a single shared component. Divergence is
-at the WRAPPER level (full page vs pop-out modal hosting the same inner editor) and in
-one leftover inline editor. Document *rendering* (as opposed to editing) was unified by
+Second pass correction: the first pass's "every inner editor is already shared" verdict
+was wrong for TWO concerns. Questionnaire editing has a full second implementation
+(the service-scoped questionnaire page), and workflow editing has a second manual
+editor (the per-matter `WorkflowEditor`) — STEP-EDITOR-1 (#311) even says "both manual
+step editors" in its own write-up. Everything else holds: divergence is at the WRAPPER
+level (full page vs pop-out modal hosting the same inner editor) and one leftover
+inline template expander. Document *rendering* (as opposed to editing) was unified by
 DOC-RENDER-1/-2 — every document body now renders through `DocumentSheet`.
 
 ## Concern-by-concern
@@ -20,8 +25,8 @@ DOC-RENDER-1/-2 — every document body now renders through `DocumentSheet`.
 |---|---|---|---|
 | Template editing (inner) | `components/templates/TemplateEditor` | templates page, service Templates tab, `TemplateEditorModal`, `configEditors` | ✅ one inner editor |
 | Template editing (pop-out) | `TemplateEditorModal` | `TemplateProposalCard` (builder chat), `UnifiedAssistantChat` | ⚠️ see gap 1 |
-| Questionnaire / intake-form editing | `QuestionnaireBuilder` (inner) via `QuestionnaireEditorModal` (pop-out) | questionnaires page, builder chat, proposal card | ✅ |
-| Workflow editing | `WorkflowBuilder` (inner) via `WorkflowEditorModal` (pop-out) | workflow page, builder chat, proposal card | ✅ |
+| Questionnaire / intake-form editing | `QuestionnaireBuilder` (inner) via `QuestionnaireEditorModal` (pop-out) | questionnaires page, builder chat, proposal card | ❌ see gap A — the service questionnaire page (`services/[serviceKey]/questionnaire/page.tsx`, 1,037 lines) is a complete SECOND editor with its own `EditorField`/`EditorSection` model; it imports nothing from `QuestionnaireBuilder` |
+| Workflow editing | `WorkflowBuilder` (inner, 1,212 lines incl. its own `StepEditor`) via `WorkflowEditorModal` (pop-out) | service workflow page, builder chat, proposal card | ❌ see gap B — `matters/[id]/WorkflowEditor.tsx` (601 lines) is a SECOND manual editor, invoked inline from the matter page; #311 patched both separately |
 | Document review/approval | `DocumentReviewer` | review page (`review/[versionId]`), workflow runner (`RunnerReview`) | ✅ |
 | Document editing (tracked changes) | `TrackedChangesEditor` | only inside `DocumentReviewer` | ✅ |
 | E-sign composing | `esign/EsignComposer` (ESIGN-UNIFY-1) | compose page, workflow step (`EsignWorkflowStep`), signature task, assistant chat | ✅ |
@@ -45,11 +50,15 @@ markdown (`renderMarkdown`, escapes all HTML), matter Brief (`BriefModal`, chat
 renderer), email bodies (`sanitizeEmailHtml` server-side; mail reads as mail, not as a
 letter page), firm signature block in the composer.
 
-## Open gaps (consolidation candidates, in priority order)
+## Open gaps (consolidation candidates, in priority order — renumbered 2026-08-04)
 
-1. **Service Templates tab still hosts an inline expanded editor** (`app/attorney/services/[serviceKey]/templates/page.tsx` — the "Open editor" expander) instead of invoking `TemplateEditorModal`. Same inner `TemplateEditor`, so no logic is duplicated, but the chrome/save wiring is a second implementation of what the modal already does (AI assist rail, save-new-version, eSign panel). Consolidating it onto `TemplateEditorModal` is the one real violation of the pop-out principle left in template land.
-2. **Page-vs-modal wrapper duality** — templates page and workflow page host their inner editors as full pages while every other entry point uses the pop-out modal. Tolerable (flagship pages), but if the principle is read strictly, the pages could open the same modals instead. Founder call.
-3. **Workflow e-sign step UX** (builder-walk gap #6) — `EsignWorkflowStep` does invoke the unified `EsignComposer`, but the pre-wiring the founder asked for (matter contacts pre-filled as recipients, approved doc pre-loaded, reachable in-place) is tracked in `exsto-law-builder-multimember-contacts` gaps 1/5/6 and is NOT closed by this audit.
+- **Gap A — two questionnaire editors** (found 2026-08-04, missed by first pass). `app/attorney/services/[serviceKey]/questionnaire/page.tsx` is a 1,037-line bespoke `QuestionnaireEditorPage` with its own field/section wire model (`wireFieldToEditor`/`editorToWire`), fully parallel to `QuestionnaireBuilder` (507 lines). Real duplicated logic, not just chrome — the largest violation of the principle on the books. Consolidation target: one inner builder, service page invokes `QuestionnaireEditorModal` (or hosts the shared inner builder).
+- **Gap B — two manual workflow editors** (found 2026-08-04; #311's own write-up says "both manual step editors"). `matters/[id]/WorkflowEditor.tsx` (601 lines, per-matter instance editing, inline on the matter page) vs `WorkflowBuilder` (definition editing, with its own inner `StepEditor`). They diverge in semantics (instance vs definition) but both hand-build step/edge editing UI; #311 had to fix the same lossless-round-trip bug in each separately, which is exactly the failure mode the principle exists to prevent. Consolidation target: shared step/edge editor core, two thin wrappers — or founder decides instance editing is a distinct concern.
+- **Gap C — service Templates tab still hosts an inline expanded editor** (`app/attorney/services/[serviceKey]/templates/page.tsx` — the "Open editor" expander, ~line 821) instead of invoking `TemplateEditorModal`. Same inner `TemplateEditor`, so no logic is duplicated, but the chrome/save wiring is a second implementation of what the modal already does (AI assist rail, save-new-version, eSign panel). (Was gap 1.)
+- **Gap D — page-vs-modal wrapper duality** — templates page and workflow page host their inner editors as full pages while every other entry point uses the pop-out modal. Tolerable (flagship pages), but if the principle is read strictly, the pages could open the same modals instead. Founder call. (Was gap 2.)
+- **Gap E — workflow e-sign step pre-wiring** (was gap 3) — mostly RESOLVED by ESIGN-STEP-1 (#511): the step opens the shared `EsignComposer` in place, pre-wired with the approved document and template-resolved recipients; the reported dead end traced to the step never having run plus an assistant-guidance gap (logged in INVENTORY.md §6). Still open from the same thread: single-member LLC service has no e-sign step at all (one-step workflow edit, awaiting founder go-ahead).
+
+Verified clean 2026-08-04 (no PR needed): document approval/review (`DocumentReviewer`: review page + `RunnerReview`), document editing (`TrackedChangesEditor` only inside `DocumentReviewer`), e-sign (`EsignComposer`: compose page, `EsignWorkflowStep`, signature task, assistant chat — the reference implementation), engagement-letter library (#487 list page edits via `/attorney/templates?template=…` → the shared `TemplateEditor`). Minor note: `questions/page.tsx` (question bank) does inline per-row question editing — small, self-contained, not counted as a violation.
 
 ## Known provenance issue (logged here for the next substrate session)
 
