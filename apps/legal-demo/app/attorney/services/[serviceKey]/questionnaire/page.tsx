@@ -1,273 +1,46 @@
 'use client'
 
+// The service intake questionnaire tab. MODAL-STD-1 (Gap A): this page used to
+// carry a complete second questionnaire editor (its own EditorField/EditorSection
+// model, ~1,000 lines); it now hosts the ONE shared QuestionnaireBuilder — the
+// same field editor the questionnaires page and the wizard-proposal pop-up mount.
+// The page keeps only host chrome: form title + jurisdiction, start-from-library,
+// save-to-library (whole form and single question), and the service-scoped save.
+// Round-trip safety: schemaToSections/sectionsToSchema preserve every wire
+// property (types incl. members_repeater/file_upload, humane-intake flags,
+// locale maps, stable field/section ids), and sectionsToSchema's opts keep the
+// persisted schema's id/version instead of re-slugging from the title.
+
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm, usePrompt } from '@/components/ConfirmModal'
-import { CopyIcon, LayersIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from '@/components/icons'
-
-// The exact field types the public booking page (apps/legal-demo/app/book)
-// renders. Keep in lockstep with KNOWN_FIELD_TYPES in the legal API — anything
-// else is rejected on save. The attorney picks by friendly label; the raw type
-// key is never shown (WP2.4: no typed enums on the surface).
-const FIELD_TYPES = [
-  'text',
-  'textarea',
-  'select',
-  'yes_no',
-  'true_false',
-  'checkbox',
-  'date',
-  'number',
-  'address_autocomplete',
-  'members_repeater',
-  'file_upload',
-] as const
-type FieldType = (typeof FIELD_TYPES)[number]
-
-const FIELD_TYPE_LABELS: Record<FieldType, string> = {
-  text: 'Short text',
-  textarea: 'Long text',
-  select: 'Dropdown',
-  yes_no: 'Yes / No',
-  true_false: 'True / False',
-  checkbox: 'Checkboxes (select many)',
-  date: 'Date',
-  number: 'Number',
-  address_autocomplete: 'Address',
-  members_repeater: 'Members (repeating)',
-  file_upload: 'File upload (client attaches documents)',
-}
-
-// Answer types that carry a choice list edited via OptionPills.
-const OPTION_FIELD_TYPES: ReadonlySet<FieldType> = new Set(['select', 'checkbox'])
-
-interface EditorField {
-  // The field's VARIABLE — the {{token}} a document-template merge-field binds to.
-  // Editable per question (the "Variable" input); defaults to a slug of the label
-  // when left blank, and is preserved across label changes so a template binding
-  // never breaks. editorFieldToWire prefers this explicit value over the slug.
-  id: string
-  label: string
-  type: FieldType
-  required: boolean
-  allow_unknown: boolean
-  ask_attorney: boolean
-  // select
-  options: string[]
-  // members_repeater
-  memberFields: EditorField[]
-  minItems: number
-  // BUILDER-UX-2 WP-7 — locale maps carried OPAQUELY so a save on this tab never
-  // strips the wizard-authored Spanish (this tab has no es-editing UI; the shared
-  // QuestionnaireBuilder and the wizard own that).
-  label_i18n?: Record<string, string>
-  options_i18n?: Record<string, string[]>
-  placeholder_i18n?: Record<string, string>
-}
-
-interface EditorSection {
-  id: string
-  title: string
-  title_i18n?: Record<string, string>
-  fields: EditorField[]
-}
-
-interface EditorDoc {
-  id: string
-  version: number
-  title: string
-  jurisdiction: string
-  sections: EditorSection[]
-}
-
-// What the API/MCP returns/accepts (the FIXED schema contract). No `help` is ever
-// written; no form `description` is ever written (WP2.4).
-interface WireField {
-  id: string
-  label: string
-  type: string
-  required?: boolean
-  allow_unknown?: boolean
-  ask_attorney?: boolean
-  options?: string[]
-  memberFields?: WireField[]
-  minItems?: number
-  // WP-7 — locale maps (pass-through; see EditorField).
-  label_i18n?: Record<string, string>
-  options_i18n?: Record<string, string[]>
-  placeholder_i18n?: Record<string, string>
-}
-interface WireSection {
-  id: string
-  title: string
-  title_i18n?: Record<string, string>
-  fields: WireField[]
-}
-interface WireDoc {
-  id: string
-  version: number
-  title: string
-  jurisdiction?: string
-  sections: WireSection[]
-}
-
-function isFieldType(t: string): t is FieldType {
-  return (FIELD_TYPES as readonly string[]).includes(t)
-}
-
-// Slug from a human label, e.g. "Proposed LLC name" → "proposed_llc_name".
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 60)
-}
-
-// Normalize a typed VARIABLE to a valid {{token}} without stripping a trailing
-// "_" mid-word, so "company_" → "company_name" types cleanly.
-function normToken(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .slice(0, 60)
-}
-
-// Reserve a unique id within `used`, falling back to a base and numeric suffix.
-function uniqueId(preferred: string, fallback: string, used: Set<string>): string {
-  const base = preferred || fallback || 'field'
-  let id = base
-  let n = 2
-  while (used.has(id)) id = `${base}_${n++}`
-  used.add(id)
-  return id
-}
-
-function wireFieldToEditor(f: WireField): EditorField {
-  return {
-    id: f.id,
-    label: f.label,
-    // An unknown legacy type surfaces as Short text so the attorney can re-pick a
-    // supported type before saving. Legacy `help` is intentionally dropped.
-    type: isFieldType(f.type) ? f.type : 'text',
-    required: f.required ?? false,
-    allow_unknown: f.allow_unknown ?? false,
-    ask_attorney: f.ask_attorney ?? false,
-    options: Array.isArray(f.options) ? f.options : [],
-    memberFields: Array.isArray(f.memberFields) ? f.memberFields.map(wireFieldToEditor) : [],
-    minItems: typeof f.minItems === 'number' ? f.minItems : 1,
-    label_i18n: f.label_i18n,
-    options_i18n: f.options_i18n,
-    placeholder_i18n: f.placeholder_i18n,
-  }
-}
-
-function wireToEditor(doc: WireDoc): EditorDoc {
-  return {
-    id: doc.id,
-    version: doc.version,
-    title: doc.title ?? '',
-    jurisdiction: doc.jurisdiction ?? '',
-    sections: (doc.sections ?? []).map((s) => ({
-      id: s.id,
-      title: s.title,
-      title_i18n: s.title_i18n,
-      fields: (s.fields ?? []).map(wireFieldToEditor),
-    })),
-  }
-}
-
-// Editor → wire. Assigns a stable id (existing kept, new slugged from the label)
-// and carries only the humane-intake flags + type-specific extras. No help, no
-// description.
-function editorFieldToWire(f: EditorField, used: Set<string>): WireField {
-  const out: WireField = {
-    id: uniqueId(f.id.trim(), slugify(f.label), used),
-    label: f.label.trim(),
-    type: f.type,
-  }
-  if (f.required) out.required = true
-  if (f.allow_unknown) out.allow_unknown = true
-  if (f.ask_attorney) out.ask_attorney = true
-  if (OPTION_FIELD_TYPES.has(f.type)) out.options = f.options.map((o) => o.trim()).filter(Boolean)
-  // WP-7 — carry the locale maps back verbatim (lossless round-trip; drop the
-  // Spanish options if the English list length changed here, since index pairing
-  // would silently mistranslate — the intake then falls back to English).
-  if (f.label_i18n && Object.keys(f.label_i18n).length) out.label_i18n = f.label_i18n
-  if (f.options_i18n && out.options) {
-    const kept = Object.fromEntries(
-      Object.entries(f.options_i18n).filter(([, arr]) => arr.length === out.options!.length),
-    )
-    if (Object.keys(kept).length) out.options_i18n = kept
-  }
-  if (f.placeholder_i18n && Object.keys(f.placeholder_i18n).length)
-    out.placeholder_i18n = f.placeholder_i18n
-  if (f.type === 'members_repeater') {
-    const memberUsed = new Set<string>()
-    out.memberFields = f.memberFields.map((mf) => editorFieldToWire(mf, memberUsed))
-    out.minItems = f.minItems
-  }
-  return out
-}
-
-function editorToWire(doc: EditorDoc): WireDoc {
-  const fieldIds = new Set<string>()
-  const sectionIds = new Set<string>()
-  return {
-    id: doc.id,
-    version: doc.version,
-    title: doc.title.trim(),
-    ...(doc.jurisdiction.trim() ? { jurisdiction: doc.jurisdiction.trim() } : {}),
-    sections: doc.sections.map((s) => ({
-      id: uniqueId(s.id.trim(), slugify(s.title), sectionIds),
-      title: s.title.trim(),
-      ...(s.title_i18n && Object.keys(s.title_i18n).length ? { title_i18n: s.title_i18n } : {}),
-      fields: s.fields.map((f) => editorFieldToWire(f, fieldIds)),
-    })),
-  }
-}
-
-function emptyField(): EditorField {
-  return {
-    id: '',
-    label: '',
-    type: 'text',
-    required: false,
-    allow_unknown: false,
-    ask_attorney: false,
-    options: [],
-    memberFields: [],
-    minItems: 1,
-  }
-}
-
-function emptySection(): EditorSection {
-  return { id: '', title: '', fields: [emptyField()] }
-}
-
-// Move the item at `from` to `to`, returning a new array.
-function moveTo<T>(arr: T[], from: number, to: number): T[] {
-  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr
-  const copy = [...arr]
-  const [item] = copy.splice(from, 1)
-  copy.splice(to, 0, item)
-  return copy
-}
+import {
+  QuestionnaireBuilder,
+  schemaToSections,
+  sectionsToSchema,
+  NEW_SECTION,
+  OPTION_TYPES,
+  type BField,
+  type BSection,
+  type QuestionnaireSchema,
+} from '@/components/QuestionnaireBuilder'
 
 // Select a reusable questionnaire from the firm library (#4b) to seed this
 // service's form, or jump to the library builder. Applying loads the chosen
 // schema into the editor (in memory) — the attorney reviews and Saves a version.
-function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
+function StartFromLibrary({ onApply }: { onApply: (schema: QuestionnaireSchema) => void }) {
   const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<
-    { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
+    { questionnaireTemplateId: string; name: string; schema: QuestionnaireSchema }[]
   >([])
   useEffect(() => {
     callAttorneyMcp<{
-      questionnaires: { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
+      questionnaires: {
+        questionnaireTemplateId: string
+        name: string
+        schema: QuestionnaireSchema
+      }[]
     }>({ toolName: 'legal.questionnaire_template.list' })
       .then((r) => setItems(r.questionnaires))
       .catch(() => setItems([]))
@@ -279,7 +52,6 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
         alignItems: 'center',
         gap: 'var(--space-2)',
         flexWrap: 'wrap',
-        margin: '0 0 var(--space-4)',
       }}
     >
       {confirmElement}
@@ -317,63 +89,65 @@ export default function QuestionnaireEditorPage() {
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
 
-  const [doc, setDoc] = useState<EditorDoc | null>(null)
+  // The persisted schema's identity, preserved VERBATIM on save — including its
+  // absence: a stored schema without id/version must not grow them on a
+  // no-change save (round-trip fidelity). Null until loaded.
+  const [meta, setMeta] = useState<{ id?: string; version?: number } | null>(null)
+  const [title, setTitle] = useState('')
+  const [jurisdiction, setJurisdiction] = useState('')
+  const [sections, setSections] = useState<BSection[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   // A transient confirmation distinct from the questionnaire "Saved a new version"
   // banner (e.g. "Saved to the question library").
   const [notice, setNotice] = useState<string | null>(null)
-  // Drag-to-reorder context: which section, and (for a field) which field index.
-  const [drag, setDrag] = useState<{ si: number; fi: number | null } | null>(null)
+
+  const applySchema = useCallback((schema: QuestionnaireSchema) => {
+    setMeta({ id: schema.id, version: schema.version })
+    setTitle(schema.title ?? '')
+    setJurisdiction(schema.jurisdiction ?? '')
+    setSections(schema.sections?.length ? schemaToSections(schema) : [NEW_SECTION()])
+  }, [])
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const r = await callAttorneyMcp<{ questionnaire: WireDoc | null }>({
+      const r = await callAttorneyMcp<{ questionnaire: QuestionnaireSchema | null }>({
         toolName: 'legal.service.questionnaire.get',
         input: { serviceKey },
       })
-      if (!r.questionnaire) {
-        setDoc({
-          id: serviceKey,
-          version: 1,
-          title: '',
-          jurisdiction: '',
-          sections: [emptySection()],
-        })
-        return
-      }
-      setDoc(wireToEditor(r.questionnaire))
+      applySchema(r.questionnaire ?? {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [serviceKey])
+  }, [serviceKey, applySchema])
 
   useEffect(() => {
     load()
   }, [load])
 
-  function patch(mut: (d: EditorDoc) => EditorDoc) {
-    setDoc((d) => (d ? mut(d) : d))
-    setSaved(false)
-  }
-  function patchSection(si: number, mut: (s: EditorSection) => EditorSection) {
-    patch((d) => ({ ...d, sections: d.sections.map((s, i) => (i === si ? mut(s) : s)) }))
-  }
-  function patchField(si: number, fi: number, mut: (f: EditorField) => EditorField) {
-    patchSection(si, (s) => ({ ...s, fields: s.fields.map((f, i) => (i === fi ? mut(f) : f)) }))
+  function currentSchema(name: string): QuestionnaireSchema {
+    const out: QuestionnaireSchema = sectionsToSchema(name, sections, {
+      id: meta?.id,
+      version: meta?.version,
+      jurisdiction,
+    })
+    // sectionsToSchema always emits id/version (its library hosts need them);
+    // here absence is part of the stored shape and must round-trip.
+    if (meta?.id === undefined) delete out.id
+    if (meta?.version === undefined) delete out.version
+    return out
   }
 
   async function save() {
-    if (!doc) return
+    if (!meta) return
     setBusy(true)
     setError(null)
     try {
-      const wire = editorToWire(doc)
       await callAttorneyMcp({
         toolName: 'legal.service.questionnaire.update',
-        input: { serviceKey, intakeSchema: wire },
+        input: { serviceKey, intakeSchema: currentSchema(title) },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -387,7 +161,7 @@ export default function QuestionnaireEditorPage() {
 
   // Promote a single question into the firm QUESTION library (migration 0077) so
   // it can be reused in any questionnaire, carrying its stable {{answer}} token.
-  async function saveQuestionToLibrary(field: EditorField) {
+  async function saveQuestionToLibrary(field: BField) {
     if (!field.label.trim()) {
       setError('Give the question a label before saving it to the library.')
       return
@@ -395,17 +169,22 @@ export default function QuestionnaireEditorPage() {
     setBusy(true)
     setError(null)
     try {
-      // The library entry is a COPY: the questionnaire field keeps its own id, so
-      // a template already bound to {{field_id}} is never silently re-pointed even
-      // if the library de-duplicates the token (e.g. company_name → company_name_2).
+      // The library entry is a COPY: the questionnaire field keeps its own token,
+      // so a template already bound to {{token}} is never silently re-pointed even
+      // if the library de-duplicates it (e.g. company_name → company_name_2).
       await callAttorneyMcp({
         toolName: 'legal.question_template.create',
         input: {
           label: field.label.trim(),
           type: field.type,
-          token: field.id || undefined,
-          ...(OPTION_FIELD_TYPES.has(field.type)
-            ? { options: field.options.map((o) => o.trim()).filter(Boolean) }
+          token: field.token?.trim() || undefined,
+          ...(OPTION_TYPES.has(field.type)
+            ? {
+                options: field.options
+                  .split('\n')
+                  .map((o) => o.trim())
+                  .filter(Boolean),
+              }
             : {}),
         },
       })
@@ -421,7 +200,7 @@ export default function QuestionnaireEditorPage() {
   // Promote the current in-editor form into the firm questionnaire library so it
   // can seed other services (a copy outward — this service is untouched).
   async function saveToLibrary() {
-    if (!doc) return
+    if (!meta) return
     const name = await prompt({
       title: 'Save To The Library',
       body: 'Adds a copy of this questionnaire to the firm library so it can seed other services.',
@@ -435,7 +214,7 @@ export default function QuestionnaireEditorPage() {
     try {
       await callAttorneyMcp({
         toolName: 'legal.questionnaire_template.create',
-        input: { name: name.trim(), schema: editorToWire(doc) },
+        input: { name: name.trim(), schema: currentSchema(name.trim()) },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -464,7 +243,7 @@ export default function QuestionnaireEditorPage() {
       >
         <StartFromLibrary
           onApply={(schema) => {
-            setDoc(wireToEditor(schema))
+            applySchema(schema)
             setSaved(false)
           }}
         />
@@ -473,7 +252,7 @@ export default function QuestionnaireEditorPage() {
           className="li-svc-btn"
           style={{ marginLeft: 'auto' }}
           onClick={() => void saveToLibrary()}
-          disabled={busy || !doc}
+          disabled={busy || !meta}
         >
           Save To Library
         </button>
@@ -483,7 +262,7 @@ export default function QuestionnaireEditorPage() {
       {saved && <div className="alert alert-success">Saved a new version.</div>}
       {notice && <div className="alert alert-success">{notice}</div>}
 
-      {!doc ? (
+      {!meta ? (
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
@@ -494,156 +273,43 @@ export default function QuestionnaireEditorPage() {
               <label>
                 <span>Form title</span>
                 <input
-                  value={doc.title}
-                  onChange={(e) => patch((d) => ({ ...d, title: e.target.value }))}
+                  value={title}
+                  onChange={(e) => {
+                    setTitle(e.target.value)
+                    setSaved(false)
+                  }}
                   placeholder="e.g. LLC operating agreement intake"
                 />
               </label>
               <label>
                 <span>Jurisdiction</span>
                 <input
-                  value={doc.jurisdiction}
-                  onChange={(e) => patch((d) => ({ ...d, jurisdiction: e.target.value }))}
+                  value={jurisdiction}
+                  onChange={(e) => {
+                    setJurisdiction(e.target.value)
+                    setSaved(false)
+                  }}
                   placeholder="e.g. NC"
                 />
               </label>
             </div>
           </div>
 
-          {doc.sections.map((section, si) => (
-            <section
-              key={si}
-              className="li-svc-qsec"
-              onDragOver={(e) => {
-                if (drag && drag.fi === null) e.preventDefault()
-              }}
-              onDrop={() => {
-                if (drag && drag.fi === null && drag.si !== si) {
-                  patch((d) => ({ ...d, sections: moveTo(d.sections, drag.si, si) }))
-                }
-                setDrag(null)
-              }}
-            >
-              <div className="li-svc-qsec-head">
-                <span
-                  className="li-svc-grip"
-                  draggable
-                  onDragStart={() => setDrag({ si, fi: null })}
-                  onDragEnd={() => setDrag(null)}
-                  title="Drag to reorder section"
-                  aria-hidden
-                >
-                  ⠿
-                </span>
-                <input
-                  className="li-svc-qsec-title"
-                  value={section.title}
-                  onChange={(e) => patchSection(si, (s) => ({ ...s, title: e.target.value }))}
-                  placeholder="Section title — e.g. About the company"
-                  aria-label={`Section ${si + 1} title`}
-                />
-                <span className="li-svc-qsec-actions">
-                  <button
-                    className="li-svc-iconbtn"
-                    onClick={() =>
-                      patch((d) => ({ ...d, sections: moveTo(d.sections, si, si - 1) }))
-                    }
-                    disabled={si === 0}
-                    title="Move section up"
-                    aria-label="Move section up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    className="li-svc-iconbtn"
-                    onClick={() =>
-                      patch((d) => ({ ...d, sections: moveTo(d.sections, si, si + 1) }))
-                    }
-                    disabled={si === doc.sections.length - 1}
-                    title="Move section down"
-                    aria-label="Move section down"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    className="li-svc-remove-section"
-                    onClick={() =>
-                      patch((d) => ({ ...d, sections: d.sections.filter((_, i) => i !== si) }))
-                    }
-                    title="Remove section"
-                    aria-label="Remove section"
-                  >
-                    Remove section
-                  </button>
-                </span>
-              </div>
-
-              {section.fields.map((field, fi) => (
-                <FieldEditor
-                  key={fi}
-                  field={field}
-                  index={fi}
-                  count={section.fields.length}
-                  draggable
-                  onDragStart={() => setDrag({ si, fi })}
-                  onDragEnd={() => setDrag(null)}
-                  onDropField={() => {
-                    if (drag && drag.fi !== null && drag.si === si && drag.fi !== fi) {
-                      patchSection(si, (s) => ({
-                        ...s,
-                        fields: moveTo(s.fields, drag.fi as number, fi),
-                      }))
-                    }
-                    setDrag(null)
-                  }}
-                  dragActive={!!drag && drag.fi !== null && drag.si === si}
-                  onChange={(mut) => patchField(si, fi, mut)}
-                  onMove={(delta) =>
-                    patchSection(si, (s) => ({ ...s, fields: moveTo(s.fields, fi, fi + delta) }))
-                  }
-                  onRemove={() =>
-                    patchSection(si, (s) => ({ ...s, fields: s.fields.filter((_, i) => i !== fi) }))
-                  }
-                  onSaveToLibrary={() => void saveQuestionToLibrary(field)}
-                  saveBusy={busy}
-                />
-              ))}
-
-              <div className="li-svc-addrow">
-                <button
-                  type="button"
-                  className="li-svc-addbtn"
-                  onClick={() =>
-                    patchSection(si, (s) => ({ ...s, fields: [...s.fields, emptyField()] }))
-                  }
-                >
-                  + Add field
-                </button>
-                <AddFromLibrary
-                  onPick={(q) =>
-                    patchSection(si, (s) => ({
-                      ...s,
-                      fields: [...s.fields, libQuestionToField(q)],
-                    }))
-                  }
-                />
-              </div>
-            </section>
-          ))}
+          <QuestionnaireBuilder
+            sections={sections}
+            onChange={(next) => {
+              setSections(next)
+              setSaved(false)
+            }}
+            onSaveQuestionToLibrary={(f) => void saveQuestionToLibrary(f)}
+          />
 
           <div className="li-svc-footrow">
             <button
               type="button"
-              className="li-svc-addbtn"
-              onClick={() => patch((d) => ({ ...d, sections: [...d.sections, emptySection()] }))}
-            >
-              + Add section
-            </button>
-            <button
-              type="button"
               className="li-svc-btn-primary"
               onClick={save}
-              disabled={busy || !doc}
+              disabled={busy || !meta}
             >
               {busy ? 'Saving…' : 'Save intake form'}
             </button>
@@ -651,387 +317,5 @@ export default function QuestionnaireEditorPage() {
         </div>
       )}
     </>
-  )
-}
-
-// One library question (migration 0077). The token is the stable {{answer}} key.
-interface LibQuestion {
-  questionTemplateId: string
-  label: string
-  type: string
-  token: string
-  options: string[] | null
-}
-
-// A library question → an editor field. The token becomes the field id (preserved
-// by editorToWire), so a template merge-field bound to {{token}} fills from it.
-function libQuestionToField(q: LibQuestion): EditorField {
-  return {
-    id: q.token,
-    label: q.label,
-    type: isFieldType(q.type) ? q.type : 'text',
-    required: false,
-    allow_unknown: false,
-    ask_attorney: false,
-    options: Array.isArray(q.options) ? q.options : [],
-    memberFields: [],
-    minItems: 1,
-  }
-}
-
-// "Add from library" — a searchable picker of reusable questions. Adding one drops
-// it into the section carrying its stable {{answer}} token, so the same question
-// reused across questionnaires binds templates once and fills everywhere.
-function AddFromLibrary({ onPick }: { onPick: (q: LibQuestion) => void }) {
-  const [open, setOpen] = useState(false)
-  const [items, setItems] = useState<LibQuestion[]>([])
-  const [q, setQ] = useState('')
-  const [loaded, setLoaded] = useState(false)
-
-  useEffect(() => {
-    if (!open || loaded) return
-    callAttorneyMcp<{ questions: LibQuestion[] }>({ toolName: 'legal.question_template.list' })
-      .then((r) => setItems(r.questions))
-      .catch(() => setItems([]))
-      .finally(() => setLoaded(true))
-  }, [open, loaded])
-
-  const needle = q.trim().toLowerCase()
-  const filtered = needle
-    ? items.filter(
-        (i) => i.label.toLowerCase().includes(needle) || i.token.toLowerCase().includes(needle),
-      )
-    : items
-
-  return (
-    <div className="qlib-picker li-svc-addlib">
-      <button className="li-svc-addbtn" type="button" onClick={() => setOpen((o) => !o)}>
-        <LayersIcon size={16} />
-        Add from library
-      </button>
-      {open && (
-        <div className="qlib-pop" role="dialog" aria-label="Question library">
-          <div className="qlib-search">
-            <SearchIcon size={15} />
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search the question library…"
-            />
-          </div>
-          <div className="qlib-list">
-            {!loaded && <div className="qlib-empty">Loading…</div>}
-            {loaded && filtered.length === 0 && (
-              <div className="qlib-empty">
-                {items.length === 0
-                  ? 'No saved questions yet. Save a question to the library from its ⧉ icon.'
-                  : 'No matches.'}
-              </div>
-            )}
-            {filtered.map((it) => (
-              <button
-                key={it.questionTemplateId}
-                type="button"
-                className="qlib-item"
-                onClick={() => {
-                  onPick(it)
-                  setOpen(false)
-                  setQ('')
-                }}
-              >
-                <span className="qlib-item-label">{it.label}</span>
-                <span className="qlib-item-meta">
-                  {FIELD_TYPE_LABELS[(isFieldType(it.type) ? it.type : 'text') as FieldType]} ·{' '}
-                  {`{{${it.token}}}`}
-                </span>
-              </button>
-            ))}
-          </div>
-          <Link href="/attorney/questions" className="qlib-manage">
-            Manage question library →
-          </Link>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OptionPills({
-  options,
-  onChange,
-}: {
-  options: string[]
-  onChange: (next: string[]) => void
-}) {
-  const [draft, setDraft] = useState('')
-  const add = () => {
-    const v = draft.trim()
-    if (!v || options.includes(v)) return setDraft('')
-    onChange([...options, v])
-    setDraft('')
-  }
-  return (
-    <div>
-      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Choices</span>
-      <div className="qb-pills">
-        {options.map((opt, i) => (
-          <span key={i} className="qb-pill">
-            {opt}
-            <button
-              type="button"
-              title="Remove choice"
-              onClick={() => onChange(options.filter((_, j) => j !== i))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {options.length === 0 && (
-          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No choices yet</span>
-        )}
-      </div>
-      <div className="qb-pill-add">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              add()
-            }
-          }}
-          placeholder="Add a choice and press Enter"
-        />
-        <button type="button" onClick={add}>
-          Add
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function FieldEditor({
-  field,
-  index,
-  count,
-  onChange,
-  onMove,
-  onRemove,
-  draggable,
-  onDragStart,
-  onDragEnd,
-  onDropField,
-  dragActive,
-  onSaveToLibrary,
-  saveBusy,
-}: {
-  field: EditorField
-  index: number
-  count: number
-  onChange: (mut: (f: EditorField) => EditorField) => void
-  onMove: (delta: number) => void
-  onRemove: () => void
-  draggable?: boolean
-  onDragStart?: () => void
-  onDragEnd?: () => void
-  onDropField?: () => void
-  dragActive?: boolean
-  // Top-level fields only: promote this question into the firm question library.
-  onSaveToLibrary?: () => void
-  saveBusy?: boolean
-}) {
-  return (
-    <fieldset
-      className="li-svc-q"
-      style={{ border: 'none', margin: 0, padding: 0 }}
-      onDragOver={(e) => {
-        if (dragActive) {
-          e.preventDefault()
-          e.stopPropagation()
-        }
-      }}
-      onDrop={(e) => {
-        if (onDropField) {
-          e.stopPropagation()
-          onDropField()
-        }
-      }}
-    >
-      <legend style={{ display: 'none' }}>Question {index + 1}</legend>
-      <div className="li-svc-qrow">
-        {draggable && (
-          <span
-            className="li-svc-grip"
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation()
-              onDragStart?.()
-            }}
-            onDragEnd={() => onDragEnd?.()}
-            title="Drag to reorder question"
-            aria-hidden
-          >
-            ⠿
-          </span>
-        )}
-        <input
-          className="li-svc-qrow-label"
-          value={field.label}
-          onChange={(e) => onChange((f) => ({ ...f, label: e.target.value }))}
-          placeholder="e.g. Proposed LLC name"
-          aria-label={`Question ${index + 1} label`}
-        />
-        <span className="li-svc-token" title="The {{token}} this fills in the template">
-          <span>{'{{'}</span>
-          <input
-            value={field.id}
-            onChange={(e) => onChange((f) => ({ ...f, id: normToken(e.target.value) }))}
-            placeholder={slugify(field.label) || 'variable'}
-            spellCheck={false}
-            aria-label={`Question ${index + 1} variable`}
-          />
-          <span>{'}}'}</span>
-        </span>
-        <select
-          className="li-svc-qrow-type"
-          value={field.type}
-          onChange={(e) => onChange((f) => ({ ...f, type: e.target.value as FieldType }))}
-          aria-label={`Question ${index + 1} answer type`}
-        >
-          {FIELD_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {FIELD_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </select>
-        <label className="li-svc-qrow-req">
-          <input
-            type="checkbox"
-            checked={field.required}
-            onChange={(e) => onChange((f) => ({ ...f, required: e.target.checked }))}
-          />
-          Required
-        </label>
-        {onSaveToLibrary && (
-          <button
-            className="li-svc-iconbtn"
-            onClick={onSaveToLibrary}
-            disabled={saveBusy}
-            title="Save this question to the library"
-            aria-label="Save this question to the library"
-          >
-            <CopyIcon size={14} />
-          </button>
-        )}
-        <button
-          className="li-svc-iconbtn"
-          onClick={() => onMove(-1)}
-          disabled={index === 0}
-          title="Move question up"
-          aria-label="Move question up"
-        >
-          ↑
-        </button>
-        <button
-          className="li-svc-iconbtn"
-          onClick={() => onMove(1)}
-          disabled={index === count - 1}
-          title="Move question down"
-          aria-label="Move question down"
-        >
-          ↓
-        </button>
-        <button
-          className="li-svc-iconbtn danger"
-          onClick={onRemove}
-          title="Remove question"
-          aria-label="Remove question"
-        >
-          <XIcon size={15} />
-        </button>
-      </div>
-
-      <div className="li-svc-qrow-extra">
-        {/* "I don't know" has no sensible rendering for an attachment control —
-            the /book renderer ignores it there, so don't author dead config. */}
-        {field.type !== 'file_upload' && (
-          <label>
-            <input
-              type="checkbox"
-              checked={field.allow_unknown}
-              onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
-            />
-            Allow “I don’t know”
-          </label>
-        )}
-        <label>
-          <input
-            type="checkbox"
-            checked={field.ask_attorney}
-            onChange={(e) => onChange((f) => ({ ...f, ask_attorney: e.target.checked }))}
-          />
-          Flag for attorney follow-up
-        </label>
-      </div>
-
-      {OPTION_FIELD_TYPES.has(field.type) && (
-        <OptionPills
-          options={field.options}
-          onChange={(next) => onChange((f) => ({ ...f, options: next }))}
-        />
-      )}
-
-      {field.type === 'members_repeater' && (
-        <div className="qb-sub">
-          <label className="qb-minitems">
-            <span>Minimum members</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={field.minItems}
-              onChange={(e) => onChange((f) => ({ ...f, minItems: Number(e.target.value) || 0 }))}
-            />
-          </label>
-          <div className="qb-sub-title">
-            <UsersIcon size={15} />
-            Per-member questions
-          </div>
-          {field.memberFields.map((mf, mi) => (
-            <FieldEditor
-              key={mi}
-              field={mf}
-              index={mi}
-              count={field.memberFields.length}
-              onChange={(mut) =>
-                onChange((f) => ({
-                  ...f,
-                  memberFields: f.memberFields.map((x, i) => (i === mi ? mut(x) : x)),
-                }))
-              }
-              onMove={(delta) =>
-                onChange((f) => ({ ...f, memberFields: moveTo(f.memberFields, mi, mi + delta) }))
-              }
-              onRemove={() =>
-                onChange((f) => ({
-                  ...f,
-                  memberFields: f.memberFields.filter((_, i) => i !== mi),
-                }))
-              }
-            />
-          ))}
-          <button
-            className="qb-add qb-add-q"
-            onClick={() =>
-              onChange((f) => ({ ...f, memberFields: [...f.memberFields, emptyField()] }))
-            }
-          >
-            <PlusIcon size={16} />
-            Add per-member question
-          </button>
-        </div>
-      )}
-    </fieldset>
   )
 }
