@@ -111,6 +111,15 @@ describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
     expect(names).toContain('produce_document')
     expect(names).toContain('get_workflow_context')
     expect(names).toContain('propose_workflow')
+    // CHATBOT-CATCHUP-1 — task queue, engagement-letter pair, and the
+    // now-always-registered prepare_envelope (upload mode needs no matter).
+    expect(names).toContain('get_task_queue')
+    expect(names).toContain('list_engagement_letters')
+    expect(names).toContain('set_default_engagement_letter')
+    expect(names).toContain('prepare_envelope')
+    // The matter-party pair stays matter-scoped — absent on this unscoped input.
+    expect(names).not.toContain('link_matter_contact')
+    expect(names).not.toContain('get_matter_parties')
   })
 })
 

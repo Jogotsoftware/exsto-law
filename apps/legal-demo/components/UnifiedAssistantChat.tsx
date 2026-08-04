@@ -2993,6 +2993,7 @@ export function UnifiedAssistantChat({
   // never pre-approved fresh out of chat) and the driver line's wording.
   function openEnvelopeForDoc(draftVersionId: string, doc: ProducedDoc) {
     setEnvelopePrepare({
+      mode: 'document',
       documentVersionId: draftVersionId,
       documentKind: doc.title,
       versionNumber: 1,
@@ -3001,8 +3002,11 @@ export function UnifiedAssistantChat({
   }
 
   function onEnvelopeSent(envelopeId: string) {
-    const label = envelopePrepare ? humanizeDocKind(envelopePrepare.documentKind) : 'document'
-    const version = envelopePrepare?.versionNumber ?? 1
+    const label =
+      envelopePrepare?.mode === 'document'
+        ? humanizeDocKind(envelopePrepare.documentKind)
+        : 'document'
+    const version = envelopePrepare?.mode === 'document' ? envelopePrepare.versionNumber : 1
     setEnvelopePrepare(null)
     setEnvelopeSentNotice({ envelopeId, label: `${label} v${version}` })
     setTimeout(() => setEnvelopeSentNotice(null), 8000)
@@ -3564,7 +3568,7 @@ export function UnifiedAssistantChat({
           the attorney confirms signers/fields and clicks Send there. ─────────── */}
       {envelopePrepare && (
         <Modal title="eSign" onClose={() => setEnvelopePrepare(null)} size="wide">
-          {envelopePrepare.status !== 'approved' && (
+          {envelopePrepare.mode === 'document' && envelopePrepare.status !== 'approved' && (
             <p className="li-modal-muted" style={{ marginTop: 0 }}>
               This version is not yet approved — you can still send it for signature.
             </p>
@@ -3572,14 +3576,20 @@ export function UnifiedAssistantChat({
           {/* ESIGN-UNIFY-1 (ES-5b, §11) — the deleted PrepareSignature is
               retargeted to the ONE unified composer in document mode; the
               matter scope pre-attaches and onSent keeps the chat's post-send
-              notice + hidden driver line unchanged. */}
+              notice + hidden driver line unchanged. CHATBOT-CATCHUP-1: the
+              'blank' mode opens the same composer empty — the attorney attaches
+              their PDF there (the "e-sign a PDF with no matter" chat path). */}
           <EsignComposer
-            source={{
-              kind: 'document',
-              documentVersionId: envelopePrepare.documentVersionId,
-              matterEntityId: activeScope.matterEntityId,
-              title: humanizeDocKind(envelopePrepare.documentKind),
-            }}
+            source={
+              envelopePrepare.mode === 'document'
+                ? {
+                    kind: 'document',
+                    documentVersionId: envelopePrepare.documentVersionId,
+                    matterEntityId: activeScope.matterEntityId,
+                    title: humanizeDocKind(envelopePrepare.documentKind),
+                  }
+                : { kind: 'blank' }
+            }
             onClose={() => setEnvelopePrepare(null)}
             onSent={onEnvelopeSent}
           />

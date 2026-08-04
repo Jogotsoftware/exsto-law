@@ -150,6 +150,9 @@ export function ServiceProposalCard({
           ...(typeof current.appointmentRequired === 'boolean'
             ? { appointmentRequired: current.appointmentRequired }
             : {}),
+          // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — the wizard-set bilingual
+          // offering persists on approve (transitions.offer_spanish).
+          ...(current.offerSpanish === true ? { offerSpanish: true } : {}),
           summary: current.summary,
           confidence: current.confidence,
         }),

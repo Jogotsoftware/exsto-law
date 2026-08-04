@@ -114,6 +114,11 @@ export * from './getBriefTool.js'
 // FB-H — the read-only get_attention_feed chat tool (attention engine).
 export * from './attentionFeedTool.js'
 export * from './esignLaunchTools.js'
+// CHATBOT-CATCHUP-1 — task queue (read), engagement-letter library, matter-party
+// chat tools.
+export * from './attorneyTaskQueueTool.js'
+export * from './engagementLetterTools.js'
+export * from './matterPartyTools.js'
 export * from './assistantMachinery.js'
 export * from './chatSession.js'
 export * from './assistantSettings.js'

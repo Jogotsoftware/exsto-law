@@ -91,12 +91,16 @@ const EMPTY_DRAFT: Draft = {
 // Standard merge fields offered in every template, click-to-insert. Authors can
 // also type any {{token}} by hand; tokens already in the body are surfaced too.
 // Source of truth: the server's system-token set (verticals/legal/src/api/
-// tokenClasses.ts) — keep this list in step with it. client_address is
-// deliberately absent: it is CLIENT data, so a template using it correctly
-// triggers a questionnaire proposal.
+// tokenClasses.ts) — keep this list in step with it. Client address/preferred
+// contact ARE offered since SIGNUP-DETAILS-1 (#495): the platform captures them
+// once at sign-up on the client record, so templates merge them with no
+// per-service questionnaire re-ask.
 const STANDARD_TOKENS: { id: string; label: string }[] = [
   { id: 'client_name', label: 'Client Name' },
   { id: 'client_email', label: 'Client Email' },
+  { id: 'client_mailing_address', label: 'Client Mailing Address' },
+  { id: 'client_business_address', label: 'Client Business Address' },
+  { id: 'client_preferred_contact', label: 'Client Preferred Contact' },
   { id: 'matter_number', label: 'Matter Number' },
   { id: 'firm_name', label: 'Firm Name' },
   { id: 'firm_address', label: 'Firm Address' },

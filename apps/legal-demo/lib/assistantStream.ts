@@ -96,6 +96,9 @@ export interface ServiceProposalEvent {
   // BUILDER-CERT-1 (WP3) — booking mode (true = consultation slot at booking;
   // false = intake-only); forwarded to the approve route.
   appointmentRequired?: boolean
+  // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — wizard-set bilingual offering;
+  // forwarded to the approve route as transitions.offer_spanish.
+  offerSpanish?: boolean
   summary: string
   confidence: number
 }
@@ -204,13 +207,18 @@ export interface EmailComposeEvent {
 
 // ASSISTANT-ACTS-1: the assistant resolved a matter document to send for
 // signature (prepare_envelope) — the chat opens the real prepare-signature
-// wizard on it. Transient, like an editor launch: never persisted.
-export interface EnvelopePrepareEvent {
-  documentVersionId: string
-  documentKind: string
-  versionNumber: number
-  status: string
-}
+// wizard on it. CHATBOT-CATCHUP-1 adds the 'blank' mode: no document resolved,
+// the composer opens for the attorney to attach any PDF (the "e-sign a PDF
+// with no matter" path). Transient, like an editor launch: never persisted.
+export type EnvelopePrepareEvent =
+  | {
+      mode: 'document'
+      documentVersionId: string
+      documentKind: string
+      versionNumber: number
+      status: string
+    }
+  | { mode: 'blank' }
 
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
@@ -360,6 +368,9 @@ export async function streamAssistant(
             typeof evt.clientDescriptionEs === 'string' ? evt.clientDescriptionEs : null,
           route: evt.route === 'auto' ? 'auto' : 'manual',
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
+          // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — the wizard-set bilingual
+          // offering rides the card to the approve route.
+          ...(evt.offerSpanish === true ? { offerSpanish: true } : {}),
           // BUILDER-CERT-1 (WP3) — booking mode rides the card to the approve route.
           ...(typeof evt.appointmentRequired === 'boolean'
             ? { appointmentRequired: evt.appointmentRequired }
@@ -477,12 +488,17 @@ export async function streamAssistant(
         })
         break
       case 'envelope_prepare':
-        handlers.onEnvelopePrepare?.({
-          documentVersionId: String(evt.documentVersionId ?? ''),
-          documentKind: String(evt.documentKind ?? ''),
-          versionNumber: typeof evt.versionNumber === 'number' ? evt.versionNumber : 1,
-          status: String(evt.status ?? ''),
-        })
+        handlers.onEnvelopePrepare?.(
+          evt.mode === 'blank'
+            ? { mode: 'blank' }
+            : {
+                mode: 'document',
+                documentVersionId: String(evt.documentVersionId ?? ''),
+                documentKind: String(evt.documentKind ?? ''),
+                versionNumber: typeof evt.versionNumber === 'number' ? evt.versionNumber : 1,
+                status: String(evt.status ?? ''),
+              },
+        )
         break
       case 'done':
         handlers.onDone?.(evt as unknown as StreamDone)

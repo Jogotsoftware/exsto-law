@@ -56,6 +56,10 @@ describe('buildMergeData', () => {
     latestDraftVersionId: null,
     latestDraftStatus: null,
     clientEmail: 'maria@example.com',
+    // SIGNUP-DETAILS-1 (#495) / CHATBOT-CATCHUP-1 — sign-up detail facts.
+    clientMailingAddress: '12 Oak St, Raleigh, NC 27601',
+    clientBusinessAddress: null,
+    clientPreferredContact: 'email',
   } satisfies MatterDetail
 
   it('maps matter + questionnaire facts onto common engagement-letter slots', () => {
@@ -71,6 +75,15 @@ describe('buildMergeData', () => {
     expect(data.client_email).toBe('maria@example.com')
     expect(data.effective_date).toBe('June 18, 2026') // deterministic long date
     expect(data.fee_amount_formatted).toBe('$1,500.00')
+  })
+
+  // CHATBOT-CATCHUP-1 — the #495 sign-up details merge as first-class tokens;
+  // a never-given one stays undefined (honest MISSING), never a guess.
+  it('fills the sign-up detail slots (mailing/business address, preferred contact)', () => {
+    const data = buildMergeData(baseMatter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.client_mailing_address).toBe('12 Oak St, Raleigh, NC 27601')
+    expect(data.client_preferred_contact).toBe('email')
+    expect(data.client_business_address).toBeUndefined()
   })
 
   it('rendering the engagement-letter slots end-to-end yields a complete document with no model call', () => {

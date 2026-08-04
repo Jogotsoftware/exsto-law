@@ -339,7 +339,7 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
       esign_config: {
         type: 'object',
         description:
-          "PREFERRED over `signature` — the full e-sign declaration (ESIGN-UNIFY-1): { signable, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual', order, repeatPerParty? }] }. Each role's `key` must be the signer key of the {{sign:<key>}} / {{name:<key>}} / {{date:<key>}} markers you emit in the body (put them in an execution section at the end — '**Accepted and Agreed:**' then per signer a {{sign:key}}, {{name:key}}, {{date:key}} line each on its own line). `bind` is how the platform resolves the role to a real recipient after intake: matter_primary_contact (the client), attorney_of_record, or manual (attorney fills at send). Equal `order` values sign in parallel. MULTI-PARTY (repeatPerParty: true): when the SIGNER COUNT VARIES PER MATTER — LLC members, partners, all parties to a multi-party agreement — declare ONE role (e.g. key 'member') with repeatPerParty: true and author ONE execution block with that key ({{sign:member}}, {{name:member}}, {{date:member}}); the platform replicates the block per actual party at drafting and sends one signature request per party (each captured at intake becomes a matter contact). NEVER hardcode member_1/member_2/member_3 roles for a variable count, and never fall back to a fixed count. Omit entirely when the document is not signed.",
+          "PREFERRED over `signature` — the full e-sign declaration (ESIGN-UNIFY-1): { signable, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual', order, repeatPerParty? }] }. Each role's `key` must be the signer key of the {{sign:<key>}} / {{name:<key>}} / {{date:<key>}} markers you emit in the body (put them in an execution section at the end — '**Accepted and Agreed:**' then per signer a {{sign:key}}, {{name:key}}, {{date:key}} line each on its own line). `bind` is how the platform resolves the role to a real recipient after intake: matter_primary_contact (the client), attorney_of_record, or manual (attorney fills at send). Equal `order` values sign in parallel. MULTI-PARTY (repeatPerParty: true): when the SIGNER COUNT VARIES PER MATTER — LLC members, partners, all parties to a multi-party agreement — declare ONE role (e.g. key 'member') with repeatPerParty: true and author ONE execution block with that key ({{sign:member}}, {{name:member}}, {{date:member}}); the platform replicates the block per actual party at drafting and sends one signature request per party (each captured at intake becomes a matter contact). NEVER hardcode member_1/member_2/member_3 roles for a variable count, and never fall back to a fixed count. A role may also carry `fields` (intake-token-sourced signer identity), `presigned` (attorney_of_record only: standing signature auto-applies at send), and `allowAddNextSigner` (open-ended signer chains) — see each property's description. Omit entirely when the document is not signed.",
         properties: {
           signable: { type: 'boolean' },
           roles: {
@@ -359,6 +359,31 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
                   type: 'boolean',
                   description:
                     'This one role stands for EVERY party on the matter (variable signer count). One execution block with this key in the body; the platform expands it per party.',
+                },
+                // ESIGN-FIELDS-1 (#496) / PRESIGN-1 (#500) / ADD-NEXT-SIGNER-1
+                // (#502) — the full role shape the backend round-trips
+                // (parseTemplateEsignRole). additionalProperties:false means an
+                // unlisted field is UNREACHABLE from chat, so each is declared.
+                fields: {
+                  type: 'object',
+                  description:
+                    "Merge-field-sourced identity for THIS signer: each value is a {{token}} name (no braces) from the service's intake whose merged value supplies that slot at send time — e.g. a counterparty whose email lives in an intake answer: { name: 'member_2_name', email: 'member_2_email' }. A bound field OVERRIDES the coarse `bind` resolution; an empty answer falls back to the bind. Use when a signer's identity comes from intake answers rather than the CRM. Omit for bind-only roles.",
+                  properties: {
+                    name: { type: 'string' },
+                    email: { type: 'string' },
+                    title: { type: 'string' },
+                  },
+                  additionalProperties: false,
+                },
+                presigned: {
+                  type: 'boolean',
+                  description:
+                    "PRESIGN-1 — the attorney's standing saved signature is applied AUTOMATICALLY at send, so this signer never has to act (only the client(s) sign). ONLY meaningful with bind 'attorney_of_record'; the platform drops it on any other bind.",
+                },
+                allowAddNextSigner: {
+                  type: 'boolean',
+                  description:
+                    "ADD-NEXT-SIGNER-1 — when this role's signer would otherwise be the LAST signature, offer them 'add another signer' instead of auto-completing the envelope (open-ended signer chains, e.g. an unknown number of members). Only meaningful for a needs_to_sign, non-presigned role.",
                 },
               },
               required: ['key', 'label'],

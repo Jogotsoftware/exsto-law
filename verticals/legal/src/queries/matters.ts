@@ -48,6 +48,13 @@ export interface MatterDetail extends MatterSummary {
   latestDraftVersionId: string | null
   latestDraftStatus: string | null
   clientEmail: string | null
+  // SIGNUP-DETAILS-1 (#495) / CHATBOT-CATCHUP-1 — client-level facts captured at
+  // sign-up on the client_contact (handlers/intake.ts buildClientContactAttrs),
+  // read here so document merge can fill {{client_mailing_address}} etc.
+  // Addresses are read as their formatted_address string; null when never given.
+  clientMailingAddress: string | null
+  clientBusinessAddress: string | null
+  clientPreferredContact: string | null
   // The client PARENT entity (matter_of, migration 0020), for linking a matter to
   // its client page. Null when the matter isn't grouped under a client yet.
   clientEntityId: string | null
@@ -222,6 +229,35 @@ export async function getMatter(
       'client_of',
       'email',
     )
+    // SIGNUP-DETAILS-1 (#495) / CHATBOT-CATCHUP-1 — the sign-up "details" facts
+    // on the client_contact, so merge can fill the address/contact tokens.
+    // Addresses are the structured shape; only formatted_address is useful in a
+    // document. All optional at sign-up → null is the common, honest case.
+    const mailingAddr = await loadInboundRelatedAttribute<{ formatted_address?: string }>(
+      client,
+      ctx.tenantId,
+      matterEntityId,
+      'client_of',
+      'mailing_address',
+    )
+    const businessAddr = await loadInboundRelatedAttribute<{ formatted_address?: string }>(
+      client,
+      ctx.tenantId,
+      matterEntityId,
+      'client_of',
+      'business_address',
+    )
+    const preferredContact = await loadInboundRelatedAttribute<string>(
+      client,
+      ctx.tenantId,
+      matterEntityId,
+      'client_of',
+      'preferred_contact_method',
+    )
+    const formattedAddress = (v: { formatted_address?: string } | null): string | null => {
+      const f = v?.formatted_address
+      return typeof f === 'string' && f.trim() ? f.trim() : null
+    }
     const transcriptText = await loadTranscriptText(client, ctx.tenantId, matterEntityId)
 
     const latestDraft = await client.query<{
@@ -296,6 +332,9 @@ export async function getMatter(
       latestDraftVersionId: latestDraft.rows[0]?.version_id ?? null,
       latestDraftStatus: latestDraft.rows[0]?.status ?? null,
       clientEmail: clientEmail ?? null,
+      clientMailingAddress: formattedAddress(mailingAddr),
+      clientBusinessAddress: formattedAddress(businessAddr),
+      clientPreferredContact: preferredContact ?? null,
       clientEntityId: clientParent.rows[0]?.id ?? null,
       workflow,
       workflowRepairAvailable,
