@@ -185,15 +185,23 @@ export function WorkflowBuilder({
   library,
   serviceKey,
   onSaveToLibrary,
+  lockedStepKeys,
 }: {
   steps: BuilderStep[]
   onChange: (next: BuilderStep[]) => void
   catalog: WorkflowCatalog | null
   library: WorkflowStepTemplate[]
-  serviceKey: string
+  // Enables the service-level drafting-instructions editor on generate steps.
+  // Per-matter hosts omit it (drafting prompts are SERVICE config, edited on the
+  // service workflow editor) — the block is hidden entirely, no dead control.
+  serviceKey?: string
   // Standalone-only chrome: the page passes its library-create handler; the wizard
   // pop-up omits it, which hides the per-step "Save to library" button entirely.
   onSaveToLibrary?: (step: BuilderStep, name: string) => void
+  // MODAL-STD-1 (Gap B) — per-matter hosting: steps whose key is listed cannot be
+  // removed (the matter's CURRENT step must stay in the graph) and show a
+  // "current" pill. Omit for definition editing (no dead affordance).
+  lockedStepKeys?: string[]
 }): React.ReactElement {
   const [editing, setEditing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -344,6 +352,7 @@ export function WorkflowBuilder({
                 onToggle={() => setEditing(editing === s.uid ? null : s.uid)}
                 onChange={(patch) => updateStep(s.uid, patch)}
                 onRemove={() => removeStep(s.uid)}
+                locked={lockedStepKeys?.includes(s.key) ?? false}
                 onMoveUp={() => move(s.uid, -1)}
                 onMoveDown={() => move(s.uid, 1)}
                 canSaveToLib={!!onSaveToLibrary}
@@ -567,13 +576,14 @@ function StepCard({
   onStartSaveToLib,
   onCancelSaveToLib,
   onSaveToLib,
+  locked = false,
 }: {
   step: BuilderStep
   prevStep?: BuilderStep
   index: number
   total: number
   catalog: WorkflowCatalog | null
-  serviceKey: string
+  serviceKey?: string
   open: boolean
   onToggle: () => void
   onChange: (patch: Partial<BuilderStep>) => void
@@ -585,6 +595,8 @@ function StepCard({
   onStartSaveToLib: () => void
   onCancelSaveToLib: () => void
   onSaveToLib: (name: string) => void
+  // The matter's current step: not removable, marked with a pill.
+  locked?: boolean
 }) {
   const isLast = index === total - 1
   const capSlug = step.actionKind === 'invoke_capability' ? stepCapabilitySlug(step) : ''
@@ -628,6 +640,7 @@ function StepCard({
             {step.label || <em>Untitled step</em>}
           </span>
           <span className={`li-svc-wf-rolechip ${tint}`}>{ROLE_SHORT_LABEL[step.gate]}</span>
+          {locked && <span className="li-svc-wf-blocking">Current</span>}
           {step.blocking && <span className="li-svc-wf-blocking">Blocking</span>}
           <span className="li-svc-wf-trigger">
             {index === 0 ? 'entry' : step.trigger || step.gate}
@@ -689,14 +702,16 @@ function StepCard({
           >
             {open ? 'Done' : 'Edit'}
           </button>
-          <button
-            type="button"
-            className="li-svc-iconbtn danger"
-            title="Remove step"
-            onClick={onRemove}
-          >
-            ✕
-          </button>
+          {!locked && (
+            <button
+              type="button"
+              className="li-svc-iconbtn danger"
+              title="Remove step"
+              onClick={onRemove}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {savingToLib && (
@@ -789,7 +804,7 @@ function StepEditor({
   isFirst: boolean
   isLast: boolean
   catalog: WorkflowCatalog | null
-  serviceKey: string
+  serviceKey?: string
   onChange: (patch: Partial<BuilderStep>) => void
 }) {
   const gates = catalog?.gates ?? (['automatic', 'attorney', 'client', 'system'] as WfGate[])
@@ -886,7 +901,7 @@ function StepEditor({
       {step.actionKind === 'invoke_capability' && (
         <CapabilityConfigEditor config={step.config} onChange={(config) => onChange({ config })} />
       )}
-      {step.actionKind === 'generate_document' && (
+      {step.actionKind === 'generate_document' && serviceKey && (
         <DraftingInstructionsEditor serviceKey={serviceKey} documents={step.documents} />
       )}
     </div>
