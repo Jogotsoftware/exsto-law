@@ -282,7 +282,10 @@ export async function listOpenTasksForAttorney(ctx: ActionContext): Promise<Atto
          LEFT JOIN entity m ON m.tenant_id = $1 AND m.id = t.matter_id
         WHERE t.status IN ('open', 'in_progress', 'blocked')
           AND COALESCE(t.kind, 'todo') = 'todo'
-          AND (t.assignee_actor_id = $2::uuid OR t.assignee_actor_id IS NULL)
+          -- assignee_actor_id is an attribute text projection (#>> '{}'), so the
+          -- param must compare as text: a ::uuid cast here made this whole source
+          -- fail (42883 text = uuid) and silently degrade the queue to no to-dos.
+          AND (t.assignee_actor_id = $2::text OR t.assignee_actor_id IS NULL)
         ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC`,
       [ctx.tenantId, actorId],
     )
