@@ -207,6 +207,10 @@ export interface ServiceProposal {
   // certification drive found the wizard had NO way to express an intake-only
   // front door, so every wizard-built service demanded a slot.
   appointmentRequired: boolean
+  // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — offer the service in English +
+  // Spanish (client picks at intake; approved English docs spawn a Spanish
+  // translation as a separate reviewable doc). Only an explicit true is set.
+  offerSpanish?: boolean
   summary: string
   confidence: number
 }
@@ -267,6 +271,9 @@ export interface CreateServiceAIInput {
   // (appointment required) so pre-existing callers are unchanged; the wizard's
   // propose_service always sets it explicitly.
   appointmentRequired?: boolean
+  // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — persisted as transitions.offer_spanish,
+  // the same flag the service Settings tab toggles. Undefined = off (default).
+  offerSpanish?: boolean
 }
 
 // Persist a reasoning_trace for an AI service-creation write (mirrors
@@ -369,6 +376,9 @@ export async function createServiceAI(
         ...(typeof input.appointmentRequired === 'boolean'
           ? { appointment_required: input.appointmentRequired }
           : {}),
+        // BILINGUAL-DOCS-1 — only an explicit true writes; the settings tab
+        // owns later toggling either way.
+        ...(input.offerSpanish === true ? { offer_spanish: true } : {}),
         ...(input.clientDisplayNameEs || input.clientDescriptionEs
           ? {
               client_copy_i18n: {

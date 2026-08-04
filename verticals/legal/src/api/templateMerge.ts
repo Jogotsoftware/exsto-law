@@ -198,6 +198,12 @@ export function buildMergeData(
     client_name: clientNameAnswer ?? clientName,
     primary_client_salutation: firstName(clientName) ?? clientName,
     client_email: matter.clientEmail ?? undefined,
+    // SIGNUP-DETAILS-1 (#495) / CHATBOT-CATCHUP-1 — the sign-up "details" facts
+    // captured once on the client_contact (mailing/business address, preferred
+    // contact method). Never given → honest MISSING, same as every curated slot.
+    client_mailing_address: matter.clientMailingAddress ?? undefined,
+    client_business_address: matter.clientBusinessAddress ?? undefined,
+    client_preferred_contact: matter.clientPreferredContact ?? undefined,
     effective_date: longDate(options.effectiveDateIso),
     today: longDate(options.todayIso ?? options.effectiveDateIso),
     // {{letter_date}} = the generation date at merge time — unless the intake
@@ -258,6 +264,9 @@ export const MERGE_SLOT_FIELDS: readonly string[] = [
   'client_name',
   'primary_client_salutation',
   'client_email',
+  'client_mailing_address',
+  'client_business_address',
+  'client_preferred_contact',
   'effective_date',
   'today',
   'letter_date',

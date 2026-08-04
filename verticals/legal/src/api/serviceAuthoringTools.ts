@@ -112,6 +112,11 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description:
           "Does booking this service START with a consultation appointment? true = the client picks a time slot when they book (services that open with a meeting); false = intake-only — the work starts straight from the client's answers/upload with no slot (document-review services, most pure document-production). REQUIRED and NEVER assumed — DERIVE it from the walkthrough (a process that opens with a consult → true; \"they upload the lease and I review it\" → false) and confirm in plain language only when genuinely ambiguous. Never say 'appointment_required' to the attorney.",
       },
+      offer_spanish: {
+        type: 'boolean',
+        description:
+          'BILINGUAL-DOCS-1 — offer this service in English AND Spanish: the client picks their language at intake, and each approved English document spawns a faithful Spanish translation as its own reviewable document. Set true when the attorney says they want the service offered in Spanish / bilingually; omit or false otherwise (it can be toggled later on the service Settings tab). Do NOT ask about it unprompted on every build — mention it only when the attorney raises language or their clients are Spanish-speaking.',
+      },
       summary: {
         type: 'string',
         description:
@@ -225,6 +230,7 @@ export function buildProposeServiceTool(
         route?: string
         generation_mode?: string
         appointment_required?: unknown
+        offer_spanish?: unknown
         summary?: string
         confidence?: number
       }
@@ -317,6 +323,9 @@ export function buildProposeServiceTool(
         route,
         generationMode,
         appointmentRequired: args.appointment_required,
+        // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1): the wizard can now set the
+        // bilingual offering from conversation; only an explicit true rides.
+        ...(args.offer_spanish === true ? { offerSpanish: true } : {}),
         summary: (args.summary ?? '').trim() || `Proposed new service "${displayName}".`,
         confidence,
       })

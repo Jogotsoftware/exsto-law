@@ -106,6 +106,14 @@ import { buildComposeEmailTool, type EmailComposeCapture } from './composeEmailT
 import { buildPrepareEnvelopeTool, type EnvelopePrepareLaunch } from './esignLaunchTools.js'
 import { buildGetBriefTool } from './getBriefTool.js'
 import { buildAttentionFeedTool } from './attentionFeedTool.js'
+// CHATBOT-CATCHUP-1 — task queue (read), engagement-letter library (read +
+// set-default), matter parties (read + link-by-name).
+import { buildTaskQueueTool } from './attorneyTaskQueueTool.js'
+import {
+  buildListEngagementLettersTool,
+  buildSetDefaultEngagementLetterTool,
+} from './engagementLetterTools.js'
+import { buildMatterPartiesTool, buildLinkMatterContactTool } from './matterPartyTools.js'
 import { getAttentionFeed, renderAttentionSnapshot } from '../queries/attentionFeed.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
@@ -270,6 +278,9 @@ export type AssistantChatStreamEvent =
       route: ServiceProposal['route']
       generationMode: ServiceProposal['generationMode']
       appointmentRequired: boolean
+      // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — the wizard-set bilingual
+      // offering rides the card to the approve route.
+      offerSpanish?: boolean
       summary: string
       confidence: number
     }
@@ -385,11 +396,16 @@ export type AssistantChatStreamEvent =
   // attorney confirms signers/fields and clicks Send there.
   | {
       type: 'envelope_prepare'
+      mode: 'document'
       documentVersionId: string
       documentKind: string
       versionNumber: number
       status: string
     }
+  // CHATBOT-CATCHUP-1 — the upload/blank mode (DESIGN §8): no document is
+  // resolved; the client opens the SAME composer blank and the attorney
+  // attaches the PDF there.
+  | { type: 'envelope_prepare'; mode: 'blank' }
   | {
       type: 'done'
       eventId: string
@@ -751,6 +767,14 @@ export function buildAttorneyClientTools(
   // real ranked feed even on an unscoped chat. READ-ONLY; the paired ACT tools
   // (compose_email, the review/e-sign launchers) stay scope-gated below.
   tools.push(buildAttentionFeedTool(ctx))
+  // CHATBOT-CATCHUP-1: the unified TASK QUEUE rides every attorney turn, like
+  // the attention feed — "what's waiting on me?" is a global question. READ-ONLY.
+  tools.push(buildTaskQueueTool(ctx))
+  // CHATBOT-CATCHUP-1: the engagement-letter library pair — list (read) +
+  // set-default (firm-scoped, reversible pointer write, name-resolved). Global:
+  // firm settings questions are asked from anywhere.
+  tools.push(buildListEngagementLettersTool(ctx))
+  tools.push(buildSetDefaultEngagementLetterTool(ctx))
   // CONTEXT-SETTINGS-1: the scope router is registered on EVERY attorney turn,
   // scoped or not — a standing preference ("every document should…") is stated
   // just as often on a general chat as on a matter.
@@ -767,8 +791,23 @@ export function buildAttorneyClientTools(
     // scoping guard as compose_email — a matter or contact to resolve against.
     tools.push(buildGetBriefTool(ctx, input))
   }
+  // CHATBOT-CATCHUP-1: prepare_envelope is now registered on EVERY attorney turn —
+  // its 'upload' mode (the blank composer, DESIGN §8) needs no matter, so an
+  // unscoped "e-sign this PDF for me" finally has a chat path. matter_document
+  // mode still requires the matter scope; the tool redirects honestly without it.
+  tools.push(
+    buildPrepareEnvelopeTool(
+      ctx,
+      input.useContext !== false ? (input.matterEntityId ?? null) : null,
+      capture.envelopePrepares,
+    ),
+  )
   if (input.useContext !== false && input.matterEntityId) {
-    tools.push(buildPrepareEnvelopeTool(ctx, input.matterEntityId, capture.envelopePrepares))
+    // CHATBOT-CATCHUP-1: matter-party pair (MULTI-PARTY-1 follow-through) —
+    // read the linked parties + link an existing contact by name (§3 Wave-1
+    // "CRM links": pure, reversible relationship write).
+    tools.push(buildMatterPartiesTool(ctx, input.matterEntityId))
+    tools.push(buildLinkMatterContactTool(ctx, input.matterEntityId))
   }
   // Build-Wizard (Phases 1–4): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
@@ -2098,6 +2137,7 @@ export async function* assistantChatStream(
         route: p.route,
         generationMode: p.generationMode,
         appointmentRequired: p.appointmentRequired,
+        ...(p.offerSpanish === true ? { offerSpanish: true } : {}),
         summary: p.summary,
         confidence: p.confidence,
       }
@@ -2212,15 +2252,19 @@ export async function* assistantChatStream(
       }
     }
     // Surface envelope-prepare launches resolved this turn (ASSISTANT-ACTS-1) —
-    // the client opens the real prepare-signature wizard on the resolved version.
+    // the client opens the composer on the resolved version, or blank for the
+    // upload mode (CHATBOT-CATCHUP-1).
     for (const p of envelopePrepares) {
-      yield {
-        type: 'envelope_prepare',
-        documentVersionId: p.documentVersionId,
-        documentKind: p.documentKind,
-        versionNumber: p.versionNumber,
-        status: p.status,
-      }
+      yield p.mode === 'blank'
+        ? { type: 'envelope_prepare', mode: 'blank' }
+        : {
+            type: 'envelope_prepare',
+            mode: 'document',
+            documentVersionId: p.documentVersionId,
+            documentKind: p.documentKind,
+            versionNumber: p.versionNumber,
+            status: p.status,
+          }
     }
   }
 

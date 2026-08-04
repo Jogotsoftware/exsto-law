@@ -185,6 +185,21 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
     },
   },
   {
+    // BILINGUAL-DOCS-1 (#490) / CHATBOT-CATCHUP-1 — a per-service toggle, not a
+    // step: the builder should REUSE it (propose_service's offer_spanish field /
+    // the service Settings tab) instead of inventing a translation step.
+    slug: 'bilingual_documents',
+    spec: {
+      name: 'Bilingual (English/Spanish) documents',
+      category: 'documents',
+      purpose:
+        'A per-service toggle (offer_spanish): the client picks English or Spanish at intake, and each approved English document automatically spawns a faithful Spanish translation as its own reviewable document (an _es document kind). Intake questions carry authored Spanish labels (label_i18n / options_i18n).',
+      when_to_use:
+        'When a service serves Spanish-speaking clients. Set offer_spanish on the service (propose_service or the Settings tab) — never build a separate translation workflow step; translation happens on approval automatically.',
+      backed_by: ['offer_spanish service toggle', 'translate-on-approval', 'client_copy_i18n'],
+    },
+  },
+  {
     slug: 'client_messaging',
     spec: {
       name: 'Client messaging',

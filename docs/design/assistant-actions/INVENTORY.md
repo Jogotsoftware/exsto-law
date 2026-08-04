@@ -24,10 +24,12 @@ verdict rests on an inference I couldn't fully trace end-to-end, it's marked **(
   attorney-chat scope) and a further block is **client-portal-actor** (`legal.client.*`,
   `legal.esign.portal.*`, `questionnaire.submit`, `intake.something_else`, `booking.submit`).
   That leaves roughly **130 attorney-actionable write ops**.
-- **Attorney chat ClientTools: 24** — 10 always/scope-gated + 14 gated behind the
-  `LEGAL_BUILD_WIZARD` flag (`buildWizardEnabled()`, `lifecycle/flags.ts`). Only **2 write to the
-  substrate directly** (`log_feedback`, `request_capability`); the rest are read-context,
-  capture-for-approval, or launch-a-UI tools.
+- **Attorney chat ClientTools: 31** (2026-08-04, CHATBOT-CATCHUP-1) — 17 always/scope-gated + 14
+  gated behind the `LEGAL_BUILD_WIZARD` flag (`buildWizardEnabled()`, `lifecycle/flags.ts`).
+  **5 write to the substrate directly** (`log_feedback`, `request_capability`,
+  `save_ai_instruction`, `set_default_engagement_letter`, `link_matter_contact` — all through the
+  action layer, all Wave-1-safe/reversible); the rest are read-context, capture-for-approval, or
+  launch-a-UI tools.
 - **Client-portal chat ClientTools: 9** — 8 read + 1 capture (`prepare_request`). Read-only by
   design; no stale paths found.
 - **Chat coverage of attorney write ops:**
@@ -40,9 +42,11 @@ verdict rests on an inference I couldn't fully trace end-to-end, it's marked **(
     contacts, companies, billing/invoicing/trust/time/expense, tasks, calendar/booking/meetings,
     firm settings/rates/signatures, notes, users/access, integrations, drafts lifecycle
     (approve/reject/revise), and e-sign lifecycle (void/resend).
-- **E8 dead-ends: 1 confirmed** (`prepare_envelope` "eSign a PDF for me" has no chat path and
-  the tool points at a component slated for deletion). No silent-no-op ClientTool handlers found
-  — the propose/capture tools all return honest "nothing was done / attorney is the gate" strings.
+- **E8 dead-ends: 0** (2026-08-04) — the last one ("eSign a PDF for me" had no chat path) closed
+  by CHATBOT-CATCHUP-1: `prepare_envelope` gained `mode: 'upload'` (opens the blank
+  `EsignComposer`) and is registered on every attorney turn. No silent-no-op ClientTool handlers
+  found — the propose/capture tools all return honest "nothing was done / attorney is the gate"
+  strings.
 
 ## 1. Op census
 
@@ -57,7 +61,7 @@ verbatim-sourced from each tool's `description`. `[C]` = reachable from attorney
 - `matter.set_workflow` — customize one matter's workflow graph. `[—]`
 - `matter.set_owner` — set/transfer the owning attorney. `[—]`
 - `matter.grant_access` — replace the set of attorneys granted send access. `[—]`
-- `matter.link_contact` — connect a contact to a matter (many-to-many). `[—]`
+- `matter.link_contact` — connect a contact to a matter (many-to-many). `[C]` via `link_matter_contact` (2026-08-04, name-resolved direct write; paired read `get_matter_parties`)
 - `matter.set_company` — link a matter to its company. `[—]`
 - `matter.set_governing_law` — set/clear a matter's governing jurisdiction. `[—]`
 - `matter.add_fee` — add a service/document fee by hand (billable). `[—]`
@@ -71,9 +75,9 @@ verbatim-sourced from each tool's `description`. `[C]` = reachable from attorney
 - `draft.approve` / `draft.reject` / `draft.request_revision` — draft lifecycle. `[—]`
 - `draft.revise` — AI revision of a version under attorney direction. `[—]`
 
-### E-sign, attorney side (`legal.esign.*`) — `[S]`/`[—]`
-- `esign.send_for_signature` — send an approved document for e-signature. `[S]` via `prepare_envelope` (opens stale wizard — §4)
-- `esign.send_file` — send an uploaded PDF for e-signature. `[—]` (no chat path — the "eSign a PDF for me" dead-end, §4)
+### E-sign, attorney side (`legal.esign.*`) — `[C]`/`[—]`
+- `esign.send_for_signature` — send an approved document for e-signature. `[C]` via `prepare_envelope` mode `matter_document` (launches the unified `EsignComposer`; attorney sends)
+- `esign.send_file` — send an uploaded PDF for e-signature. `[C]` via `prepare_envelope` mode `upload` (2026-08-04 — blank composer; the former dead-end, §4)
 - `esign.void` — void an active envelope. `[—]`
 - `esign.resend` — re-send the signing link/nudge to the current signer. `[—]`
 - (`esign.portal.load/sign/decline` are client-actor, portal chat scope.)
@@ -105,7 +109,9 @@ verbatim-sourced from each tool's `description`. `[C]` = reachable from attorney
 - `calendar.categories.set` — replace the firm calendar palette. `[—]`
 - `call.assign` / `call.record_manual` — attach/record consultation calls. `[—]`
 
-### Firm settings / rates / signatures — `[—]` all (the long-standing 2026-07-07 gap, still open)
+### Firm settings / rates / signatures — mostly `[—]` (the long-standing 2026-07-07 gap; engagement letters + AI-instruction scopes now covered)
+- `legal.firm.engagement_letters.list` / `.set_default` — engagement-letter library. `[C]` via `list_engagement_letters` / `set_default_engagement_letter` (2026-08-04; `.remove` stays UI-only by design)
+- firm/service AI instructions + context files — `[C]` via `save_ai_instruction` (CONTEXT-SETTINGS-1, 8 scopes incl. per-service drafting/review instructions)
 - `settings.update` — update firm-level settings. `[—]`
 - `booking_rules.update` — update firm booking rules. `[—]`
 - `firm.set_default_rate` — set the firm-wide default hourly rate. `[—]`
@@ -145,6 +151,7 @@ verbatim-sourced from each tool's `description`. `[C]` = reachable from attorney
 - capability-library request (`requestCapability`, no dedicated MCP tool name in the census — action-layer function) — file a Tier-3 gap. `[C]` via `request_capability` (**direct write**, flag-gated)
 - `research.ask` — Perplexity research scoped to a matter. `[—]` (the attorney chat has its own web-search branch; this MCP op is not a ClientTool)
 - `attention.feed` (read) — ranked "what's most pressing" feed. `[C]` (read) via `get_attention_feed`
+- `legal.attorney.task_queue` (read) — the unified "awaiting me" Task Queue. `[C]` (read) via `get_task_queue` (2026-08-04)
 - `assistant.save_reply` — save an assistant reply as a matter draft. `[—]` (a UI action, not a self-callable chat tool)
 - `document.review.run` — enqueue an AI review of an uploaded document. `[—]`
 - `transcript.extract` — distill a consultation transcript into notes/facts. `[—]`
@@ -157,7 +164,7 @@ verbatim-sourced from each tool's `description`. `[C]` = reachable from attorney
 
 ### 2.1 Attorney chat (`buildAttorneyClientTools`, assistantChat.ts:602)
 
-Always registered (10):
+Always or scope-gated (17, as of 2026-08-04 CHATBOT-CATCHUP-1):
 
 | Tool | Kind | Backs op | Verdict |
 |---|---|---|---|
@@ -168,9 +175,15 @@ Always registered (10):
 | `propose_workflow` | capture→approve | `service.lifecycle.set` | Covered |
 | `open_artifact_editor` | launch UI | (editor performs `draft.edit`/`template.update`) | Covered (launch) |
 | `get_attention_feed` | read | `attention.feed` | Covered (read) |
-| `compose_email` | capture→composer | `mail.compose` / `email.draft` | Covered (launch) |
+| `get_task_queue` | read | `legal.attorney.task_queue` | Covered (read) |
+| `list_engagement_letters` | read | `legal.firm.engagement_letters.list` | Covered (read) |
+| `set_default_engagement_letter` | **direct write** (name-resolved) | `legal.firm.engagement_letters.set_default` | Covered |
+| `save_ai_instruction` | **direct write** (scope-routed) | `firm.ai_context.update` / drafting+review instructions | Covered |
+| `compose_email` | capture→composer (scoped) | `mail.compose` / `email.draft` | Covered (launch) |
 | `get_brief` | read (scoped) | `matter.brief.get` | Covered (read) |
-| `prepare_envelope` | launch UI (matter-scoped) | `esign.send_for_signature` | **Covered-but-STALE** (§4) |
+| `prepare_envelope` | launch UI (always; matter mode needs scope) | `esign.send_for_signature` / `esign.send_file` | Covered (launch; blank mode = upload) |
+| `get_matter_parties` | read (matter-scoped) | matter_contact traversal | Covered (read) |
+| `link_matter_contact` | **direct write** (matter-scoped, name-resolved) | `matter.link_contact` | Covered |
 
 Flag-gated behind `LEGAL_BUILD_WIZARD` (14): `get_service_context`, `propose_service`,
 `get_questionnaire_context`, `propose_questionnaire`, `get_template_context`, `propose_template`,
@@ -251,12 +264,36 @@ destructive/irreversible/financial, or needs more design.
    confirm.
 7. **Document review / transcript** — `document.review.run`, `transcript.extract`. Enqueue AI work;
    fine to wrap but lower demand than Wave 1.
+8. **Service lifecycle from chat** (folded from §6, 2026-08-04) — `legal.service.retire` and the
+   builder's discard-draft (`/api/attorney/services/[serviceKey]/discard-draft`) have no chat
+   verb ("scrap that service I started"). Retiring/discarding is destructive-in-spirit — wants a
+   propose→confirm card, not a direct write. Same wave: the build strip's Start over / Leave
+   build controls are UI-only; a chat verb would need to drive the build-session state.
+9. **Existing-service e-sign role config from chat** (folded from §6, 2026-08-04) —
+   `legal.service.template.esign.update` is MCP-only: no chat verb flips `repeatPerParty` /
+   `presigned` / `allowAddNextSigner` / `fields` on an EXISTING service's role after the fact
+   (the wizard can now author all of them at propose_template time — CHATBOT-CATCHUP-1 — but
+   editing later means the Templates tab). Needs a small propose→approve tool that reads the
+   current config, applies a delta, and cards the diff.
+10. **Propose-time drafting/review instruction seeding** (folded from §6, 2026-08-04) — largely
+   MOOT: `save_ai_instruction`'s `service_document_generation` / `service_document_review`
+   scopes already write the layered instructions from chat once the service exists. Remaining
+   nicety: letting `propose_template` seed non-default instructions in the same proposal instead
+   of the follow-up `save_ai_instruction` call. Low priority.
 
 ## 4. E8 dead-end audit
 
 "E8" (per the ITEM 10 e-sign walk in `docs/design/esign-unify/DESIGN.md` §8) = a chat tool that
 gets called but produces no visible effect, dead-ends, or points at removed code — the discipline
 being propose→approve and never letting the bot claim something is "live" that isn't.
+
+> **STATUS 2026-08-04 (CHATBOT-CATCHUP-1): both findings below are CLOSED.** The staleness was
+> fixed earlier (ES-5b retargeted the chat launch to `EsignComposer`; `PrepareSignature` deleted),
+> and the dead-end proper is now fixed too: `prepare_envelope` carries `mode:
+> 'matter_document' | 'upload'`, is registered on EVERY attorney turn (matter mode still requires
+> the matter scope and redirects honestly without it), and `mode: 'upload'` opens the blank
+> composer — "eSign a PDF for me" with no matter finally has a chat path (backs `esign.send_file`).
+> The section is kept verbatim below as the audit record.
 
 ### 4.1 CONFIRMED — `prepare_envelope` is stale and partially dead-ends
 
@@ -363,33 +400,31 @@ entries into the gap map in §3 and marks closed ones fixed.
 - **2026-07-21 (post-#457 audit, pre-2026-07-22 sweep):**
   - `prepare_envelope` → `PrepareSignature` staleness (§4.1): **FIXED.** `PrepareSignature.tsx`/
     `NewEnvelopeWizard.tsx` deleted; chat now opens `EsignComposer` (`UnifiedAssistantChat.tsx:20,3417`).
-  - Attorney Task Queue (#489/#491): `attorneyTaskQueueTools.ts` (`legal.attorney.task_queue`) has
-    no `ClientTool` in `buildAttorneyClientTools` and no mention in `skillContext.ts`/`assistantPrompt.ts`
-    — the assistant can't tell an attorney what's in their queue, unlike its `get_attention_feed` sibling.
-  - Engagement Letter Library (#487/#488/#493): `legal.firm.engagement_letters.*` (list/set_default/
-    remove/import, `settingsTools.ts`) has no attorney-chat wrapper — same shape as the pre-existing
-    firm-settings gap (§3 Wave 1 #1), now extended to this domain.
-  - Bilingual docs (#490, `offer_spanish`): not in `propose_service`'s input schema
-    (`serviceAuthoringTools.ts`) — the AI can't set it from conversation, only manually via the
-    `ServiceEditorModal` proposal card. Not modeled in `seed-capabilities.ts` either.
-  - eSign "upload a PDF, no matter" dead-end (§4.1, distinct from the fixed staleness above): still
-    open. `esignLaunchTools.ts` still only resolves `listMatterDraftVersions`; no `mode: 'blank'|'document'`
-    was added.
+  - Attorney Task Queue (#489/#491): **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** — `get_task_queue`
+    ClientTool (`api/attorneyTaskQueueTool.ts`), read-only, registered every attorney turn.
+  - Engagement Letter Library (#487/#488/#493): **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** —
+    `list_engagement_letters` + `set_default_engagement_letter` (`api/engagementLetterTools.ts`,
+    name-resolved). `.remove` deliberately stays UI-only.
+  - Bilingual docs (#490, `offer_spanish`): **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** —
+    `offer_spanish` added to `propose_service`'s schema, threaded through the proposal card and
+    the create-from-ai route to `transitions.offer_spanish`; `bilingual_documents` entry added to
+    `seed-capabilities.ts` (reseed needed per tenant).
+  - eSign "upload a PDF, no matter" dead-end (§4.1): **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** —
+    `prepare_envelope` gained `mode: 'matter_document' | 'upload'`; upload mode opens the blank
+    `EsignComposer`; tool registered on every attorney turn.
   - `legal.user.delete` / `.portal_list` / `.set_portal_user_type` (USERS-SPLIT-1 follow-on): new,
     unwired — consistent with the existing users/access Wave-2 call (security-sensitive, likely stays
     admin-UI only).
 
 - **2026-07-22 (#494/#495/#496 sweep):**
-  - ESIGN-FIELDS-1 (#496, per-role signer field bindings, drag-and-drop): not reachable from chat.
-    `propose_template`'s schema (`intakeTemplateTools.ts:329-348`) sets `additionalProperties: false`
-    on each `esignConfig.roles[]` entry with no `fields` property documented — the AI cannot construct
-    this shape even though the backend parser (`parseTemplateEsignConfig`) now round-trips it.
-  - Client mailing/business address + preferred contact (#495, captured at sign-up): never added to
-    `MERGE_SLOT_FIELDS` (`templateMerge.ts:254`) — no `{{client_mailing_address}}` (etc.) merge token
-    exists, system or client-sourced. The code comment at `templates/page.tsx:90-93` ("client_address
-    is deliberately absent... triggers a questionnaire proposal") predates this and is now stale: the
-    platform captures address once automatically at sign-up and no longer needs a per-service
-    questionnaire re-ask for it.
+  - ESIGN-FIELDS-1 (#496, per-role signer field bindings): **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)**
+    — `propose_template`'s `esignConfig.roles[]` schema now declares `fields{name,email,title}`,
+    `presigned`, and `allowAddNextSigner` (the full shape `parseTemplateEsignRole` round-trips).
+  - Client mailing/business address + preferred contact (#495): **FIXED 2026-08-04
+    (CHATBOT-CATCHUP-1)** — `client_mailing_address` / `client_business_address` /
+    `client_preferred_contact` added to `MERGE_SLOT_FIELDS` (+ `CLIENT_SOURCED_SLOTS`, read via
+    `getMatter`'s new client_of attribute loads), offered in the template editor's standard
+    tokens; the stale `templates/page.tsx` comment corrected.
   - #494 (matter-status mirror fix): internal consistency fix only, no chat/builder surface — not a gap.
 
 - **2026-07-23 (PRESIGN-1 Phase 2, service-scoped signer intake):**
@@ -404,7 +439,11 @@ entries into the gap map in §3 and marks closed ones fixed.
     `TemplateEsignPanel.tsx`). Convenience UI only, not modeled as an action-layer op — nothing for
     chat to wrap directly, but `propose_service`/`propose_questionnaire` still can't express "this
     signer's identity comes from intake" as a package, so an AI-authored service with extra signers
-    can't reproduce this in one step either.
+    can't reproduce this in one step either. **Largely FIXED 2026-08-04 (CHATBOT-CATCHUP-1):**
+    `propose_template` roles now accept `fields{name,email,title}` bound to intake tokens — the
+    builder expresses signer-identity-from-intake by proposing the intake fields
+    (`propose_questionnaire`) and binding them on the role. The Templates-tab convenience toggle
+    itself stays UI-only (fine — same outcome reachable from chat).
 
 - **2026-07-23 (ADD-NEXT-SIGNER-1, Phase 3 of the signer program — presigned #500, service-scoped
   signers #501):** two new action-layer ops, both deliberately human-in-the-loop, neither wired to
@@ -423,6 +462,9 @@ entries into the gap map in §3 and marks closed ones fixed.
     (`standaloneTemplateTools.ts`) for AI-authored template edits, but `propose_service`'s schema
     still doesn't cover per-document-kind e-sign config at all (same gap #501 already flagged for
     `presigned`/`fields` — this just adds one more field to that same unreached surface).
+    **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** for the authoring path: `allowAddNextSigner` (with
+    `presigned` and `fields`) is now in `propose_template`'s roles schema. Post-hoc editing of an
+    EXISTING service's role config from chat remains open — folded into §3 Wave 2 #9.
 
 ## Critical files
 
@@ -436,7 +478,9 @@ entries into the gap map in §3 and marks closed ones fixed.
 target `prepare_envelope` should point at) · `docs/design/esign-unify/DESIGN.md` (the ES-1..ES-6
 plan this stale finding sits under).
 
-- **2026-07-30 (CONTEXT-SETTINGS-1):** the AI Context settings landed WIRED for chat — `save_ai_instruction`
+- **2026-07-30 (CONTEXT-SETTINGS-1):** *(CLOSED 2026-08-04 — `save_ai_instruction`'s
+  `service_document_generation`/`service_document_review` scopes already write both layers from
+  chat; residual propose-time seeding folded into §3 Wave 2 #10.)* the AI Context settings landed WIRED for chat — `save_ai_instruction`
   (`assistantChat.ts`, routing doctrine in the tool description + `assistantPrompt.ts`) lets the assistant
   route a spoken standing instruction to any of eight scopes and report which it wrote to, and
   `legal.firm.ai_context.get/update` + `legal.firm.ai_instruction.save` (`settingsTools.ts`) expose the
@@ -450,7 +494,8 @@ plan this stale finding sits under).
     is the missing shape.
   - `transitions.review.instructions` is the review twin. `legal.service.review.update` accepts it, but
     it is absent from every build-wizard schema, so a builder conversation cannot set it either.
-- **2026-07-30 (SB-FIX-1):** the builder's own state and controls got smarter; two edges
+- **2026-07-30 (SB-FIX-1):** *(FOLDED 2026-08-04 into §3 Wave 2 #8 — retire/discard wants a
+  confirm card, not a Wave-1 write.)* the builder's own state and controls got smarter; two edges
   are not reachable from chat.
   - `POST /api/attorney/services/[serviceKey]/discard-draft` (retires an abandoned
     half-built draft, behind the build strip's new ⋯ menu) has **no MCP tool and no
@@ -473,15 +518,11 @@ plan this stale finding sits under).
   per-person name+email memberFields) for any multi-person service, and
   `propose_template`'s `esign_config` schema accepts `repeatPerParty` on a role — the
   builder can author the whole shape conversationally. Remaining gaps:
-  - `legal.matter.link_contact` (MCP `mcp/tools/companyTools.ts:134`) still has **no
-    `ClientTool`** — the attorney cannot say "add Maria as a party on this matter" in
-    chat; parties link only via intake (`handlers/intake.ts` matter.open party loop) or
-    the MCP tool. Same for reading a matter's party list (`matter_contact` traversal,
-    `api/esignPrefill.ts:listMatterPartyContacts`).
-  - The service Templates tab's per-role "One signature request per party" toggle
-    (`components/templates/TemplateEsignPanel.tsx`) is UI + builder-proposal only; there
-    is no chat verb to flip it on an EXISTING service's role after the fact
-    (`legal.service.template.esign.update` exists as MCP but is not a `ClientTool`).
+  - `legal.matter.link_contact`: **FIXED 2026-08-04 (CHATBOT-CATCHUP-1)** —
+    `link_matter_contact` (name-resolved direct write) + `get_matter_parties` (read), both
+    matter-scoped (`api/matterPartyTools.ts`).
+  - The per-role "One signature request per party" toggle on an EXISTING service: still no chat
+    verb — folded into §3 Wave 2 #9 (2026-08-04).
 - **2026-08-03 (ESIGN-STEP-1 trace, docs-only):** the 2026-07-24 "e-sign step is a dead
   end" report traced to an ASSISTANT-GUIDANCE gap, not a platform gap (full evidence:
   `docs/diagnostics/ESIGN-STEP-1-TRACE.md`). Asked "where do I add the signature spots"
@@ -489,9 +530,21 @@ plan this stale finding sits under).
   already on (`/attorney/esign/compose`, the standalone ad-hoc composer) instead of
   routing by context: field placement lives on the TEMPLATE (Templates tab →
   TemplateEsignPanel per-role bindings, #496), and at run time the workflow step opens
-  the pre-wired composer modal itself (`EsignWorkflowStep`, #451). Gap: the attorney
-  system prompt / esign-related skills carry no "signature spots: template at build
-  time, step modal at run time — the compose page is only for ad-hoc PDFs outside a
-  matter" routing note, so the model answers from whatever surface it happens to see in
-  `page_context`. Cheap fix next chatbot session: one paragraph in the relevant
-  firm-admin/esign skill (reseed after edit).
+  the pre-wired composer modal itself (`EsignWorkflowStep`, #451). **FIXED 2026-08-04
+  (CHATBOT-CATCHUP-1)** — routing paragraph added to
+  `verticals/legal/skills/firm-admin/author-template.md` ("Where signature SPOTS live")
+  and a matching routing note in `prepare_envelope`'s tool description; skills reseeded
+  to the Pacheco tenant.
+
+- **2026-08-04 (CHATBOT-CATCHUP-1 sweep):** worked this whole log. Closed above:
+  Task Queue tool, engagement-letter pair, `offer_spanish` authoring, e-sign role
+  `fields`/`presigned`/`allowAddNextSigner` schema, #495 merge tokens, upload-mode
+  e-sign launch, matter-party pair (`get_matter_parties`/`link_matter_contact`), the
+  ESIGN-STEP-1 routing note, and `bilingual_documents` in the capability catalog.
+  Folded into §3 Wave 2 as items 8–10: service retire/discard-draft chat verb,
+  existing-service e-sign role config editing, and propose-time instruction seeding
+  (the CONTEXT-SETTINGS-1 deltas are otherwise covered by `save_ai_instruction`'s
+  service scopes — verified against `aiInstructionRouting.ts`, which writes
+  `transitions.drafting.instructions[kind]` / review instructions through the action
+  layer). Deliberate non-gaps left as recorded: `esign.add_signer` / `finish_signing`
+  human-in-the-loop boundary, users/access admin-only.

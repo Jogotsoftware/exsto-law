@@ -71,7 +71,10 @@ describe('act-in-place tool scoping', () => {
     expect(names).toContain('prepare_envelope')
   })
 
-  it('registers compose_email + get_brief but NOT prepare_envelope on a contact-scoped turn', () => {
+  // CHATBOT-CATCHUP-1: prepare_envelope is now ALWAYS registered — its 'upload'
+  // mode (blank composer) needs no matter, so "e-sign this PDF" works from any
+  // scope; matter_document mode still redirects honestly without a matter.
+  it('registers compose_email + get_brief + always-on prepare_envelope on a contact-scoped turn', () => {
     const names = toolNames({
       message: 'email the client',
       modelId: 'a',
@@ -79,18 +82,20 @@ describe('act-in-place tool scoping', () => {
     })
     expect(names).toContain('compose_email')
     expect(names).toContain('get_brief')
-    // Envelopes resolve against a matter's documents; a contact scope has none.
-    expect(names).not.toContain('prepare_envelope')
+    expect(names).toContain('prepare_envelope')
   })
 
-  it('registers NEITHER on a global (unscoped) turn', () => {
+  it('registers neither scoped tool on a global (unscoped) turn; prepare_envelope stays', () => {
     const names = toolNames({ message: 'email the client', modelId: 'a' })
     expect(names).not.toContain('compose_email')
     expect(names).not.toContain('get_brief')
-    expect(names).not.toContain('prepare_envelope')
+    expect(names).toContain('prepare_envelope')
+    // The matter-party pair is matter-scoped and absent here.
+    expect(names).not.toContain('get_matter_parties')
+    expect(names).not.toContain('link_matter_contact')
   })
 
-  it('registers NEITHER when the attorney turned context off (useContext: false)', () => {
+  it('registers neither scoped tool when the attorney turned context off (useContext: false)', () => {
     const names = toolNames({
       message: 'email the client',
       modelId: 'a',
@@ -99,7 +104,21 @@ describe('act-in-place tool scoping', () => {
     })
     expect(names).not.toContain('compose_email')
     expect(names).not.toContain('get_brief')
-    expect(names).not.toContain('prepare_envelope')
+    // prepare_envelope stays registered (upload mode is context-free), but a
+    // context-off turn passes no matter, so matter_document mode redirects.
+    expect(names).toContain('prepare_envelope')
+    expect(names).not.toContain('get_matter_parties')
+    expect(names).not.toContain('link_matter_contact')
+  })
+
+  it('registers the matter-party pair only on a matter-scoped turn', () => {
+    const names = toolNames({
+      message: 'add maria to this matter',
+      modelId: 'a',
+      matterEntityId: MATTER_ID,
+    })
+    expect(names).toContain('get_matter_parties')
+    expect(names).toContain('link_matter_contact')
   })
 })
 

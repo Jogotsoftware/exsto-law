@@ -56,6 +56,13 @@ const CLIENT_SOURCED_SLOTS: ReadonlySet<string> = new Set([
   // TOKEN resolves system-side from the matter's stored fact, not the raw
   // answer — same shape as effective_date above.
   'governing_jurisdiction',
+  // SIGNUP-DETAILS-1 (#495) / CHATBOT-CATCHUP-1 — captured automatically at
+  // sign-up on the client_contact, so templates merge them with NO questionnaire
+  // re-ask (excluded from coverage forcing) — but a service may still
+  // legitimately ask (e.g. to confirm a stale address), so never auto-internal.
+  'client_mailing_address',
+  'client_business_address',
+  'client_preferred_contact',
 ])
 
 // True when a proposed CLIENT-FACING questionnaire field with this id must be

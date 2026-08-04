@@ -24,6 +24,8 @@ export async function POST(request: Request) {
     route?: WorkflowRoute
     generationMode?: GenerationMode
     appointmentRequired?: boolean
+    // BILINGUAL-DOCS-1 (CHATBOT-CATCHUP-1) — wizard-set bilingual offering.
+    offerSpanish?: boolean
     summary?: string
     confidence?: number
   } | null
@@ -52,6 +54,7 @@ export async function POST(request: Request) {
         ...(typeof body?.appointmentRequired === 'boolean'
           ? { appointmentRequired: body.appointmentRequired }
           : {}),
+        ...(body?.offerSpanish === true ? { offerSpanish: true } : {}),
       },
       {
         conclusion: (body?.summary ?? '').trim() || `Created the service "${displayName}".`,
