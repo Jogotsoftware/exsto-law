@@ -9632,6 +9632,7 @@ input[type='number'] {
   position: relative;
   height: 64px;
   flex: 0 0 auto;
+  min-height: 64px;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -9658,9 +9659,23 @@ input[type='number'] {
 .li-topbar-spacer {
   flex: 1 1 auto;
 }
-.li-main {
+.li-topbar-logo {
+  display: block;
+  height: 40px;
+  max-width: 280px;
+  object-fit: contain;
+}
+/* UIWALK-1: the scroll region now wraps the top bar + main, so the bar slides
+   away with the page instead of staying pinned. */
+.li-scrollcol {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.li-main {
+  flex: 1 0 auto;
   padding: 28px 32px;
   /* Defeat the legacy global `main` element rule (max-width 1240px + auto side
      margins). Auto cross-axis margins make a flex child shrink-to-fit, which
@@ -10140,23 +10155,56 @@ input[type='number'] {
   padding: 16px 4px;
 }
 
-/* Recently booked list. */
+/* Tasks list (formerly Recently booked). */
 .li-dash-rbody {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: 320px;
+  max-height: 340px;
   overflow-y: auto;
+  overflow-x: hidden;
   margin: 0 -8px;
   padding: 0 8px;
+}
+.li-dash-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.li-dash-card-head .li-dash-card-title {
+  margin-bottom: 0;
+}
+.li-dash-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-navy);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.li-dash-card-link:hover {
+  text-decoration: underline;
+}
+.li-dash-rmain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.li-dash-rmain .li-dash-rclient {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .li-dash-rrow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 12px;
-  margin: 0 -12px;
+  padding: 10px 8px;
+  margin: 0 -8px;
   border-radius: 10px;
   text-decoration: none;
   color: inherit;
@@ -11160,7 +11208,7 @@ input[type='number'] {
   display: flex;
   gap: 10px;
   margin-bottom: 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
 }
 .li-rev-search {
@@ -11187,6 +11235,7 @@ input[type='number'] {
   color: var(--li-fg);
 }
 .li-rev-kind {
+  flex: 0 0 auto;
   height: 40px;
   background: var(--li-card);
   border: 1px solid var(--li-border-input);
@@ -13751,9 +13800,9 @@ fieldset.li-svc-fieldset legend {
   border: 1px solid var(--li-border-input);
   border-radius: var(--li-radius-btn);
   padding: 0 12px;
-  height: 34px;
-  flex: 1 1 260px;
-  max-width: 320px;
+  height: 40px;
+  flex: 1 1 320px;
+  max-width: 520px;
   color: var(--li-muted-2);
 }
 .li-mat-search input {
@@ -13775,8 +13824,13 @@ fieldset.li-svc-fieldset legend {
   border: 1px solid var(--li-border);
   border-radius: var(--li-radius-btn);
   padding: 0 26px 0 12px;
-  height: 34px;
+  height: 40px;
+  width: 148px;
+  flex: 0 0 148px;
   cursor: pointer;
+}
+.li-mat-filter select {
+  width: 100%;
 }
 .li-mat-filter:hover {
   border-color: #b9c4da;
@@ -26805,4 +26859,135 @@ details.li-brief-research summary:hover {
 }
 .li-tplsign-role-gap-fix:hover {
   color: var(--li-gold-deep, var(--li-gold));
+}
+
+/* --- UIWALK-1: calendar guest chips + video-call toggle + firm color editor --- */
+.li-cal-chipsinput {
+  position: relative;
+}
+.li-cal-chipsinput-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  background: var(--li-card);
+  padding: 6px 8px;
+  min-height: 38px;
+}
+.li-cal-chipsinput-box input {
+  border: none;
+  outline: none;
+  flex: 1 1 140px;
+  min-width: 120px;
+  font-family: inherit;
+  font-size: 13.5px;
+  background: transparent;
+  color: var(--li-fg);
+}
+.li-cal-guestchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--li-info-bg);
+  color: var(--li-navy);
+  border-radius: var(--li-radius-chip);
+  padding: 3px 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.li-cal-guestchip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+.li-cal-chipsinput-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.14);
+  overflow: hidden;
+}
+.li-cal-chipsinput-menu button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.li-cal-chipsinput-menu button:hover {
+  background: var(--li-bg);
+}
+.li-cal-chipsinput-name {
+  font-weight: 600;
+  color: var(--li-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-cal-chipsinput-email {
+  color: var(--li-muted-2);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.li-cal-field-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+.li-cal-field-check input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--li-navy);
+}
+.li-set-colorrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-set-colorrow input[type='color'] {
+  width: 40px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--li-border-input);
+  border-radius: 8px;
+  background: var(--li-card);
+  cursor: pointer;
+}
+.li-set-colorrow .li-set-input {
+  flex: 1 1 auto;
+}
+.li-set-colorswatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-set-colorswatch > span {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--li-border);
+  display: inline-block;
+}
+
+/* Embedded calendar on the home page: pad it inside the dash card. */
+.li-dash-week .li-cal-root {
+  padding: 0 22px 22px;
 }

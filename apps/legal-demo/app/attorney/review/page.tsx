@@ -20,7 +20,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTimeShort } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
 import { EmailComposeModal } from '@/components/EmailComposeModal'
 import {
@@ -233,10 +233,6 @@ export default function TaskQueue() {
   return (
     <main className="li-rev">
       <h1 className="li-rev-title">Task Queue</h1>
-      <p className="li-rev-sub">
-        Everything waiting on you — drafts to review, documents to sign, invoices, and client
-        requests.
-      </p>
 
       {error && <div className="alert alert-error li-rev-alert">{error}</div>}
 
@@ -374,7 +370,7 @@ export default function TaskQueue() {
                 <span className="li-rev-matter">{t.matterNumber || '—'}</span>
                 <span className="li-rev-task">{t.title}</span>
                 <span className="li-rev-when">
-                  {t.dateLabel} {formatDateTime(t.date)}
+                  {t.dateLabel} {formatDateTimeShort(t.date)}
                 </span>
                 <span className="li-rev-await-actions">
                   {t.type === 'esign' && t.viewHref && (

@@ -38,7 +38,6 @@ export default function AdminLoginPage() {
       <div style={{ maxWidth: 420, margin: '4rem auto 0' }}>
         <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
           <h1 style={{ fontSize: '2rem', marginBottom: 'var(--space-2)' }}>Exsto Platform</h1>
-          <p style={{ color: 'var(--muted)' }}>Admin console</p>
         </div>
         <div className="login-card">
           {error && <div className="alert alert-error">{error}</div>}

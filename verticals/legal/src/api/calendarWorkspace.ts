@@ -14,6 +14,7 @@ import {
   createBookingEvent,
   rescheduleEvent,
   cancelEvent,
+  updateEventFields,
   addEventAttendees,
   loadCredentials,
   fetchBusyIntervals,
@@ -335,6 +336,10 @@ export interface CreateConsultationInput {
   matterEntityId: string
   startIso: string
   endIso: string
+  // Attach a Google Meet link (video consultation).
+  includeMeet?: boolean
+  // Extra guests to invite beyond the client (merged into the event after create).
+  attendeeEmails?: string[]
 }
 
 // Attorney books/rebooks a consultation for an existing matter from the
@@ -365,9 +370,18 @@ export async function createConsultation(
       matterId: matter.matterEntityId,
       matterReschedulePath: `/book/reschedule/${matter.matterEntityId}`,
       bookingBaseUrl: baseUrl,
+      includeMeet: input.includeMeet,
     })
     googleEventId = created.eventId
     googleEventUrl = created.htmlLink
+    // Extra guests beyond the client — best-effort merge onto the fresh event
+    // (a failed invite must not fail the booking itself).
+    const extraGuests = (input.attendeeEmails ?? [])
+      .map((e) => e.trim())
+      .filter((e) => e.includes('@'))
+    if (extraGuests.length > 0) {
+      await addEventAttendees(ctx.tenantId, googleEventId, extraGuests, ctx.actorId).catch(() => {})
+    }
   }
 
   return submitAction(ctx, {
@@ -453,6 +467,51 @@ export async function addBookingAttendees(
   const emails = (input.attendeeEmails ?? []).map((e) => e.trim()).filter((e) => e.includes('@'))
   if (emails.length === 0) throw new Error('Enter at least one valid email address.')
   return addEventAttendees(ctx.tenantId, eventId, emails, input.calendarActorId ?? ctx.actorId)
+}
+
+// ── Generic Google-event writes (calendar full interactivity) ────────────────
+// Edit/delete ANY event on the attorney's own Google account — including events
+// that were created directly in Google and have no app entity. Same posture as
+// addBookingAttendees above: the substrate models matters/meetings, not the
+// attorney's whole personal calendar, so these are read-through writes to
+// Google with no substrate effect. calendarId targets the calendar the event
+// was read from (listCalendarEvents reports it); omitted → booking calendar.
+
+export interface UpdateExternalEventInput {
+  googleEventId: string
+  calendarId?: string | null
+  summary?: string
+  startIso?: string
+  endIso?: string
+}
+
+export async function updateExternalEvent(
+  ctx: ActionContext,
+  input: UpdateExternalEventInput,
+): Promise<{ ok: true }> {
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
+  if (!creds) throw new Error('Google Calendar is not connected.')
+  if (input.summary === undefined && input.startIso === undefined && input.endIso === undefined) {
+    throw new Error('Nothing to update: provide summary and/or startIso+endIso.')
+  }
+  await updateEventFields(
+    ctx.tenantId,
+    input.googleEventId,
+    { summary: input.summary, startIso: input.startIso, endIso: input.endIso },
+    ctx.actorId,
+    input.calendarId ?? null,
+  )
+  return { ok: true }
+}
+
+export async function deleteExternalEvent(
+  ctx: ActionContext,
+  input: { googleEventId: string; calendarId?: string | null },
+): Promise<{ ok: true }> {
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
+  if (!creds) throw new Error('Google Calendar is not connected.')
+  await cancelEvent(ctx.tenantId, input.googleEventId, ctx.actorId, input.calendarId ?? null)
+  return { ok: true }
 }
 
 async function matterGoogleEventId(

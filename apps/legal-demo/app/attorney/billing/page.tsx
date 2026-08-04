@@ -1108,9 +1108,6 @@ export default function BillingPage(): React.ReactElement {
   return (
     <main>
       <h1 className="li-bill-title">Billing</h1>
-      <p className="li-bill-subtitle">
-        Unbilled work, issued invoices, and the firm rates they draw from.
-      </p>
       <Tabs
         ariaLabel="Billing"
         tabs={BILL_TABS}

@@ -53,7 +53,9 @@ export interface AssistantModel {
 
 // Static catalog of the models we expose, per provider. Kept here (not env) so
 // the dropdown is stable; the firm default models for drafting/research still
-// come from env in the adapters. Labels use the marketing names.
+// come from env in the adapters. Labels are NEUTRAL capability tiers (founder
+// direction 2026-08-04: no user-visible model/vendor names anywhere in the
+// product) — the concrete model ids stay internal on `model`.
 const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: AssistantProvider }> = [
   // Claude (Anthropic) — conversational assistant. Opus/Sonnet honour the
   // work-rate knob and Claude's web-search tool; Haiku does neither for effort.
@@ -65,7 +67,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'anthropic',
     providerLabel: 'Claude',
     model: 'auto',
-    label: 'Auto (picks the right Claude)',
+    label: 'Auto',
     available: true,
     supportsCitations: false,
     isDefault: true,
@@ -77,7 +79,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'anthropic',
     providerLabel: 'Claude',
     model: 'claude-opus-4-8',
-    label: 'Claude Opus 4.8',
+    label: 'Advanced',
     available: true,
     supportsCitations: false,
     isDefault: false,
@@ -89,7 +91,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'anthropic',
     providerLabel: 'Claude',
     model: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6',
+    label: 'Standard',
     available: true,
     supportsCitations: false,
     // Auto (above) is the one anthropic default now; Sonnet is still pinnable.
@@ -102,7 +104,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'anthropic',
     providerLabel: 'Claude',
     model: 'claude-haiku-4-5-20251001',
-    label: 'Claude Haiku 4.5',
+    label: 'Fast',
     available: true,
     supportsCitations: false,
     isDefault: false,
@@ -117,7 +119,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'perplexity',
     providerLabel: 'Perplexity',
     model: 'sonar',
-    label: 'Perplexity Sonar (research)',
+    label: 'Web Research',
     available: true,
     supportsCitations: true,
     isDefault: true,
@@ -129,7 +131,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'perplexity',
     providerLabel: 'Perplexity',
     model: 'sonar-reasoning',
-    label: 'Perplexity Sonar Reasoning',
+    label: 'Web Research Pro',
     available: true,
     supportsCitations: true,
     isDefault: false,
@@ -142,7 +144,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'openai',
     providerLabel: 'OpenAI',
     model: 'gpt-4o',
-    label: 'OpenAI GPT-4o (coming soon)',
+    label: 'More models (coming soon)',
     available: false,
     supportsCitations: false,
     isDefault: true,

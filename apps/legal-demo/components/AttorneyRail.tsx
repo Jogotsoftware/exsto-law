@@ -28,7 +28,6 @@ import {
   SettingsIcon,
   ListIcon,
   CopyIcon,
-  MessageCircleIcon,
   SignatureIcon,
   Share2Icon,
   UsersIcon,
@@ -72,7 +71,8 @@ const NAV: NavNode[] = [
       { href: '/attorney/services', label: 'Services', Icon: ListIcon },
       { href: '/attorney/templates', label: 'Templates', Icon: CopyIcon },
       { href: '/attorney/questionnaires', label: 'Intake Forms', Icon: HelpCircleIcon },
-      { href: '/attorney/questions', label: 'Questions', Icon: MessageCircleIcon },
+      // UIWALK-1: Questions is hidden from the nav for now (founder direction
+      // 2026-08-04). The route stays reachable by URL.
     ],
   },
   { kind: 'leaf', href: '/attorney/billing', label: 'Billing', Icon: FileTextIcon },

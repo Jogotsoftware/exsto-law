@@ -304,7 +304,6 @@ export default function QuestionnaireLibraryPage(): ReactElement {
           <div className="li-int-gallery-head">
             <div>
               <h1 className="li-int-title">Intake Forms</h1>
-              <p className="li-int-sub">Forms clients complete before a matter opens.</p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div className="li-viewtoggle" role="group" aria-label="View">

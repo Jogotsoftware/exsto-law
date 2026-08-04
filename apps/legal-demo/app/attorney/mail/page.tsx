@@ -223,6 +223,21 @@ export default function MailPage() {
   const [portalMessages, setPortalMessages] = useState<PortalMessage[] | null>(null)
   const [portalDraft, setPortalDraft] = useState('')
   const [portalBusy, setPortalBusy] = useState(false)
+  // "New chat" (UIWALK-1): pick a matter → open (or start) its portal thread.
+  // Matters load lazily the first time the picker opens; pickedMatter keeps the
+  // header labelled for a matter with no thread row yet.
+  const [newChatOpen, setNewChatOpen] = useState(false)
+  const [newChatMatters, setNewChatMatters] = useState<Array<{
+    matterEntityId: string
+    matterNumber: string
+    clientName: string
+  }> | null>(null)
+  const [newChatPick, setNewChatPick] = useState<string | null>(null)
+  const [pickedMatter, setPickedMatter] = useState<{
+    matterEntityId: string
+    matterNumber: string
+    clientName: string
+  } | null>(null)
 
   async function load(search?: string): Promise<ThreadSummary[]> {
     setError(null)
@@ -562,6 +577,26 @@ export default function MailPage() {
     }
   }
 
+  function openNewChat() {
+    setNewChatOpen(true)
+    setNewChatPick(null)
+    if (newChatMatters === null) {
+      callAttorneyMcp<{
+        matters: Array<{ matterEntityId: string; matterNumber: string; clientName: string }>
+      }>({ toolName: 'legal.matter.list' })
+        .then((r) => setNewChatMatters(r.matters))
+        .catch(() => setNewChatMatters([]))
+    }
+  }
+
+  function startNewChat() {
+    if (!newChatPick) return
+    const m = newChatMatters?.find((x) => x.matterEntityId === newChatPick) ?? null
+    setPickedMatter(m)
+    setNewChatOpen(false)
+    openPortalThread(newChatPick)
+  }
+
   async function openPortalThread(matterEntityId: string) {
     setOpenMatterId(matterEntityId)
     setPortalMessages(null)
@@ -633,13 +668,26 @@ export default function MailPage() {
         )
       : portalThreads
     : null
-  const currentPortalMeta = portalThreads?.find((t) => t.matterEntityId === openMatterId) ?? null
+  const currentPortalMeta =
+    portalThreads?.find((t) => t.matterEntityId === openMatterId) ??
+    (pickedMatter && pickedMatter.matterEntityId === openMatterId
+      ? {
+          matterEntityId: pickedMatter.matterEntityId,
+          matterNumber: pickedMatter.matterNumber,
+          clientName: pickedMatter.clientName,
+          lastAuthor: null,
+          lastBody: '',
+          lastAt: null,
+          messageCount: 0,
+          unreadCount: 0,
+        }
+      : null)
 
   return (
     <main>
       <div className="li-mail-head">
         <h1 className="li-mail-title">Inbox</h1>
-        {tab === 'email' && (
+        {tab === 'email' ? (
           <button
             type="button"
             className="li-mail-composebtn"
@@ -647,6 +695,11 @@ export default function MailPage() {
           >
             <PlusIcon size={15} />
             Compose
+          </button>
+        ) : (
+          <button type="button" className="li-mail-composebtn" onClick={openNewChat}>
+            <PlusIcon size={15} />
+            New Chat
           </button>
         )}
       </div>
@@ -1023,6 +1076,44 @@ export default function MailPage() {
           </>
         )}
       </div>
+
+      {newChatOpen && (
+        <Modal
+          title="New Chat"
+          onClose={() => setNewChatOpen(false)}
+          footer={
+            <>
+              <button onClick={() => setNewChatOpen(false)}>Cancel</button>
+              <button className="primary" disabled={!newChatPick} onClick={startNewChat}>
+                Open Chat
+              </button>
+            </>
+          }
+        >
+          <p className="li-modal-muted" style={{ marginTop: 0 }}>
+            Pick the matter to message — the client sees the conversation in their portal.
+          </p>
+          {newChatMatters === null ? (
+            <div className="li-mail-loading">
+              <span className="spinner" /> Loading matters…
+            </div>
+          ) : newChatMatters.length === 0 ? (
+            <div className="li-mail-empty">No matters yet.</div>
+          ) : (
+            <Combobox
+              ariaLabel="Matter"
+              options={newChatMatters.map((m) => ({
+                value: m.matterEntityId,
+                label: m.clientName || m.matterNumber,
+                hint: m.clientName ? m.matterNumber : undefined,
+              }))}
+              value={newChatPick}
+              onChange={setNewChatPick}
+              placeholder="Search matters or clients…"
+            />
+          )}
+        </Modal>
+      )}
 
       {compose && (
         <Modal

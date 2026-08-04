@@ -277,7 +277,6 @@ export default function QuestionLibraryPage(): ReactElement {
       <div className="li-int-gallery-head">
         <div>
           <h1 className="li-int-title">Questions</h1>
-          <p className="li-int-sub">The reusable question bank your intake forms draw from.</p>
         </div>
         <button
           type="button"

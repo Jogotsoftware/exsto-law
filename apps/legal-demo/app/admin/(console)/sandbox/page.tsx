@@ -137,10 +137,6 @@ export default function AdminSandboxPage() {
   return (
     <main style={{ maxWidth: 900 }}>
       <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Sandbox</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Build and test anything in the sandbox workspace, then promote services to production
-        tenants.
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
       {msg && <div className="alert alert-success">{msg}</div>}
 

@@ -34,6 +34,7 @@ interface TenantSettings {
   firmAddress: string | null
   firmJurisdiction: string | null
   practiceAreas: string[] | null
+  headerColor: string | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -96,6 +97,7 @@ export default function FirmDetailsPage(): React.ReactElement {
           attorneyName: settings.attorneyName ?? '',
           firmJurisdiction: settings.firmJurisdiction ?? '',
           practiceAreas: settings.practiceAreas ?? [],
+          headerColor: settings.headerColor ?? '',
         },
       })
       await refreshSettings()
@@ -227,6 +229,32 @@ export default function FirmDetailsPage(): React.ReactElement {
                     placeholder="e.g. business law, estate planning. Press Enter to add."
                   />
                 </label>
+                <label className="li-set-label">
+                  <span>Header color</span>
+                  <span className="li-set-colorrow">
+                    <input
+                      type="color"
+                      value={settings.headerColor ?? '#1b2a4a'}
+                      onChange={(e) => updateField('headerColor', e.target.value)}
+                      aria-label="Pick the header color"
+                    />
+                    <input
+                      className="li-set-input"
+                      value={settings.headerColor ?? ''}
+                      placeholder="Default navy"
+                      onChange={(e) => updateField('headerColor', e.target.value || null)}
+                    />
+                    {settings.headerColor && (
+                      <button
+                        type="button"
+                        className="li-set-btn"
+                        onClick={() => updateField('headerColor', null)}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </span>
+                </label>
               </div>
               <label className="li-set-label">
                 <span>Firm address</span>
@@ -238,10 +266,11 @@ export default function FirmDetailsPage(): React.ReactElement {
                 />
               </label>
               <p className="li-set-hint">
-                These fields fill the firm identity on generated documents and letterheads. The home
-                jurisdiction is the firm-wide fallback — each matter carries its own governing law
-                (from intake, editable on the matter page), which always wins. Type a practice area
-                and press Enter to add it as a pill.
+                These fields fill the firm identity on generated documents and letterheads. The
+                header color restyles the top bar across the console. The home jurisdiction is the
+                firm-wide fallback — each matter carries its own governing law (from intake,
+                editable on the matter page), which always wins. Type a practice area and press
+                Enter to add it as a pill.
               </p>
               <div className="li-set-actions-row">
                 <button
@@ -300,6 +329,19 @@ export default function FirmDetailsPage(): React.ReactElement {
                     </span>
                   ) : (
                     '—'
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="li-set-kv-label">Header color</div>
+                <div className="li-set-kv-value">
+                  {settings.headerColor ? (
+                    <span className="li-set-colorswatch">
+                      <span style={{ background: settings.headerColor }} />
+                      {settings.headerColor}
+                    </span>
+                  ) : (
+                    'Default navy'
                   )}
                 </div>
               </div>

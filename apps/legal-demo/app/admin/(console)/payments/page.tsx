@@ -121,11 +121,6 @@ export default function AdminPaymentsPage(): React.ReactElement {
   return (
     <main style={{ maxWidth: 720 }}>
       <h1>Payments</h1>
-      <p style={{ color: 'var(--muted)', lineHeight: 1.5 }}>
-        exsto-law&rsquo;s own Stripe keys, used to run the Connect platform that lets firms accept
-        online payments. Use <strong>test-mode</strong> keys (sk_test_… / pk_test_…) until you go
-        live. Keys are stored encrypted; environment variables act as a fallback.
-      </p>
 
       {error && (
         <div className="alert alert-error" role="alert">
