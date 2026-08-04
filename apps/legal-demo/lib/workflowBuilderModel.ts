@@ -24,6 +24,7 @@ export type WfActionKind =
   | 'manual_task'
   | 'complete_matter'
   | 'invoke_capability'
+  | 'esign'
 
 export interface WfEdge {
   to: string
@@ -65,6 +66,36 @@ export interface BuilderStep {
   // invoke_capability step's capability_slug + capability_config) round-trips
   // unchanged. Undefined for step kinds that carry no config.
   config?: Record<string, unknown>
+  // MODAL-STD-1 (Gap B) — strict losslessness for graphs this builder didn't
+  // author. Any stage property beyond the ones the builder edits (key/label/
+  // client_label/entry/terminal/blocking/action/documents/advances_to), and any
+  // incoming-edge property beyond to/gate/via/on (e.g. `when`), are carried
+  // OPAQUELY and written back verbatim, so the shared editor can host the
+  // per-matter instance graph without silently stripping shape it doesn't know.
+  stageExtras?: Record<string, unknown>
+  edgeExtras?: Record<string, unknown>
+}
+
+const KNOWN_STAGE_KEYS = new Set([
+  'key',
+  'label',
+  'client_label',
+  'entry',
+  'terminal',
+  'blocking',
+  'action',
+  'documents',
+  'advances_to',
+])
+const KNOWN_EDGE_KEYS = new Set(['to', 'gate', 'via', 'on'])
+
+function extras(
+  obj: Record<string, unknown>,
+  known: Set<string>,
+): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(obj)) if (!known.has(k)) out[k] = obj[k]
+  return Object.keys(out).length ? out : undefined
 }
 
 // `via` names the action that fires attorney/client edges; `on` names the event an
@@ -182,6 +213,10 @@ export function graphToSteps(graph: WfLifecycle): BuilderStep[] {
       blocking: s.blocking !== false,
       documents: s.documents ?? [],
       config: s.action?.config,
+      stageExtras: extras(s as unknown as Record<string, unknown>, KNOWN_STAGE_KEYS),
+      edgeExtras: edge
+        ? extras(edge as unknown as Record<string, unknown>, KNOWN_EDGE_KEYS)
+        : undefined,
     }
   })
 }
@@ -207,6 +242,8 @@ export function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
     const action: { kind: WfActionKind; config?: Record<string, unknown> } = { kind: s.actionKind }
     if (s.config && Object.keys(s.config).length > 0) action.config = s.config
     const stage: WfStage = {
+      // Unknown stage properties first, so the builder-owned fields below win.
+      ...(s.stageExtras ?? {}),
       key: keys[i],
       label: s.label.trim() || `Step ${i + 1}`,
       entry: i === 0 || undefined,
@@ -221,7 +258,11 @@ export function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
       // Target-anchored: the NEXT step owns this edge's pair ("how step i+1 is
       // reached"); the default keys off THIS step's kind (what completes step i).
       const target = steps[i + 1]
-      const edge: WfEdge = { to: keys[i + 1], gate: target.gate }
+      const edge: WfEdge = {
+        ...((target.edgeExtras ?? {}) as Partial<WfEdge>),
+        to: keys[i + 1],
+        gate: target.gate,
+      }
       // An empty trigger with no default is left OFF the edge (never written as ''),
       // so the server validator's "names no 'on'/'via'" check fires instead of a
       // dead-token edge slipping through.

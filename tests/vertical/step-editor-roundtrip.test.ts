@@ -8,16 +8,17 @@
 // invoke_capability step's capability_slug + capability_config). Both are fixed by
 // preserving the saved structure. These tests run the REAL validator (@exsto/legal)
 // against the REAL NC Will Drafting v5 graph.
+// MODAL-STD-1 (Gap B): the per-matter editor's own pure builder
+// (workflowGraph.ts) was retired — BOTH manual editors now round-trip through
+// the ONE shared model below, so the matter acceptance tests run against
+// graphToSteps/stepsToGraph too (target-anchored semantics, see P12).
 import { describe, it, expect } from 'vitest'
 import { validateLifecycle, validateLinearLifecycle, diagnoseEdgeTransition } from '@exsto/legal'
-import {
-  buildMatterGraph,
-  type CatalogGate,
-} from '../../apps/legal-demo/app/attorney/matters/[id]/workflowGraph'
 import {
   graphToSteps,
   stepsToGraph,
   defaultTrigger,
+  nextUid,
   type WfGate,
   type WfActionKind,
   type WfLifecycle,
@@ -73,19 +74,6 @@ const V5: WfLifecycle = [
   },
 ]
 
-// The closed catalog gates the per-matter builder consults for a freshly-added step.
-const CATALOG: CatalogGate[] = [
-  { kind: 'view_intake', defaultGate: 'client' },
-  { kind: 'view_consultation', defaultGate: 'attorney' },
-  { kind: 'generate_document', defaultGate: 'automatic' },
-  { kind: 'review_send_document', defaultGate: 'attorney' },
-  { kind: 'approve_send_invoice', defaultGate: 'attorney' },
-  { kind: 'await_payment', defaultGate: 'system' },
-  { kind: 'manual_task', defaultGate: 'attorney' },
-  { kind: 'complete_matter', defaultGate: 'system' },
-  { kind: 'invoke_capability', defaultGate: 'attorney' },
-]
-
 // The validator's Lifecycle type is the server's; our fixtures are the wire mirror.
 // Structurally identical — cast at the boundary so the test stays app-type-free.
 type Lc = Parameters<typeof validateLifecycle>[0]
@@ -101,66 +89,71 @@ describe('STEP-EDITOR-1 — v5 is a valid fixture', () => {
   })
 })
 
-describe('NEW-E — per-matter editor round-trips losslessly (acceptance A/B)', () => {
+describe('per-matter editor (shared model) — round-trips losslessly (acceptance A/B)', () => {
   it('unchanged v5 rebuilds IDENTICAL and valid (A)', () => {
-    const out = buildMatterGraph(V5, CATALOG)
+    const out = stepsToGraph(graphToSteps(V5))
     expect(valid(out).errors).toEqual([]) // no dropped `on`, no invalid edge
     expect(out).toEqual(V5) // byte-faithful: no drift, no rewritten gate/via
   })
 
   it('injects/duplicates NO node — exactly one generate_document survives', () => {
-    const out = buildMatterGraph(V5, CATALOG)
+    const out = stepsToGraph(graphToSteps(V5))
     expect(out).toHaveLength(5)
     expect(out.filter((s) => s.action?.kind === 'generate_document')).toHaveLength(1)
   })
 
   it('the automatic edge KEEPS its `on` event (not rewritten to via)', () => {
-    const out = buildMatterGraph(V5, CATALOG)
+    const out = stepsToGraph(graphToSteps(V5))
     const edge = out.find((s) => s.key === 'generate_will')!.advances_to[0]
     expect(edge.gate).toBe('automatic')
     expect(edge.on).toBe('document.generated')
     expect(edge.via).toBeUndefined()
   })
 
-  it('reordering keeps every automatic edge valid — `on` preserved (B)', () => {
-    // Move review_send_will ahead of generate_will.
-    const reordered = [V5[0], V5[2], V5[1], V5[3], V5[4]]
-    const out = buildMatterGraph(reordered, CATALOG)
+  it('reordering keeps the graph valid; a pair travels WITH its target step (P12) (B)', () => {
+    // Move review_send_will ahead of generate_will IN THE STEP DOMAIN (how the
+    // shared editor reorders). Under target-anchoring, "reached on
+    // document.generated" belongs to review_send_will and moves with it.
+    const steps = graphToSteps(V5)
+    const reordered = [steps[0], steps[2], steps[1], steps[3], steps[4]]
+    const out = stepsToGraph(reordered)
     expect(valid(out).errors).toEqual([])
-    const gen = out.find((s) => s.key === 'generate_will')!.advances_to[0]
-    expect(gen).toMatchObject({
-      gate: 'automatic',
-      on: 'document.generated',
-      to: 'client_response',
-    })
-    expect(gen.via).toBeUndefined()
+    const intoReview = out.find((s) => s.advances_to[0]?.to === 'review_send_will')!.advances_to[0]
+    expect(intoReview).toMatchObject({ gate: 'automatic', on: 'document.generated' })
+    expect(intoReview.via).toBeUndefined()
   })
 
   it('adding a step saves a VALID graph; the new step gets a valid default edge (B)', () => {
-    const added = [
-      V5[0],
-      V5[1],
-      V5[2],
-      {
-        key: 'paralegal_review',
-        label: 'Paralegal review',
-        action: { kind: 'manual_task' as const },
-        advances_to: [],
-      },
-      V5[3],
-      V5[4],
-    ]
-    const out = buildMatterGraph(added, CATALOG)
+    const steps = graphToSteps(V5)
+    const inserted = {
+      uid: nextUid(),
+      key: 'paralegal_review',
+      label: 'Paralegal review',
+      clientLabel: '',
+      actionKind: 'manual_task' as WfActionKind,
+      gate: 'attorney' as WfGate,
+      trigger: '',
+      blocking: true,
+      documents: [],
+    }
+    const out = stepsToGraph([...steps.slice(0, 3), inserted, ...steps.slice(3)])
     expect(valid(out).errors).toEqual([])
-    // The automatic edge is still intact after the insert.
+    // The automatic edge is still intact after the insert (it travels with
+    // review_send_will, still reached from generate_will).
     expect(out.find((s) => s.key === 'generate_will')!.advances_to[0].on).toBe('document.generated')
-    // The new step advances via an attorney action (catalog default), a valid edge.
-    const inserted = out.find((s) => s.key === 'paralegal_review')!.advances_to[0]
-    expect(inserted).toMatchObject({
-      to: 'client_response',
-      gate: 'attorney',
-      via: 'legal.matter.advance',
-    })
+    // The inserted step's incoming edge is a valid attorney edge (default token
+    // derives from what completes the preceding review step).
+    const intoInserted = out.find((s) => s.advances_to[0]?.to === 'paralegal_review')!
+    expect(intoInserted.advances_to[0]).toMatchObject({ gate: 'attorney', via: 'draft.approve' })
+  })
+
+  it('unknown stage/edge properties (e.g. `when`) round-trip opaquely', () => {
+    const withExtras: WfLifecycle = JSON.parse(JSON.stringify(V5)) as WfLifecycle
+    ;(withExtras[1] as unknown as Record<string, unknown>).custom_note = 'kept'
+    withExtras[1].advances_to[0].when = 'answers.state == "NC"'
+    const out = stepsToGraph(graphToSteps(withExtras))
+    expect(valid(out).errors).toEqual([])
+    expect(out).toEqual(withExtras)
   })
 })
 
@@ -433,20 +426,14 @@ describe('NEW-G — step config is editable in place and round-trips (acceptance
     expect(cfg.capability_config.message).toBe('Please review and reply.')
   })
 
-  it('editing a step config survives the per-matter rebuild', () => {
-    // Simulate updateStage: edit the capability step's message in place.
-    const edited = V5.map((s) =>
-      s.action?.kind === 'invoke_capability'
-        ? {
-            ...s,
-            action: {
-              ...s.action,
-              config: { ...(s.action.config as object), capability_config: { message: 'Edited.' } },
-            },
-          }
+  it('editing a step config survives the per-matter rebuild (shared model)', () => {
+    // Simulate the matter modal's in-place config edit in the STEP domain.
+    const edited = graphToSteps(V5).map((s) =>
+      s.actionKind === 'invoke_capability'
+        ? { ...s, config: { ...s.config, capability_config: { message: 'Edited.' } } }
         : s,
     )
-    const out = buildMatterGraph(edited, CATALOG)
+    const out = stepsToGraph(edited)
     expect(valid(out).errors).toEqual([])
     const cfg = out.find((s) => s.key === 'client_response')!.action?.config as {
       capability_config: { message: string }
