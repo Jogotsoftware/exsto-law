@@ -16,17 +16,12 @@ import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
 import { streamTemplateAi } from '@/lib/templateAiStream'
-import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import type { TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
-import { TemplatePreview } from '@/components/templates/TemplatePreview'
-import { EyeIcon, SignatureIcon } from '@/components/icons'
-import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
+import { TemplateEditorModal } from '@/components/TemplateEditorModal'
+import { markdownToHtml } from '@/lib/templateBody'
 import { DocumentThumb } from '@/components/DocumentThumb'
-import {
-  TemplateEsignPanel,
-  roleBlockHtml,
-  signerIntakeFieldIds,
-} from '@/components/templates/TemplateEsignPanel'
+import { signerIntakeFieldIds } from '@/components/templates/TemplateEsignPanel'
 import type { TemplateEsignConfig, TemplateEsignRole } from '@exsto/legal'
 
 const EMPTY_ESIGN: TemplateEsignConfig = { signable: false, roles: [] }
@@ -663,35 +658,32 @@ function KindEditor({
   onSavedToLibrary: () => Promise<void>
 }) {
   const { confirm, confirmElement } = useConfirm()
-  const [text, setText] = useState(template.templateText ?? '')
+  // MODAL-STD-1 (Gap C): the card is a thumbnail + "Open editor"; editing happens
+  // in the shared TemplateEditorModal (the same pop-out the builder chat and
+  // proposal cards use), not an inline expander. savedText is the last PERSISTED
+  // body — it drives the thumbnail and seeds the modal, so Cancel discards edits.
+  // liveText mirrors the modal's editor while it is open, driving the context
+  // panels (orphan banner, library actions, AI).
+  const [savedText, setSavedText] = useState(template.templateText ?? '')
+  const [liveText, setLiveText] = useState(template.templateText ?? '')
   const [esign, setEsign] = useState<TemplateEsignConfig>(template.esignConfig)
-  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const [libNote, setLibNote] = useState<string | null>(null)
-  const [showPreview, setShowPreview] = useState(false)
   const [showAi, setShowAi] = useState(false)
-  const [showSigners, setShowSigners] = useState(false)
-  // Comp: the Templates tab card is COLLAPSED to a thumbnail by default; "Open
-  // editor" expands it in place to the full rich-text editor below (no separate
-  // template-editor route exists yet — that's WP-E's scope).
-  const [open, setOpen] = useState(false)
   // "Insert a field" collapses by default so the field list doesn't eat vertical
   // space — typing `{{` in the editor is the primary way to drop a field anyway.
   const [showFields, setShowFields] = useState(false)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
-  // HTML seed for the rich editor + a key that remounts it when the body is
-  // replaced wholesale (loading a library template). Normal typing flows through
-  // onChange → text and never re-seeds, so the cursor position is preserved.
-  const [seedHtml, setSeedHtml] = useState(() => markdownToHtml(template.templateText ?? ''))
-  const [editorKey, setEditorKey] = useState(0)
 
   // Save the current body into the firm template library as a reusable document,
   // tagged with this document kind so it shows up as an "add from library" option
   // for other services. Does not change this service — it's a copy outward.
   async function saveToLibrary() {
-    if (!text.trim()) {
+    if (!liveText.trim()) {
       setErr('Nothing to save — the template is empty.')
       return
     }
@@ -703,7 +695,7 @@ function KindEditor({
         input: {
           name: humanKind(template.documentKind),
           category: 'document',
-          body: text,
+          body: liveText,
           docKind: template.documentKind,
         },
       })
@@ -717,7 +709,7 @@ function KindEditor({
     }
   }
 
-  const tokens = extractTokens(text)
+  const tokens = extractTokens(liveText)
   // Token/field matching is case-INSENSITIVE, mirroring renderTemplate (a
   // hand-typed {{COMPANY_NAME}} fills a company_name field at merge time), so
   // the editor never flags red something the merge would fill.
@@ -739,10 +731,9 @@ function KindEditor({
         : 'unknown'
 
   // Insert a bound field as an atomic {{marker}} chip at the cursor. The editor's
-  // onChange then refreshes `text` (the markdown source of truth).
+  // onChange (via the modal's onBodyChange) then refreshes liveText.
   function insertField(id: string) {
     editorRef.current?.insertVariable(id)
-    setSaved(false)
   }
 
   async function addNewField() {
@@ -754,13 +745,11 @@ function KindEditor({
     setNewLabel('')
   }
 
-  // ES-3: insert a role's signature/name/date execution lines at the cursor as
-  // ruled lines (marker-carrying SignatureLine nodes), same as the standalone
-  // editor's insertEsignBlock. The canonical heading is added once, when the
-  // body has no execution section yet.
-  function insertEsignBlock(role: TemplateEsignRole) {
-    const hasExecution = /\{\{\s*sign\s*:/.test(text)
-    editorRef.current?.insertHtml(roleBlockHtml(role, !hasExecution))
+  // Wholesale body replacement (library load, AI revision) goes through the
+  // shared editor handle — same path the modal's own AI rail uses.
+  function replaceBody(body: string) {
+    editorRef.current?.setContent(markdownToHtml(body))
+    setLiveText(body)
   }
 
   // PRESIGN-1 Phase 2 — ensure this role's three intake questions exist on
@@ -777,34 +766,39 @@ function KindEditor({
     ])
   }
 
-  async function save() {
-    if (!text.trim()) {
-      setErr('The template cannot be empty.')
-      return
-    }
-    setBusy(true)
-    setErr(null)
-    try {
-      await Promise.all([
-        callAttorneyMcp({
-          toolName: 'legal.service.template.update',
-          input: { serviceKey, documentKind: template.documentKind, templateText: text },
-        }),
-        callAttorneyMcp({
-          toolName: 'legal.service.template.esign.update',
-          input: { serviceKey, documentKind: template.documentKind, esignConfig: esign },
-        }),
-      ])
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
+  // The modal's Save handler: it surfaces a thrown error in its own action row,
+  // so validation throws instead of setting local state.
+  async function persistTemplate(body: string, esignConfig?: TemplateEsignConfig): Promise<void> {
+    if (!body.trim()) throw new Error('The template cannot be empty.')
+    await Promise.all([
+      callAttorneyMcp({
+        toolName: 'legal.service.template.update',
+        input: { serviceKey, documentKind: template.documentKind, templateText: body },
+      }),
+      callAttorneyMcp({
+        toolName: 'legal.service.template.esign.update',
+        input: {
+          serviceKey,
+          documentKind: template.documentKind,
+          esignConfig: esignConfig ?? esign,
+        },
+      }),
+    ])
+    setSavedText(body)
+    if (esignConfig) setEsign(esignConfig)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
   }
 
-  const fieldCount = tokens.length
+  function closeEditor() {
+    setOpen(false)
+    setLiveText(savedText)
+    setShowAi(false)
+    setErr(null)
+    setLibNote(null)
+  }
+
+  const fieldCount = extractTokens(savedText).length
 
   return (
     <section className="li-svc-tplcard">
@@ -815,267 +809,180 @@ function KindEditor({
           {fieldCount} field{fieldCount === 1 ? '' : 's'}
         </span>
         <div className="li-svc-tplcard-actions">
-          <button
-            type="button"
-            className="li-svc-openeditor"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? 'Close editor' : 'Open editor'}
+          {saved && <span className="badge ok">Saved a new version</span>}
+          <button type="button" className="li-svc-openeditor" onClick={() => setOpen(true)}>
+            Open editor
           </button>
         </div>
       </div>
 
       <div className="li-svc-thumbwrap">
         <DocumentThumb
-          body={text}
+          body={savedText}
           title={humanKind(template.documentKind).toUpperCase()}
           className="li-svc-thumb"
         />
       </div>
 
       {open && (
-        <div className="li-svc-tplcard-expanded">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              flexWrap: 'wrap',
-            }}
-          >
-            <button
-              type="button"
-              className={showAi ? 'primary' : undefined}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-              onClick={() => setShowAi((v) => !v)}
-              title="Draft or revise this document with skill-aware AI"
-            >
-              ✨ AI
-            </button>
-            <button
-              type="button"
-              className={showPreview ? 'primary' : undefined}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-              onClick={() => setShowPreview((v) => !v)}
-              title="Preview the finished document with sample data, side by side"
-            >
-              <EyeIcon size={15} /> Preview
-            </button>
-            <button
-              type="button"
-              className={showSigners ? 'primary' : undefined}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-              onClick={() => setShowSigners((v) => !v)}
-              title="Who signs this document, in what order"
-            >
-              <SignatureIcon size={15} /> Signers
-              {esign.signable && esign.roles.length > 0 && (
-                <span className="li-svc-fieldcount">{esign.roles.length}</span>
-              )}
-            </button>
-            <button
-              className="li-svc-btn-primary"
-              style={{ marginLeft: 'auto' }}
-              onClick={save}
-              disabled={busy || !text.trim()}
-            >
-              {busy ? 'Saving…' : 'Save new version'}
-            </button>
-          </div>
-
-          {showSigners && (
-            <TemplateEsignPanel
-              body={text}
-              config={esign}
-              onChange={(next) => {
-                setEsign(next)
-                setSaved(false)
-              }}
-              onInsertBlock={insertEsignBlock}
-              onCollectAtIntake={collectSignerAtIntake}
-            />
-          )}
-
-          {showAi && (
-            <AiEnhancePanel
-              currentBody={text}
-              fieldIds={fields.map((f) => f.id)}
-              onClose={() => setShowAi(false)}
-              onResult={(body) => {
-                // Replace the body with the AI revision; remount the editor to re-seed
-                // (typing flows through onChange, but a wholesale swap must re-seed HTML).
-                setText(body)
-                setSeedHtml(markdownToHtml(body))
-                setEditorKey((k) => k + 1)
-                setSaved(false)
-                setErr(null)
-              }}
-            />
-          )}
-
-          <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
-            <span className="tpl-insert-label">Library:</span>
-            {library.length > 0 && (
-              <select
-                value=""
-                aria-label="Start from a library template"
-                disabled={busy}
-                onChange={(e) => {
-                  const pick = library.find((l) => l.docKind === e.target.value)
-                  if (!pick) return
-                  const apply = () => {
-                    setText(pick.body)
-                    setSeedHtml(markdownToHtml(pick.body))
-                    setEditorKey((k) => k + 1)
-                    setSaved(false)
-                  }
-                  if (!text.trim()) return apply()
-                  void confirm({
-                    title: 'Replace this document body?',
-                    body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
-                    confirmLabel: 'Replace',
-                    danger: true,
-                  }).then((ok) => {
-                    if (ok) apply()
-                  })
-                }}
-              >
-                <option value="">Start from a library template…</option>
-                {library.map((l) => (
-                  <option key={l.docKind} value={l.docKind}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              type="button"
-              onClick={() => void saveToLibrary()}
-              disabled={busy || !text.trim()}
-            >
-              Save to library
-            </button>
-            {libNote && <span className="badge ok">{libNote}</span>}
-          </div>
-
-          <div className="tpl-insert tpl-insert-collapsible">
-            <button
-              type="button"
-              className="tpl-insert-toggle"
-              aria-expanded={showFields}
-              onClick={() => setShowFields((s) => !s)}
-            >
-              <span className={`tpl-insert-caret${showFields ? ' open' : ''}`} aria-hidden="true">
-                ▸
-              </span>
-              Insert a field
-              {fields.length > 0 && <span className="tpl-insert-count">{fields.length}</span>}
-              <span className="tpl-insert-hint">or just type {'{{'} in the document</span>
-            </button>
-            {showFields && (
-              <div className="tpl-insert-body">
-                {fields.length === 0 && (
-                  <span className="text-muted">No questions yet — add one →</span>
-                )}
-                {fields.map((f) => (
-                  <button
-                    key={f.id}
-                    className="qb-pill"
-                    type="button"
-                    onClick={() => insertField(f.id)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-                <span className="tpl-newfield">
-                  <input
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        void addNewField()
-                      }
+        <TemplateEditorModal
+          title={`Edit template — ${humanKind(template.documentKind)}`}
+          initialBody={savedText}
+          initialEsignConfig={esign}
+          saveLabel="Save new version"
+          placeholder="Write the document. Type {{ to insert a field…"
+          validateVariable={validateVariable}
+          variableNames={suggestVariables}
+          enablePreview
+          editorHandleRef={editorRef}
+          onBodyChange={setLiveText}
+          onCollectAtIntake={collectSignerAtIntake}
+          onSave={persistTemplate}
+          onClose={closeEditor}
+          contextPanels={
+            <>
+              <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
+                <button
+                  type="button"
+                  className={showAi ? 'primary' : undefined}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                  onClick={() => setShowAi((v) => !v)}
+                  title="Draft or revise this document with skill-aware AI"
+                >
+                  ✨ AI
+                </button>
+                <span className="tpl-insert-label">Library:</span>
+                {library.length > 0 && (
+                  <select
+                    value=""
+                    aria-label="Start from a library template"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const pick = library.find((l) => l.docKind === e.target.value)
+                      if (!pick) return
+                      if (!liveText.trim()) return replaceBody(pick.body)
+                      void confirm({
+                        title: 'Replace this document body?',
+                        body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
+                        confirmLabel: 'Replace',
+                        danger: true,
+                      }).then((ok) => {
+                        if (ok) replaceBody(pick.body)
+                      })
                     }}
-                    placeholder="New field label…"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void addNewField()}
-                    disabled={!newLabel.trim()}
                   >
-                    + Add &amp; insert
-                  </button>
-                </span>
+                    <option value="">Start from a library template…</option>
+                    {library.map((l) => (
+                      <option key={l.docKind} value={l.docKind}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void saveToLibrary()}
+                  disabled={busy || !liveText.trim()}
+                >
+                  Save to library
+                </button>
+                {libNote && <span className="badge ok">{libNote}</span>}
               </div>
-            )}
-          </div>
 
-          {orphans.length > 0 && (
-            <div className="alert alert-warn">
-              Unbound markers (no matching question):{' '}
-              {orphans.map((o) => (
-                <code key={o} style={{ marginRight: 'var(--space-2)' }}>{`{{${o}}}`}</code>
-              ))}
-              <button
-                type="button"
-                style={{ marginLeft: 'var(--space-2)' }}
-                onClick={() =>
-                  void onAddFields(orphans.map((o) => ({ id: o, label: humanize(o) })))
-                }
-              >
-                Add {orphans.length === 1 ? 'it' : 'them all'} as questions
-              </button>
-            </div>
-          )}
-
-          <div style={{ marginTop: 'var(--space-2)' }}>
-            <span
-              className="tpl-insert-label"
-              style={{ display: 'block', marginBottom: 'var(--space-1)' }}
-            >
-              Document
-            </span>
-            <div className="tpl-split">
-              <div className="tpl-split-col">
-                <TemplateEditor
-                  key={editorKey}
-                  initialHtml={seedHtml}
-                  editorRef={editorRef}
-                  placeholder="Write the document. Type {{ to insert a field…"
-                  validateVariable={validateVariable}
-                  variableNames={suggestVariables}
-                  onChange={(html) => {
-                    setText(htmlToMarkdown(html))
-                    setSaved(false)
+              {showAi && (
+                <AiEnhancePanel
+                  currentBody={liveText}
+                  fieldIds={fields.map((f) => f.id)}
+                  onClose={() => setShowAi(false)}
+                  onResult={(body) => {
+                    replaceBody(body)
                     setErr(null)
                   }}
                 />
+              )}
+
+              <div className="tpl-insert tpl-insert-collapsible">
+                <button
+                  type="button"
+                  className="tpl-insert-toggle"
+                  aria-expanded={showFields}
+                  onClick={() => setShowFields((s) => !s)}
+                >
+                  <span
+                    className={`tpl-insert-caret${showFields ? ' open' : ''}`}
+                    aria-hidden="true"
+                  >
+                    ▸
+                  </span>
+                  Insert a field
+                  {fields.length > 0 && <span className="tpl-insert-count">{fields.length}</span>}
+                  <span className="tpl-insert-hint">or just type {'{{'} in the document</span>
+                </button>
+                {showFields && (
+                  <div className="tpl-insert-body">
+                    {fields.length === 0 && (
+                      <span className="text-muted">No questions yet — add one →</span>
+                    )}
+                    {fields.map((f) => (
+                      <button
+                        key={f.id}
+                        className="qb-pill"
+                        type="button"
+                        onClick={() => insertField(f.id)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                    <span className="tpl-newfield">
+                      <input
+                        value={newLabel}
+                        onChange={(e) => setNewLabel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            void addNewField()
+                          }
+                        }}
+                        placeholder="New field label…"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void addNewField()}
+                        disabled={!newLabel.trim()}
+                      >
+                        + Add &amp; insert
+                      </button>
+                    </span>
+                  </div>
+                )}
               </div>
-              {showPreview && (
-                <div className="tpl-split-col">
-                  <TemplatePreview body={text} />
+
+              {orphans.length > 0 && (
+                <div className="alert alert-warn">
+                  Unbound markers (no matching question):{' '}
+                  {orphans.map((o) => (
+                    <code key={o} style={{ marginRight: 'var(--space-2)' }}>{`{{${o}}}`}</code>
+                  ))}
+                  <button
+                    type="button"
+                    style={{ marginLeft: 'var(--space-2)' }}
+                    onClick={() =>
+                      void onAddFields(orphans.map((o) => ({ id: o, label: humanize(o) })))
+                    }
+                  >
+                    Add {orphans.length === 1 ? 'it' : 'them all'} as questions
+                  </button>
                 </div>
               )}
-            </div>
-          </div>
 
-          {err && (
-            <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-              {err}
-            </div>
-          )}
-          {saved && (
-            <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
-              Saved a new version.
-            </div>
-          )}
-        </div>
+              {err && (
+                <div className="alert alert-error" style={{ marginBottom: 'var(--space-2)' }}>
+                  {err}
+                </div>
+              )}
+            </>
+          }
+        />
       )}
     </section>
   )
