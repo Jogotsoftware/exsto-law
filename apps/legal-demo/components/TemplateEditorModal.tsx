@@ -13,13 +13,23 @@
 // "Insert signature block" into the live editor) and Save delivers the edited
 // config as onSave's second argument. Hosts that don't pass it see no panel
 // (no dead controls) and their one-argument onSave keeps working unchanged.
-import { useRef, useState } from 'react'
+//
+// MODAL-STD-1 (Gap C): the service Templates tab now opens this modal instead of
+// its former inline expander, so the modal grew optional host-context props —
+// variable validation/suggestion for the `{{` autocomplete, a live-markdown
+// callback, an external editor handle, arbitrary context panels (insert-field
+// rail, orphan banner, library row), a side-by-side preview toggle, and the
+// eSign panel's collect-at-intake action. All optional: hosts that omit them
+// see exactly the pre-Gap-C modal.
+import { useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { Modal } from '@/components/Modal'
 import { EditorActionRow } from '@/components/EditorActionRow'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateEsignPanel, roleBlockHtml } from '@/components/templates/TemplateEsignPanel'
 import { AiRegenerateRail } from '@/components/AiRegenerateRail'
+import { EyeIcon } from '@/components/icons'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 import type { TemplateEsignConfig, TemplateEsignRole } from '@exsto/legal'
 
@@ -30,6 +40,15 @@ export function TemplateEditorModal({
   regenerateTargetId,
   onSave,
   onClose,
+  saveLabel,
+  placeholder,
+  validateVariable,
+  variableNames,
+  onBodyChange,
+  editorHandleRef,
+  contextPanels,
+  enablePreview = false,
+  onCollectAtIntake,
 }: {
   title: string
   // Markdown (proposal body or persisted template body).
@@ -44,8 +63,25 @@ export function TemplateEditorModal({
   // panel is enabled, the edited config.
   onSave: (body: string, esignConfig?: TemplateEsignConfig) => Promise<void> | void
   onClose: () => void
+  saveLabel?: string
+  placeholder?: string
+  // Chip coloring + `{{` autocomplete for hosts with a bound questionnaire.
+  validateVariable?: (name: string) => VariableStatus
+  variableNames?: string[]
+  // Live markdown mirror on every edit — lets the host drive context panels
+  // (orphan banner, library actions) off the current body.
+  onBodyChange?: (md: string) => void
+  // Host-held editor handle for inserting fields/blocks or replacing the body
+  // (library load, host-side AI). The modal reads/writes through the same ref.
+  editorHandleRef?: MutableRefObject<TemplateEditorHandle | null>
+  // Host context rendered between the action row and the editor.
+  contextPanels?: ReactNode
+  enablePreview?: boolean
+  // Forwarded to the eSign panel (PRESIGN-1 collect-signer-at-intake).
+  onCollectAtIntake?: (role: TemplateEsignRole) => Promise<void>
 }): React.ReactElement {
-  const editorRef = useRef<TemplateEditorHandle | null>(null)
+  const internalRef = useRef<TemplateEditorHandle | null>(null)
+  const editorRef = editorHandleRef ?? internalRef
   // The editor's seed: markdown → HTML with {{tokens}} rehydrated as chips. State
   // (not a one-shot) so "Use this" from the AI rail can reseed the live editor —
   // TemplateEditor resyncs when its initialHtml prop changes.
@@ -53,16 +89,19 @@ export function TemplateEditorModal({
   // Live HTML, updated on every keystroke so Save reads the latest even if the
   // imperative handle is momentarily null.
   const htmlRef = useRef(seedHtml)
-  // ES-3: the live MARKDOWN mirror, for the eSign panel's marker↔role drift.
-  // Only maintained (and only re-rendering) when the panel is enabled.
+  // ES-3: the live MARKDOWN mirror, for the eSign panel's marker↔role drift and
+  // the preview pane. Only maintained (and only re-rendering) when a consumer
+  // (eSign panel, preview, onBodyChange host) needs it.
   const [bodyMd, setBodyMd] = useState(initialBody)
   const [esignConfig, setEsignConfig] = useState<TemplateEsignConfig>(
     () => initialEsignConfig ?? { signable: false, roles: [] },
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
 
   const esignEnabled = initialEsignConfig !== undefined
+  const trackMd = esignEnabled || enablePreview || onBodyChange !== undefined
 
   function insertEsignBlock(role: TemplateEsignRole) {
     const hasExecution = /\{\{\s*sign\s*:/.test(bodyMd)
@@ -88,6 +127,7 @@ export function TemplateEditorModal({
       <EditorActionRow
         busy={busy}
         error={error}
+        saveLabel={saveLabel}
         onCancel={onClose}
         onSave={save}
         ai={
@@ -100,7 +140,8 @@ export function TemplateEditorModal({
               onUse={(proposed) => {
                 const html = markdownToHtml(proposed)
                 htmlRef.current = html
-                if (esignEnabled) setBodyMd(proposed)
+                if (trackMd) setBodyMd(proposed)
+                onBodyChange?.(proposed)
                 // Apply through the imperative handle — the prop-resync path no-ops when
                 // the proposal equals the last SEED even though the editor holds unsaved
                 // edits. setSeedHtml stays as the pre-mount fallback.
@@ -111,20 +152,51 @@ export function TemplateEditorModal({
           ) : undefined
         }
       />
-      <TemplateEditor
-        initialHtml={seedHtml}
-        editorRef={editorRef}
-        onChange={(html) => {
-          htmlRef.current = html
-          if (esignEnabled) setBodyMd(htmlToMarkdown(html))
-        }}
-      />
+      {contextPanels}
+      {enablePreview && (
+        <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
+          <button
+            type="button"
+            className={showPreview ? 'primary' : undefined}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+            onClick={() => setShowPreview((v) => !v)}
+            title="Preview the finished document with sample data, side by side"
+          >
+            <EyeIcon size={15} /> Preview
+          </button>
+        </div>
+      )}
+      <div className={showPreview ? 'tpl-split' : undefined}>
+        <div className={showPreview ? 'tpl-split-col' : undefined}>
+          <TemplateEditor
+            initialHtml={seedHtml}
+            editorRef={editorRef}
+            placeholder={placeholder}
+            validateVariable={validateVariable}
+            variableNames={variableNames}
+            onChange={(html) => {
+              htmlRef.current = html
+              if (trackMd) {
+                const md = htmlToMarkdown(html)
+                setBodyMd(md)
+                onBodyChange?.(md)
+              }
+            }}
+          />
+        </div>
+        {showPreview && (
+          <div className="tpl-split-col">
+            <TemplatePreview body={bodyMd} />
+          </div>
+        )}
+      </div>
       {esignEnabled && (
         <TemplateEsignPanel
           body={bodyMd}
           config={esignConfig}
           onChange={setEsignConfig}
           onInsertBlock={insertEsignBlock}
+          onCollectAtIntake={onCollectAtIntake}
         />
       )}
     </Modal>
