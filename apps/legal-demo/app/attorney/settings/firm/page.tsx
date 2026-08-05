@@ -36,6 +36,9 @@ interface TenantSettings {
   firmJurisdiction: string | null
   practiceAreas: string[] | null
   headerColor: string | null
+  // FIRM-LANDING-2 — public landing page copy (tagline + about paragraph).
+  tagline: string | null
+  about: string | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -99,6 +102,8 @@ export default function FirmDetailsPage(): React.ReactElement {
           firmJurisdiction: settings.firmJurisdiction ?? '',
           practiceAreas: settings.practiceAreas ?? [],
           headerColor: settings.headerColor ?? '',
+          tagline: settings.tagline ?? '',
+          about: settings.about ?? '',
         },
       })
       await refreshSettings()
@@ -249,6 +254,37 @@ export default function FirmDetailsPage(): React.ReactElement {
                   rows={2}
                 />
               </label>
+              {/* FIRM-LANDING-2 — the public landing page's copy. Saved through
+                  the same legal.settings.firm_profile.set action as the fields
+                  above; empty clears (generic hero line / hidden about section). */}
+              <div className="li-set-section-heading">Public page</div>
+              <label className="li-set-label">
+                <span>Tagline</span>
+                <input
+                  className="li-set-input"
+                  value={settings.tagline ?? ''}
+                  onChange={(e) => updateField('tagline', e.target.value || null)}
+                  maxLength={160}
+                  placeholder="One line under your firm name on your public page"
+                />
+              </label>
+              <label className="li-set-label">
+                <span>About the firm</span>
+                <textarea
+                  className="li-set-textarea"
+                  value={settings.about ?? ''}
+                  onChange={(e) => updateField('about', e.target.value || null)}
+                  rows={4}
+                  maxLength={4000}
+                  placeholder="A short public paragraph about your firm. Leave empty to hide the section."
+                />
+              </label>
+              <p className="li-set-hint">
+                Your public page (your firm&rsquo;s own web address) shows your firm name, the
+                tagline, this about paragraph, your bookable services, and whichever of the firm
+                phone / email / address above are filled in — leave a contact field empty and it
+                stays off the public page.
+              </p>
               <p className="li-set-hint">
                 These fields fill the firm identity where templates merge them. The brand color
                 tints your console header and sidebar, the client portal header, and the booking
@@ -328,6 +364,16 @@ export default function FirmDetailsPage(): React.ReactElement {
                   ) : (
                     'Default navy'
                   )}
+                </div>
+              </div>
+              <div>
+                <div className="li-set-kv-label">Public page tagline</div>
+                <div className="li-set-kv-value">{settings.tagline ?? '—'}</div>
+              </div>
+              <div className="li-set-kv-full">
+                <div className="li-set-kv-label">Public page about</div>
+                <div className="li-set-kv-value" style={{ whiteSpace: 'pre-line' }}>
+                  {settings.about ?? '—'}
                 </div>
               </div>
               <div className="li-set-kv-full">

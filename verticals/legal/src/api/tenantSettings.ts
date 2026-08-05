@@ -29,6 +29,11 @@ export interface TenantSettings {
   // UIWALK-1 (migration 0196) — the firm's chosen top-bar/header color (hex,
   // e.g. '#1b2a4a'). No default: unset renders the product's standard navy.
   headerColor: string | null
+  // FIRM-LANDING-2 (migration 0200) — the public landing page's hero tagline
+  // and about paragraph. No defaults: unset renders the generic hero line /
+  // hides the about section (honest unset, same posture as the rest).
+  tagline: string | null
+  about: string | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -45,6 +50,8 @@ const EMPTY: TenantSettings = {
   assistantInstructions: null,
   portalAssistantInstructions: null,
   headerColor: null,
+  tagline: null,
+  about: null,
   defaultHourlyRateUsd: null,
   defaultLlcFlatFeeUsd: null,
   updatedAt: null,
@@ -84,6 +91,8 @@ export interface FirmProfileFields {
   assistantInstructions: string[] | null
   portalAssistantInstructions: string[] | null
   headerColor: string | null
+  tagline: string | null
+  about: string | null
 }
 
 const PROFILE_ATTR_KINDS = [
@@ -97,6 +106,8 @@ const PROFILE_ATTR_KINDS = [
   'assistant_instructions',
   'portal_assistant_instructions',
   'firm_header_color',
+  'firm_tagline',
+  'firm_about',
 ] as const
 
 // Tri-state per field, read off the firm_profile singleton:
@@ -118,6 +129,8 @@ interface FirmProfileAttrReads {
   assistantInstructions: string[] | null | undefined
   portalAssistantInstructions: string[] | null | undefined
   headerColor: string | null | undefined
+  tagline: string | null | undefined
+  about: string | null | undefined
 }
 
 // Latest firm-identity attributes off the firm_profile singleton (all undefined
@@ -206,6 +219,8 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       assistantInstructions: listOrTextVal('assistant_instructions'),
       portalAssistantInstructions: listOrTextVal('portal_assistant_instructions'),
       headerColor: val('firm_header_color'),
+      tagline: val('firm_tagline'),
+      about: val('firm_about'),
     }
   })
 }
@@ -236,6 +251,8 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
       base.portalAssistantInstructions,
     ),
     headerColor: field(profile.headerColor, base.headerColor),
+    tagline: field(profile.tagline, base.tagline),
+    about: field(profile.about, base.about),
   }
 }
 
@@ -290,6 +307,8 @@ export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFie
     assistantInstructions: s.assistantInstructions,
     portalAssistantInstructions: s.portalAssistantInstructions,
     headerColor: s.headerColor,
+    tagline: s.tagline,
+    about: s.about,
   }
 }
 
@@ -313,6 +332,10 @@ export interface SetFirmProfileInput {
   portalAssistantInstructions?: string[] | null
   // UIWALK-1 — hex header color; empty clears (falls back to standard navy).
   headerColor?: string | null
+  // FIRM-LANDING-2 — public landing page hero tagline + about paragraph.
+  // Empty clears (generic hero line / hidden about section).
+  tagline?: string | null
+  about?: string | null
 }
 
 // Write the firm profile through the core (legal.firm.set_profile — append-only
@@ -342,6 +365,8 @@ export async function setFirmProfile(
         ? { portal_assistant_instructions: input.portalAssistantInstructions }
         : {}),
       ...(input.headerColor !== undefined ? { firm_header_color: input.headerColor } : {}),
+      ...(input.tagline !== undefined ? { firm_tagline: input.tagline } : {}),
+      ...(input.about !== undefined ? { firm_about: input.about } : {}),
     },
   })
   return getFirmProfile(ctx)
@@ -380,6 +405,8 @@ async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
       assistantInstructions: null,
       portalAssistantInstructions: null,
       headerColor: null,
+      tagline: null,
+      about: null,
       defaultHourlyRateUsd:
         r.default_hourly_rate_usd != null ? Number(r.default_hourly_rate_usd) : null,
       defaultLlcFlatFeeUsd:

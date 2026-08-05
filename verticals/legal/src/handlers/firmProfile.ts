@@ -102,6 +102,12 @@ interface FirmProfileSetPayload {
   portal_assistant_instructions?: unknown
   // UIWALK-1 (migration 0196) — the firm's top-bar color as '#rrggbb'; '' clears.
   firm_header_color?: string | null
+  // FIRM-LANDING-2 (migration 0200) — the public landing page's hero tagline
+  // and about paragraph. Plain text, trimmed, '' clears; length-capped below
+  // (these render verbatim on the firm's public page — a paste-a-document
+  // value is a mistake, not a tagline).
+  firm_tagline?: string | null
+  firm_about?: string | null
 }
 
 const PROFILE_FIELDS = [
@@ -115,6 +121,8 @@ const PROFILE_FIELDS = [
   'assistant_instructions',
   'portal_assistant_instructions',
   'firm_header_color',
+  'firm_tagline',
+  'firm_about',
 ] as const
 
 type ProfileField = (typeof PROFILE_FIELDS)[number]
@@ -128,6 +136,12 @@ type ProfileField = (typeof PROFILE_FIELDS)[number]
 // input clears the field, fails safe like practice_areas.
 const INSTRUCTIONS_ITEM_CHAR_CAP = 500
 const INSTRUCTIONS_MAX_ITEMS = 20
+
+// FIRM-LANDING-2 — public-page copy caps. A tagline is one hero line; the
+// about block is one readable paragraph (or a few). Over-cap input is
+// REJECTED, not silently truncated (see normalizeFirmProfileFieldValue).
+const TAGLINE_CHAR_CAP = 160
+const ABOUT_CHAR_CAP = 4000
 
 function normalizeInstructionsPills(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -171,6 +185,18 @@ export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown)
     return normalizeInstructionsPills(raw)
   }
   const text = typeof raw === 'string' ? raw.trim() : ''
+  if (kind === 'firm_tagline' && text.length > TAGLINE_CHAR_CAP) {
+    // Rejected loudly (like firm_jurisdiction/firm_header_color), never silently
+    // truncated — the tagline renders verbatim on the public landing hero.
+    throw new Error(
+      `firm_tagline must be at most ${TAGLINE_CHAR_CAP} characters (got ${text.length}); leave empty to clear.`,
+    )
+  }
+  if (kind === 'firm_about' && text.length > ABOUT_CHAR_CAP) {
+    throw new Error(
+      `firm_about must be at most ${ABOUT_CHAR_CAP} characters (got ${text.length}); leave empty to clear.`,
+    )
+  }
   if (kind === 'firm_header_color' && text) {
     // Store only a well-formed hex color — anything else would be injected
     // verbatim into an inline style on every page's header.
@@ -198,7 +224,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color, firm_tagline, firm_about.',
     )
   }
 

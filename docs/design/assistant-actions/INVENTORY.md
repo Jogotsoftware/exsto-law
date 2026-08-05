@@ -548,3 +548,16 @@ plan this stale finding sits under).
   `transitions.drafting.instructions[kind]` / review instructions through the action
   layer). Deliberate non-gaps left as recorded: `esign.add_signer` / `finish_signing`
   human-in-the-loop boundary, users/access admin-only.
+
+- **2026-08-05 (FIRM-LANDING-2):** attorney-editable public landing page shipped — the
+  firm_profile singleton gains `firm_tagline`/`firm_about` (migration 0200), edited in
+  Settings → Firm Details → "Public page" and rendered at the firm subdomain root via
+  `getPublicFirmSite` (`verticals/legal/src/api/publicSite.ts`, public-safe closed shape:
+  identity + set contact fields + bookable services). The MCP settings pair
+  (`legal.settings.firm_profile.get/set`, `mcp/tools/settingsTools.ts`) carries the new
+  `tagline`/`about` fields (TS-typed pass-through, no JSON schema to extend; descriptions
+  updated) — but the attorney CHAT has no ClientTool that writes the firm profile at all,
+  so "change my public page tagline" is not chat-doable; missing: a firm-profile set
+  ClientTool in `buildAttorneyClientTools` — `verticals/legal/src/api/assistantChat.ts:710`.
+  Deliberate non-gap: tagline/about are NOT merge tokens (public marketing copy, never
+  document content — the FIRM_DEFAULTS/merge-neutrality rule).
