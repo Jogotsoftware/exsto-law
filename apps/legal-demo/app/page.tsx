@@ -1,6 +1,6 @@
 import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
-import { resolvePublicFirm } from '@exsto/legal'
+import { getPublicFirmSite } from '@exsto/legal'
 import { FirmLandingPage } from '@/components/FirmLandingPage'
 import LoginPage from './login/page'
 
@@ -22,9 +22,12 @@ export default async function RootPage(): Promise<React.JSX.Element> {
   // unknown firm must 404) from the legacy ?firm=/cookie fallback, which never
   // changes what the canonical root shows.
   if (slug && h.get('x-firm-host') === '1') {
-    const firm = await resolvePublicFirm(slug)
-    if (!firm) notFound()
-    return <FirmLandingPage firmName={firm.firmName} />
+    // FIRM-LANDING-2 — one composed public-safe read: identity + tagline/about
+    // + set contact fields + the bookable-services list. Fails closed exactly
+    // like resolvePublicFirm did (unknown slug → null → 404).
+    const site = await getPublicFirmSite(slug)
+    if (!site) notFound()
+    return <FirmLandingPage site={site} />
   }
   return <LoginPage />
 }
