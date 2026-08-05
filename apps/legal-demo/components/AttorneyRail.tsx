@@ -59,7 +59,9 @@ const NAV: NavNode[] = [
   { kind: 'leaf', href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
   { kind: 'leaf', href: '/attorney/review', label: 'Tasks', Icon: CheckCircleIcon },
   { kind: 'leaf', href: '/attorney/esign', label: 'eSign', Icon: SignatureIcon },
-  { kind: 'leaf', href: '/attorney/requests', label: 'Requests', Icon: HelpCircleIcon },
+  // UIWALK-2: Requests is hidden from the nav (founder direction 2026-08-04) —
+  // client requests surface in Tasks. The route stays reachable: Task Queue
+  // rows (workHref) and the attorney_new_request email deep-link there.
   { kind: 'leaf', href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { kind: 'leaf', href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
   {
@@ -122,6 +124,8 @@ const MODULE_AREAS: Record<string, string[]> = {
     '/attorney/questions',
     '/attorney/services',
   ],
+  // UIWALK-2: inert for nav (Requests is no longer a nav item) — kept to
+  // document the module↔route relationship.
   'client-portal': ['/attorney/requests'],
   'e-sign': ['/attorney/esign'],
 }
