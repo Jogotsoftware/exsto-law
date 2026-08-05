@@ -2,8 +2,25 @@
 // workers/runtime package stays untouched, ADR 0043). The dispatcher binds
 // tenant context + the per-tenant system actor before invoking handlers.
 import { registerWorkerHandler, enqueueJob } from '@exsto/worker-runtime'
-import { withTenant } from '@exsto/shared'
+import { withSuperuser, withTenant } from '@exsto/shared'
 import { runGranolaProjection } from '../api/granolaIngestion.js'
+
+// SECOND-FIRM-1 — the tenants the worker runs per-tenant bootstraps for: every
+// ACTIVE tenant except the platform/sandbox infrastructure tenants. The
+// exclusion lives in SQL (private.worker_list_active_tenants, migration 0199)
+// so every consumer agrees on it. Runs as the connecting role (withSuperuser —
+// the worker's direct-DB allowance, same posture as connectionStore); the
+// definer function exposes tenant ids only. Callers must treat a throw as
+// "enumeration unavailable" and degrade loudly (worker.ts falls back to the
+// historical tenant-zero seed so a not-yet-migrated database still boots).
+export async function listWorkerTenants(): Promise<string[]> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM private.worker_list_active_tenants()`,
+    )
+    return res.rows.map((r) => r.id)
+  })
+}
 
 // How often the calendar reconciliation pass re-reads Google (default 6h).
 // Validated at module load so a misconfigured env fails loudly at startup rather

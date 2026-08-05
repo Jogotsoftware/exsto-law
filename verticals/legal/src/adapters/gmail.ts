@@ -7,11 +7,19 @@ import {
   GMAIL_MODIFY_SCOPE,
 } from './googleCalendar.js'
 import { sanitizeEmailHtml } from './sanitizeEmailHtml.js'
+import { resolveFirmDisplayName } from '../lib/firmDisplayName.js'
 
-// Firm sender identity for all outbound client mail (WP3.1 acceptance). Quoted
-// because the name contains "(beta)" — parentheses are comment delimiters in
-// RFC 5322 headers, so an unquoted display name would be misparsed.
-export const FIRM_SENDER_DISPLAY_NAME = 'Pacheco Law - Legal Instruments (beta)'
+// Firm sender identity for all outbound client mail (WP3.1 acceptance).
+// SECOND-FIRM-1: built from the TENANT's own firm name (never a hardcoded
+// firm) — an unset/cleared firm name degrades to the bare product identity.
+// The header value is quoted at the call site because the name contains
+// "(beta)" — parentheses are comment delimiters in RFC 5322 headers, so an
+// unquoted display name would be misparsed; quotes/backslashes are stripped
+// here so a firm name can never break out of the quoted-string.
+export function firmSenderDisplayName(firmName: string | null): string {
+  const clean = (firmName ?? '').replace(/["\\]/g, '').trim()
+  return clean ? `${clean} - Legal Instruments (beta)` : 'Legal Instruments (beta)'
+}
 
 export interface EmailAttachment {
   filename: string
@@ -242,10 +250,14 @@ export async function sendEmail(
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2 })
 
-  // Firm-branded sender: "Pacheco Law - Legal Instruments (beta)" <attorney@…>.
-  // Quoted display name (the "(beta)" parentheses would otherwise read as a
-  // header comment). The envelope address stays the attorney's connected account.
-  const fromHeader = `"${FIRM_SENDER_DISPLAY_NAME}" <${creds.accountEmail}>`
+  // Firm-branded sender: "<firm name> - Legal Instruments (beta)" <attorney@…>,
+  // resolved from THIS tenant's firm profile (SECOND-FIRM-1 — never another
+  // firm's name). Quoted display name (the "(beta)" parentheses would otherwise
+  // read as a header comment). The envelope address stays the attorney's
+  // connected account. Resolution is best-effort: on a read failure the mail
+  // still goes out under the bare product identity.
+  const firmName = await resolveFirmDisplayName(tenantId).catch((): null => null)
+  const fromHeader = `"${firmSenderDisplayName(firmName)}" <${creds.accountEmail}>`
   const raw = buildRawMessage(args, fromHeader)
 
   const res = await gmail.users.messages.send({

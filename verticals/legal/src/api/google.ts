@@ -20,6 +20,7 @@ import { recordIntegrationProbe } from './integrations.js'
 import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { getFirmBookingRules } from './firmBookingRules.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 
 // 'admin' = platform admin-console sign-in (ADR 0046). Identity-only like
@@ -318,8 +319,6 @@ export interface CreateBookingEventArgs {
   intakeSummary?: string
 }
 
-const ATTORNEY_FALLBACK_EMAIL = 'juancarlos@pachecolaw.com'
-
 export async function tryCreateBookingEvent(
   ctx: ActionContext,
   args: CreateBookingEventArgs,
@@ -331,10 +330,25 @@ export async function tryCreateBookingEvent(
   // ORIGIN-1: the event's reschedule link is firm-facing — the firm's own origin
   // (NOT the OAuth redirect URI, which stays pinned to the canonical host).
   const baseUrl = await firmOriginForTenant(ctx.tenantId)
-  const attorneyEmail = status.accountEmail ?? ATTORNEY_FALLBACK_EMAIL
+  // SECOND-FIRM-1: event branding comes from THIS tenant's settings (the merge
+  // read — honest null when unset, never a demo-firm default). The attorney
+  // attendee is the connected account; a connected row with no stored email
+  // degrades to the firm's contact email — never another firm's inbox. With
+  // neither, skip the event honestly rather than inviting the wrong address.
+  const settings = await getTenantSettingsForMerge(ctx).catch((): null => null)
+  const firmName = settings?.firmName ?? null
+  const attorneyEmail = status.accountEmail ?? settings?.firmEmail ?? null
+  if (!attorneyEmail) {
+    console.warn(
+      '[google-calendar] no attorney/firm email resolvable for tenant',
+      ctx.tenantId,
+      '— skipping booking event',
+    )
+    return null
+  }
 
   const descriptionHtml = `
-<b>Pacheco Law consultation</b><br>
+<b>${firmName ?? 'Consultation'}${firmName ? ' consultation' : ''}</b><br>
 ${args.serviceDisplayName} &middot; ${args.clientFullName}
 <br><br>
 ${args.intakeSummary ? `<b>Intake summary:</b><br>${args.intakeSummary}<br><br>` : ''}
@@ -345,7 +359,7 @@ ${args.intakeSummary ? `<b>Intake summary:</b><br>${args.intakeSummary}<br><br>`
     return await createBookingEvent({
       tenantId: ctx.tenantId,
       actorId: firmActor,
-      summary: `Pacheco Law — ${args.serviceDisplayName} (${args.clientFullName})`,
+      summary: `${firmName ?? 'Consultation'} — ${args.serviceDisplayName} (${args.clientFullName})`,
       descriptionHtml,
       startIso: args.scheduledAtIso,
       endIso: args.scheduledEndIso,

@@ -12,9 +12,10 @@ import { PUBLIC_SLUG_RE, RESERVED_SLUGS } from '@exsto/legal/slug'
 // Slug precedence: firm subdomain of TENANT_BASE_DOMAIN  >  ?firm= query  >  firm_slug
 // cookie. A ?firm= selection is persisted to a short-lived cookie so later navigations
 // and the funnel's own /api/client/* calls (which drop the query) keep the same firm.
-// No slug found ⇒ no header injected, and the Node helper falls back to the demoted env
-// default. An incoming x-firm-slug is always cleared first, so only this middleware —
-// never a forged request header — decides the slug.
+// No slug found ⇒ no header injected, and the Node helper FAILS CLOSED
+// (FirmNotFoundError → 404 with "use your firm's link" copy; SECOND-FIRM-1 removed the
+// old env-default fallback). An incoming x-firm-slug is always cleared first, so only
+// this middleware — never a forged request header — decides the slug.
 
 // A firm slug is a single DNS label — SLUG-PROV-1: the shared definition in
 // @exsto/legal/slug (dependency-free, Edge-safe) so middleware, the control-plane

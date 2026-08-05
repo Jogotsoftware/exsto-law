@@ -8,9 +8,14 @@
 //     → match matter (booking time window + attendee email)
 //     → call.ingest               (call_session + transcript projection)
 //
-// Tenant is resolved SERVER-SIDE (single-firm Phase 0: tenant zero) — never
-// from the webhook payload. Unmatched transcripts project with a null matter
-// and surface in the review queue (call_sessions without call_of), never the void.
+// Tenant is resolved SERVER-SIDE — never from the webhook payload. SECOND-FIRM-1:
+// the single global webhook endpoint carries no tenant hint, so the tenant is
+// resolved by FOLLOWING THE DATA — Granola is connected per-attorney per-tenant
+// (migration 0016), each connection carries its own webhook secret, and the
+// tenant(s) whose secret verifies the HMAC signature own the event. Unmatched
+// transcripts project with a null matter and surface in the review queue
+// (call_sessions without call_of), never the void.
+import { withTenant } from '@exsto/shared'
 import {
   submitAction,
   withActionContext,
@@ -25,13 +30,60 @@ import {
   verifyGranolaSignature,
   type GranolaCallData,
 } from '../adapters/granola.js'
-import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
+import { listConnectedTenants, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 
+// Historical single-firm pins — kept ONLY for (a) the tenant-zero actor
+// preference below (unchanged attribution for tenant zero's history) and
+// (b) the explicit last-resort context for the dormant external e-sign
+// callback, which still has no tenant signal of any kind.
 const TENANT_ZERO = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
-const SYSTEM_ACTOR = '00000000-0000-0000-0001-000000000001'
+const LEGACY_SYSTEM_ACTOR = '00000000-0000-0000-0001-000000000001'
 
-export function ingestionContext(): ActionContext {
-  return { tenantId: TENANT_ZERO, actorId: SYSTEM_ACTOR }
+// The tenant's own ingestion system actor: the historical …0001 when it exists
+// in this tenant (tenant zero — attribution unchanged), else the tenant's own
+// system/agent actor. withTenant (not withActionContext): the actor is what we
+// are resolving, so there is no ActionContext yet — same bootstrap shape as
+// resolvePublicIntakeActor. Fails closed: tenant-zero's actor id has no row in
+// any other tenant, so returning it would only FK-fail the ingest downstream.
+async function resolveIngestionActor(tenantId: string): Promise<string> {
+  return withTenant(tenantId, async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM actor
+        WHERE tenant_id = $1 AND status = 'active'
+          AND (id = $2 OR actor_type IN ('system', 'agent'))
+        ORDER BY (id = $2) DESC,
+                 CASE actor_type WHEN 'system' THEN 0 ELSE 1 END, created_at
+        LIMIT 1`,
+      [tenantId, LEGACY_SYSTEM_ACTOR],
+    )
+    const id = res.rows[0]?.id
+    if (!id) {
+      throw new Error(
+        `No active system/agent actor in tenant ${tenantId} — seed one before ingesting integrations.`,
+      )
+    }
+    return id
+  })
+}
+
+// SECOND-FIRM-1: the ingestion context is now PER-TENANT (tenant id + that
+// tenant's own system actor), never a module-level tenant-zero pin.
+export async function ingestionContext(tenantId: string): Promise<ActionContext> {
+  return { tenantId, actorId: await resolveIngestionActor(tenantId) }
+}
+
+// LAST-RESORT ONLY. The dormant external e-sign provider callback
+// (handleEsignCallback, esign.ts — no live provider configured) arrives with no
+// tenant signal at all: no slug, no signed token, and no per-tenant secret to
+// follow. Until that path grows a real tenant resolution (it must, before an
+// external provider goes live), it stays on the historical tenant-zero pin —
+// EXPLICITLY and LOUDLY, never as a silent default. Do not add new callers.
+export function lastResortTenantZeroContext(caller: string): ActionContext {
+  console.warn(
+    `[ingestion] ${caller}: no tenant signal — falling back to tenant zero (${TENANT_ZERO}). ` +
+      'This is a single-firm legacy pin; wire real tenant resolution before multi-firm use.',
+  )
+  return { tenantId: TENANT_ZERO, actorId: LEGACY_SYSTEM_ACTOR }
 }
 
 // Strict matching: attendee email must match a client_of contact AND the call
@@ -191,19 +243,37 @@ export interface WebhookResult {
 
 // Thin webhook entry: verify → raw_event_log → enqueue → ack. Anything slow
 // (API fetch, projection) happens in the worker.
+//
+// SECOND-FIRM-1: one global endpoint, N firms. The payload carries no tenant
+// hint, so the tenant is resolved from the DATA the webhook already depends on:
+// every tenant with an active Granola connection has its own webhook secret
+// (per-connection Vault record; the GRANOLA_WEBHOOK_SECRET env var is the
+// legacy single-firm fallback), and the tenant(s) whose secret verifies the
+// signature own the event. Normally exactly one tenant matches; if several
+// share the legacy env secret each ingests, and matching (attendee email +
+// booking window) sorts the call into the right matter — an unmatched copy
+// lands visibly in that firm's review queue, never silently in the wrong
+// matter and never silently in the dev tenant.
 export async function handleGranolaWebhook(
   rawBody: string,
   signatureHeader: string | null,
 ): Promise<WebhookResult> {
-  const ctx = ingestionContext()
-  // Verify against the firm's primary Granola connection's webhook secret. Until
-  // per-attorney webhook routing lands, a single endpoint maps to one secret.
-  const granolaActor = await resolveFirmPrimaryActor(ctx.tenantId, 'granola')
-  const secret = await granolaWebhookSecret(ctx.tenantId, granolaActor)
-  if (!secret) {
+  const tenantIds = await listConnectedTenants('granola')
+  let anySecret = false
+  const matched: string[] = []
+  for (const tenantId of tenantIds) {
+    // Granola is per-attorney (migration 0016); the endpoint verifies against
+    // the firm's primary connection's secret, per tenant.
+    const granolaActor = await resolveFirmPrimaryActor(tenantId, 'granola')
+    const secret = await granolaWebhookSecret(tenantId, granolaActor)
+    if (!secret) continue
+    anySecret = true
+    if (verifyGranolaSignature(rawBody, signatureHeader, secret)) matched.push(tenantId)
+  }
+  if (!anySecret) {
     return { ok: false, status: 503, error: 'Granola webhook secret not configured' }
   }
-  if (!verifyGranolaSignature(rawBody, signatureHeader, secret)) {
+  if (matched.length === 0) {
     return { ok: false, status: 401, error: 'invalid signature' }
   }
 
@@ -216,23 +286,28 @@ export async function handleGranolaWebhook(
   const externalId =
     (payload.call_id as string | undefined) ?? (payload.id as string | undefined) ?? null
 
-  const raw = await submitAction(ctx, {
-    actionKindName: 'raw_event.ingest',
-    intentKind: 'automatic_sync',
-    payload: {
-      source_type: 'integration',
-      source_ref: 'integration:granola',
-      external_id: externalId,
-      payload,
-    },
-  })
-  const rawEffects = (raw.effects[0] ?? {}) as { rawEventLogId?: string }
+  let first: { rawEventLogId?: string; jobId?: string } | null = null
+  for (const tenantId of matched) {
+    const ctx = await ingestionContext(tenantId)
+    const raw = await submitAction(ctx, {
+      actionKindName: 'raw_event.ingest',
+      intentKind: 'automatic_sync',
+      payload: {
+        source_type: 'integration',
+        source_ref: 'integration:granola',
+        external_id: externalId,
+        payload,
+      },
+    })
+    const rawEffects = (raw.effects[0] ?? {}) as { rawEventLogId?: string }
 
-  const jobId = await enqueueJob({
-    tenantId: ctx.tenantId,
-    jobKind: 'legal.granola.project',
-    payload: { raw_event_log_id: rawEffects.rawEventLogId ?? null, payload },
-  })
+    const jobId = await enqueueJob({
+      tenantId: ctx.tenantId,
+      jobKind: 'legal.granola.project',
+      payload: { raw_event_log_id: rawEffects.rawEventLogId ?? null, payload },
+    })
+    first ??= { rawEventLogId: rawEffects.rawEventLogId, jobId }
+  }
 
-  return { ok: true, status: 200, rawEventLogId: rawEffects.rawEventLogId, jobId }
+  return { ok: true, status: 200, rawEventLogId: first?.rawEventLogId, jobId: first?.jobId }
 }

@@ -169,10 +169,20 @@ export async function deliverNotification(ctx: ActionContext, input: NotifyInput
   }
 
   const ref = route.templateRef ?? route.kindName
-  const { subject, bodyText } = renderNotificationTemplate(ref, input.variables)
+  // SECOND-FIRM-1: thread THIS tenant's firm identity into every render so no
+  // template ever needs a hardcoded firm. Caller-supplied variables win (the
+  // e-sign paths already pass firm_name/attorney_name explicitly); an unset
+  // firm renders the templates' honest generic copy.
+  const firmSettings = await getTenantSettings(ctx).catch(() => null)
+  const variables: Record<string, unknown> = {
+    ...(firmSettings?.firmName ? { firm_name: firmSettings.firmName } : {}),
+    ...(firmSettings?.attorneyName ? { attorney_name: firmSettings.attorneyName } : {}),
+    ...input.variables,
+  }
+  const { subject, bodyText } = renderNotificationTemplate(ref, variables)
   // Branded HTML alternative when the kit has a matching template (ref keys mirror
   // the route template_refs); null → plaintext-only, unchanged behaviour.
-  const branded = renderEmailHtml(ref, input.variables)
+  const branded = renderEmailHtml(ref, variables)
   // Sign client-facing mail with the configurable firm signature (Contract B
   // parity, fix #10) so every outbound client email carries ONE signature set in
   // Settings — templates no longer hardcode a closing. Internal attorney

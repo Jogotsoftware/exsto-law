@@ -11,13 +11,12 @@ import {
   resolveInvoiceClientContact,
   getClientInvoiceByNumber,
   createInvoicePaymentIntent,
+  resolvePublicIntakeActor,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
-
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`pay-link:${clientIpFrom(request)}`)
@@ -48,8 +47,13 @@ export async function POST(request: Request) {
   }
 
   // Everything below is pinned to the TOKEN's invoice + tenant — nothing from
-  // the body names an invoice.
-  const ctx: ActionContext = { tenantId: tok.tenantId, actorId: ACTOR_ID }
+  // the body names an invoice. SECOND-FIRM-1: the actor is THAT tenant's own
+  // public-intake system actor (tenant zero's global …0005 id has no row in any
+  // other tenant and would FK-fail the payment write there).
+  const ctx: ActionContext = {
+    tenantId: tok.tenantId,
+    actorId: await resolvePublicIntakeActor(tok.tenantId),
+  }
   try {
     const contactId = await resolveInvoiceClientContact(ctx, tok.invoiceNumber)
     if (!contactId) return NextResponse.json({ error: 'Invoice not found.' }, { status: 404 })

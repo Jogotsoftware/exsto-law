@@ -1,6 +1,7 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { chatWithAssistant, type ChatMessage } from '../adapters/claude.js'
 import { resolveModelForTask } from '../lib/modelRouter.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
 
 // The page the attorney was on when they opened the assistant, plus an optional
 // intent flag the widget sets (e.g. a "Leave feedback" entry point). Kept open
@@ -23,16 +24,21 @@ export interface AssistantReply {
   reply: string
 }
 
-// Concise system prompt for the Pacheco Law beta assistant. It helps the
-// attorney USE the app and explicitly invites feedback; it must NOT give legal
-// advice (this is a tool-usage helper, not a lawyer) and keeps replies short.
-const SYSTEM_PROMPT = [
-  'You are the in-app assistant for the Pacheco Law beta — a legal practice tool for a solo/small NC business-law firm.',
-  'Help the attorney USE the app: intake, consultation booking, drafting, review, Granola call import, and settings.',
-  'You also collect product feedback: when the attorney shares a complaint, idea, or praise, acknowledge it warmly and let them know it has been recorded for the team. Invite feedback when it fits naturally.',
-  'Do NOT give legal advice, draft legal language, or opine on the merits of any matter — you are a tool-usage helper, not a lawyer. If asked for legal advice, say that is outside what you can help with here.',
-  'Keep replies short and direct — a few sentences at most. No preamble.',
-].join(' ')
+// Concise system prompt for the in-app beta assistant. SECOND-FIRM-1: the firm
+// identity is resolved PER TENANT (merge read — honest generic when unset,
+// never a demo-firm default). It helps the attorney USE the app and explicitly
+// invites feedback; it must NOT give legal advice (this is a tool-usage helper,
+// not a lawyer) and keeps replies short.
+function buildSystemPrompt(firmName: string | null): string {
+  const firmLabel = firmName ? `${firmName} (beta)` : 'this legal practice (beta)'
+  return [
+    `You are the in-app assistant for ${firmLabel} — a legal practice tool for a solo/small law firm.`,
+    'Help the attorney USE the app: intake, consultation booking, drafting, review, Granola call import, and settings.',
+    'You also collect product feedback: when the attorney shares a complaint, idea, or praise, acknowledge it warmly and let them know it has been recorded for the team. Invite feedback when it fits naturally.',
+    'Do NOT give legal advice, draft legal language, or opine on the merits of any matter — you are a tool-usage helper, not a lawyer. If asked for legal advice, say that is outside what you can help with here.',
+    'Keep replies short and direct — a few sentences at most. No preamble.',
+  ].join(' ')
+}
 
 // Heuristic: is this turn product feedback rather than a how-do-I question?
 // The widget's explicit intent wins; otherwise a light keyword sniff. Kept
@@ -102,8 +108,11 @@ export async function askAssistant(
   if (!message) throw new Error('Type a message first.')
 
   const history = input.history ?? []
+  const firmName = await getTenantSettingsForMerge(ctx)
+    .then((s) => s.firmName)
+    .catch((): null => null)
   const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: buildSystemPrompt(firmName) },
     ...history,
     { role: 'user', content: message },
   ]

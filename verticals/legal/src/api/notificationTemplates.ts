@@ -10,6 +10,13 @@ export interface RenderedNotification {
 type Vars = Record<string, unknown>
 const s = (v: unknown, fallback = ''): string => (v == null || v === '' ? fallback : String(v))
 
+// SECOND-FIRM-1: templates never hardcode a firm. deliverNotification threads
+// the tenant's firm_name / attorney_name into every render's variables (caller-
+// supplied values win), so these helpers render the firm when known and honest
+// generic copy when not — never another firm's identity.
+const firmSuffix = (v: Vars): string => (s(v.firm_name) ? ` — ${s(v.firm_name)}` : '')
+const firmLabel = (v: Vars, fallback: string): string => s(v.firm_name, fallback)
+
 const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
   'attorney-manual-matter': (v) => ({
     subject: `New matter needs your attention — ${s(v.client_full_name, 'a prospect')} (${s(v.service_label, s(v.service_key, 'matter'))})`,
@@ -42,23 +49,25 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     ].join('\n'),
   }),
   'prospect-intake-confirmation': (v) => ({
-    subject: `We received your information — Pacheco Law`,
+    subject: `We received your information${firmSuffix(v)}`,
     bodyText: [
       `Hi ${s(v.client_first_name, s(v.client_full_name, 'there'))},`,
       ``,
       // Intake-only services (no consultation) get honest next-steps copy —
       // never a reference to an appointment that doesn't exist.
       v.scheduled_at
-        ? `Thanks for telling us about your matter. Juan Carlos will review your answers before your consultation.`
-        : `Thanks for telling us about your matter. Juan Carlos will review your answers and follow up with next steps by email.`,
+        ? `Thanks for telling us about your matter. ${s(v.attorney_name, 'Your attorney')} will review your answers before your consultation.`
+        : `Thanks for telling us about your matter. ${s(v.attorney_name, 'Your attorney')} will review your answers and follow up with next steps by email.`,
     ].join('\n'),
   }),
   'client-portal-magic-link': (v) => ({
-    subject: `Your Pacheco Law sign-in link`,
+    subject: v.firm_name
+      ? `Your ${s(v.firm_name)} sign-in link`
+      : `Your client portal sign-in link`,
     bodyText: [
       `Hi ${s(v.client_full_name, 'there')},`,
       ``,
-      `Use the secure link below to sign in to your Pacheco Law client portal and`,
+      `Use the secure link below to sign in to your ${firmLabel(v, 'firm')} client portal and`,
       `view the status of your matter. The link expires in 30 minutes.`,
       ``,
       `${s(v.login_url, '(sign-in link unavailable)')}`,
@@ -67,11 +76,13 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     ].join('\n'),
   }),
   'client-portal-invite': (v) => ({
-    subject: `Set up your Pacheco Law client portal`,
+    subject: v.firm_name
+      ? `Set up your ${s(v.firm_name)} client portal`
+      : `Set up your client portal`,
     bodyText: [
       `Hi ${s(v.client_full_name, 'there')},`,
       ``,
-      `Pacheco Law has set up secure portal access for you. Use the link below to`,
+      `${firmLabel(v, 'Your law firm')} has set up secure portal access for you. Use the link below to`,
       `choose a password — then you can sign in any time to view your matters,`,
       `documents, and invoices, and message the firm. The link expires in 7 days.`,
       ``,
@@ -92,7 +103,7 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     ].join('\n'),
   }),
   'client-request-update': (v) => ({
-    subject: `Update on your ${s(v.request_type, 'request')} — Pacheco Law`,
+    subject: `Update on your ${s(v.request_type, 'request')}${firmSuffix(v)}`,
     bodyText: [
       `Hi there,`,
       ``,
@@ -186,7 +197,7 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     ].join('\n'),
   }),
   'client-portal-message': (v) => ({
-    subject: `You have a new message from Pacheco Law`,
+    subject: `You have a new message from ${firmLabel(v, 'your attorney')}`,
     bodyText: [
       `Hi there,`,
       ``,
@@ -199,11 +210,11 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     ].join('\n'),
   }),
   'prospect-booking-confirmation': (v) => ({
-    subject: `Your consultation is booked — Pacheco Law`,
+    subject: `Your consultation is booked${firmSuffix(v)}`,
     bodyText: [
       `Hi ${s(v.client_first_name, s(v.client_full_name, 'there'))},`,
       ``,
-      `Your consultation with Juan Carlos Pacheco is confirmed for ${s(v.scheduled_at_label, s(v.scheduled_at, 'the selected time'))}.`,
+      `Your consultation with ${s(v.attorney_name, firmLabel(v, 'us'))} is confirmed for ${s(v.scheduled_at_label, s(v.scheduled_at, 'the selected time'))}.`,
       `A calendar invitation is on its way to your inbox.`,
       ``,
       `Need to change it? Use the reschedule link in the calendar invite.`,
@@ -261,7 +272,7 @@ export function renderNotificationTemplate(
   const template = TEMPLATES[templateRef]
   if (!template) {
     return {
-      subject: `Pacheco Law notification (${templateRef})`,
+      subject: `${s(variables.firm_name, 'Firm')} notification (${templateRef})`,
       bodyText: JSON.stringify(variables, null, 2),
     }
   }

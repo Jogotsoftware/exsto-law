@@ -328,13 +328,13 @@ export async function loadEnvelopeFileRefByToken(
   docIndex = 0,
 ): Promise<EnvelopeFileRef | null> {
   const tok = verifySigningToken(token)
-  return loadEnvelopeFileRef(signingCtx(tok.tenantId), tok.envelopeId, docIndex)
+  return loadEnvelopeFileRef(await signingCtx(tok.tenantId), tok.envelopeId, docIndex)
 }
 
 /** Token door for all of an envelope's files, in order (multi-doc signer view). */
 export async function loadEnvelopeFileRefsByToken(token: string): Promise<EnvelopeFileRef[]> {
   const tok = verifySigningToken(token)
-  return loadEnvelopeFileRefs(signingCtx(tok.tenantId), tok.envelopeId)
+  return loadEnvelopeFileRefs(await signingCtx(tok.tenantId), tok.envelopeId)
 }
 
 /** Portal-session door for the authenticated client's file view: authorize the
@@ -349,5 +349,5 @@ export async function loadEnvelopeFileRefForClient(
   docIndex = 0,
 ): Promise<EnvelopeFileRef | null> {
   const envelopeId = await resolveClientEnvelopeId(p, requestId)
-  return loadEnvelopeFileRef(signingCtx(p.tenantId), envelopeId, docIndex)
+  return loadEnvelopeFileRef(await signingCtx(p.tenantId), envelopeId, docIndex)
 }

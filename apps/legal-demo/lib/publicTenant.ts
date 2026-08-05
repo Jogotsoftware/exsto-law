@@ -10,17 +10,14 @@ import { resolvePublicFirm, resolvePublicIntakeActor } from '@exsto/legal'
 //   1. x-firm-slug header present → resolve it through public.resolve_public_firm
 //      (SECURITY DEFINER, migration 0119). Unknown slug ⇒ FAIL CLOSED (throw), never a
 //      silent fall-through to dev.
-//   2. No slug at all → the DEMOTED env default (LEGAL_CLIENT_TENANT_ID, dev tenant).
-//      Kept only so the bare host pre-DNS still resolves and nothing 500s; a request
-//      that named a firm never lands here.
+//   2. No slug at all → FAIL CLOSED too (SECOND-FIRM-1). The old demoted env default
+//      (DEFAULT_TENANT_ID → the Dev Firm) is GONE: a slug-less public request on the
+//      legacy host used to silently land its writes in the dev tenant — wrong the
+//      moment a real second firm exists. Old booking links keep working because they
+//      carry ?firm= (buildFirmBookingUrl); firm subdomains carry the slug in the host.
 //
 // The per-tenant intake ACTOR is resolved the same way the /book/{slug} front door does
 // (resolvePublicIntakeActor) — tenant zero's …0005 FK-fails for any other tenant.
-
-// Demoted last-resort default. NOT deleted this phase (Phase 2 removes it once every
-// public entry carries a firm). Only reached when no slug was supplied at all.
-const DEFAULT_TENANT_ID =
-  process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
 
 const FIRM_SLUG_HEADER = 'x-firm-slug'
 
@@ -35,11 +32,14 @@ export interface PublicTenant {
   slug: string | null
 }
 
-// A named firm did not resolve. Routes map this to a clear "firm not found" response
-// (never a dev-tenant write) — see A3.
+// A named firm did not resolve — or no firm was named at all. Routes map this to a
+// clear "firm not found" response (never a dev-tenant write) — see A3.
 export class FirmNotFoundError extends Error {
-  constructor(public readonly slug: string) {
-    super(`Unknown firm: ${slug}`)
+  constructor(
+    public readonly slug: string,
+    message?: string,
+  ) {
+    super(message ?? `Unknown firm: ${slug}`)
     this.name = 'FirmNotFoundError'
   }
 }
@@ -60,16 +60,14 @@ export async function resolvePublicTenant(request: Request): Promise<PublicTenan
   }
 
   // HOST-TENANCY-1 belt-and-suspenders: a firm HOST with no resolvable slug must
-  // never fall through to the env default — middleware always sets both headers
-  // together, so this is unreachable unless something upstream broke. Fail closed.
+  // never fall through — middleware always sets both headers together, so this is
+  // unreachable unless something upstream broke. Fail closed.
   if (fromFirmHost) throw new FirmNotFoundError('(firm host without slug)')
 
-  // No firm named anywhere → demoted env default (legacy hosts only; removed
-  // entirely in the Phase-8 hardening pass).
-  return {
-    tenantId: DEFAULT_TENANT_ID,
-    actorId: await resolvePublicIntakeActor(DEFAULT_TENANT_ID),
-    firmName: null,
-    slug: null,
-  }
+  // SECOND-FIRM-1: no firm named anywhere (legacy host, no ?firm=, no cookie) —
+  // FAIL CLOSED with actionable copy instead of silently landing on the Dev Firm.
+  throw new FirmNotFoundError(
+    '(no firm specified)',
+    'No firm was specified. Use your firm’s own link — its subdomain, or a link carrying ?firm=<your-firm> — to reach this page.',
+  )
 }
