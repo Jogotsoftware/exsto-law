@@ -52,8 +52,10 @@ export async function POST(request: Request) {
     )
   }
 
-  return mintClientSessionResponse(target.tenantId, target.clientContactId, {
-    redirect: '/portal',
-    path: '/portal',
-  })
+  return mintClientSessionResponse(
+    target.tenantId,
+    target.clientContactId,
+    { redirect: '/portal', path: '/portal' },
+    request,
+  )
 }

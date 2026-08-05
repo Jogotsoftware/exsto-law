@@ -1,6 +1,7 @@
 import { withSuperuser } from '@exsto/shared'
 import type { ActionContext } from '@exsto/substrate'
 import { readSessionFromCookieHeader } from '@/lib/session'
+import { checkTenantMatchesHost } from '@/lib/hostTenantGuard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -74,5 +75,13 @@ export async function resolveAttorneyCtx(
   // a short TTL so a page's many calls don't each pay a DB round-trip).
   const ok = await actorIsActive(actorId, tenantId)
   if (!ok) return { error: 'Session no longer valid.', status: 401 }
+  // HOST-TENANCY-1: on a firm subdomain, a session for any OTHER firm is refused
+  // outright — even a validly-signed one. Host-only cookies make this nearly
+  // unreachable (the cookie was minted on this host), so any hit means minting
+  // let something through or the tenant's slug changed; fail closed either way.
+  const hostCheck = await checkTenantMatchesHost(tenantId, request)
+  if (!hostCheck.ok) {
+    return { error: 'This session does not belong to this firm’s workspace.', status: 401 }
+  }
   return { tenantId, actorId }
 }

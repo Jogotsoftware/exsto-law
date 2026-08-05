@@ -9,6 +9,7 @@ import {
 } from '@exsto/legal'
 import { withSuperuser } from '@exsto/shared'
 import { signClientSession, buildClientSessionCookie } from '@/lib/clientSession'
+import { checkTenantMatchesHost } from '@/lib/hostTenantGuard'
 
 // Shared "turn a resolved client_contact into a portal session" path. BOTH the
 // magic-link consume route and the Supabase-Auth bridge funnel through here, so
@@ -69,9 +70,19 @@ export interface MintResult {
 export async function mintClientSession(
   tenantId: string,
   clientContactId: string,
+  request?: Request,
 ): Promise<MintResult> {
   if (!UUID_RE.test(tenantId) || !UUID_RE.test(clientContactId)) {
     return { ok: false, error: 'Invalid account reference.' }
+  }
+  // HOST-TENANCY-1: a session may only be minted on the firm host it belongs to.
+  // The cookie is host-only, so this is THE gate that keeps a firm subdomain's
+  // sessions single-tenant — everything downstream can then trust host ⇒ tenant.
+  if (request) {
+    const hostCheck = await checkTenantMatchesHost(tenantId, request)
+    if (!hostCheck.ok) {
+      return { ok: false, error: 'This account belongs to a different firm’s site.' }
+    }
   }
   const active = await isClientContactActive(tenantId, clientContactId)
   if (!active) {
@@ -126,8 +137,9 @@ export async function mintClientSessionResponse(
   tenantId: string,
   clientContactId: string,
   redirectInfo: { redirect: string; path: string },
+  request?: Request,
 ): Promise<NextResponse> {
-  const result = await mintClientSession(tenantId, clientContactId)
+  const result = await mintClientSession(tenantId, clientContactId, request)
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 401 })
   }

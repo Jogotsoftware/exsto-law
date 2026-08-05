@@ -120,8 +120,10 @@ export async function POST(request: Request) {
   // Bind the proven identity into a portal session (re-checks active + re-resolves
   // matterIds in the shared mint path) and sign them in. ORIGIN-1 rule 2: stay on
   // the host the user is on — the session cookie set here is host-only.
-  return mintClientSessionResponse(invite.tenantId, invite.clientContactId, {
-    redirect: `${requestOrigin(request)}${dest}`,
-    path: dest,
-  })
+  return mintClientSessionResponse(
+    invite.tenantId,
+    invite.clientContactId,
+    { redirect: `${requestOrigin(request)}${dest}`, path: dest },
+    request,
+  )
 }
