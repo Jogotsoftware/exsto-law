@@ -422,106 +422,101 @@ function FieldRow({
   const typeChoices = isMember
     ? FIELD_TYPES.filter((ft) => ft.value !== 'members_repeater')
     : FIELD_TYPES
+  // Size the token input to what it shows (value or placeholder slug) so long
+  // variables like registered_agent_address read whole instead of clipping.
+  const tokenShown = field.token || slug(field.label) || 'variable'
   return (
-    <div className="qb-field-row">
-      <input
-        className="qb-field-label"
-        value={field.label}
-        onChange={(e) => onChange({ label: e.target.value })}
-        placeholder="Question label"
-      />
-      <span
-        className="qb-var"
-        title="The variable this answer fills in the document template. Leave blank to use the question label."
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 1,
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          fontSize: '0.8rem',
-          color: 'var(--muted)',
-        }}
-      >
-        {'{{'}
+    <div className={`qb-q${isMember ? ' qb-q--member' : ''}`}>
+      <div className="qb-q-head">
         <input
-          value={field.token ?? ''}
-          onChange={(e) => onChange({ token: normToken(e.target.value) })}
-          placeholder={slug(field.label) || 'variable'}
-          spellCheck={false}
-          aria-label="Variable name"
-          style={{
-            width: '7.5rem',
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            padding: 'var(--space-1)',
-          }}
+          className="qb-field-label"
+          value={field.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder="Question label"
         />
-        {'}}'}
-      </span>
-      <select
-        value={field.type}
-        onChange={(e) => onChange({ type: e.target.value as FieldType })}
-        aria-label="Field type"
-      >
-        {typeChoices.map((ft) => (
-          <option key={ft.value} value={ft.value}>
-            {ft.label}
-          </option>
-        ))}
-      </select>
-      <label className="qb-req">
-        <input
-          type="checkbox"
-          checked={field.required}
-          onChange={(e) => onChange({ required: e.target.checked })}
-        />
-        Required
-      </label>
-      {onSaveToLibrary && (
-        <button
-          type="button"
-          className="qb-remove"
-          onClick={onSaveToLibrary}
-          title="Save this question to the library"
-          aria-label="Save this question to the library"
+        <span
+          className="qb-var"
+          title="The variable this answer fills in the document template. Leave blank to use the question label."
         >
-          <CopyIcon size={14} />
-        </button>
-      )}
-      <button
-        type="button"
-        className="qb-remove"
-        onClick={() => onMove(-1)}
-        disabled={index === 0}
-        title="Move question up"
-        aria-label="Move question up"
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="qb-remove"
-        onClick={() => onMove(1)}
-        disabled={index === count - 1}
-        title="Move question down"
-        aria-label="Move question down"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        className="qb-remove"
-        title="Remove field"
-        aria-label="Remove field"
-        onClick={onRemove}
-      >
-        <X size={14} aria-hidden />
-      </button>
-      <div className="qb-flags">
+          {'{{'}
+          <input
+            value={field.token ?? ''}
+            onChange={(e) => onChange({ token: normToken(e.target.value) })}
+            placeholder={slug(field.label) || 'variable'}
+            spellCheck={false}
+            aria-label="Variable name"
+            style={{ width: `${Math.min(38, Math.max(8, tokenShown.length + 1))}ch` }}
+          />
+          {'}}'}
+        </span>
+        <select
+          className="qb-type"
+          value={field.type}
+          onChange={(e) => onChange({ type: e.target.value as FieldType })}
+          aria-label="Field type"
+        >
+          {typeChoices.map((ft) => (
+            <option key={ft.value} value={ft.value}>
+              {ft.label}
+            </option>
+          ))}
+        </select>
+        <div className="qb-actions">
+          {onSaveToLibrary && (
+            <button
+              type="button"
+              className="qb-iconbtn"
+              onClick={onSaveToLibrary}
+              title="Save this question to the library"
+              aria-label="Save this question to the library"
+            >
+              <CopyIcon size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="qb-iconbtn"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            title="Move question up"
+            aria-label="Move question up"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="qb-iconbtn"
+            onClick={() => onMove(1)}
+            disabled={index === count - 1}
+            title="Move question down"
+            aria-label="Move question down"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="qb-iconbtn qb-danger"
+            title="Remove question"
+            aria-label="Remove question"
+            onClick={onRemove}
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+      </div>
+      <div className="qb-switches">
+        <label className="qb-switch">
+          <input
+            type="checkbox"
+            checked={field.required}
+            onChange={(e) => onChange({ required: e.target.checked })}
+          />
+          Required
+        </label>
         {/* "I don't know" has no sensible rendering for an attachment control —
             the /book renderer ignores it there, so don't author dead config. */}
         {field.type !== 'file_upload' && (
-          <label className="qb-req">
+          <label className="qb-switch">
             <input
               type="checkbox"
               checked={field.allowUnknown}
@@ -530,7 +525,7 @@ function FieldRow({
             Allow “I don’t know”
           </label>
         )}
-        <label className="qb-req">
+        <label className="qb-switch">
           <input
             type="checkbox"
             checked={field.askAttorney}
@@ -548,27 +543,29 @@ function FieldRow({
           placeholder="One option per line"
         />
       )}
-      {/* WP-7 — the Spanish client-facing text, edited beside the English.
-          Empty is safe: the Spanish intake falls back to English. */}
-      <input
-        className="qb-field-label"
-        value={field.labelI18n?.es ?? ''}
-        onChange={(e) =>
-          onChange({ labelI18n: { ...(field.labelI18n ?? {}), es: e.target.value } })
-        }
-        placeholder="Pregunta (Español, opcional)"
-        aria-label="Question label in Spanish"
-      />
-      {OPTION_TYPES.has(field.type) && (
-        <textarea
-          className="qb-options"
-          value={field.optionsEs}
-          onChange={(e) => onChange({ optionsEs: e.target.value })}
-          rows={2}
-          placeholder="Opciones en Español, una por línea (mismo orden)"
-          aria-label="Options in Spanish"
+      {/* WP-7 — the Spanish client-facing text, de-emphasized under the English
+          (UIWALK-2). Empty is safe: the Spanish intake falls back to English. */}
+      <div className="qb-es">
+        <input
+          className="qb-field-label"
+          value={field.labelI18n?.es ?? ''}
+          onChange={(e) =>
+            onChange({ labelI18n: { ...(field.labelI18n ?? {}), es: e.target.value } })
+          }
+          placeholder="Pregunta (Español, opcional)"
+          aria-label="Question label in Spanish"
         />
-      )}
+        {OPTION_TYPES.has(field.type) && (
+          <textarea
+            className="qb-options"
+            value={field.optionsEs}
+            onChange={(e) => onChange({ optionsEs: e.target.value })}
+            rows={2}
+            placeholder="Opciones en Español, una por línea (mismo orden)"
+            aria-label="Options in Spanish"
+          />
+        )}
+      </div>
       {field.type === 'members_repeater' && (
         <div className="qb-sub">
           <label className="qb-minitems">
@@ -648,23 +645,59 @@ export function QuestionnaireBuilder({
 
   return (
     <div className="qb-builder">
-      <p className="text-muted" style={{ fontSize: '0.82rem', margin: '-0.3rem 0 0.9rem' }}>
-        Each question’s <strong>variable</strong> is the <code>{'{{token}}'}</code> its answer fills
-        in the bound document template — set it to tie a question to a template field. Leave it
-        blank to default to the question label.
+      <p className="qb-intro">
+        Each question’s <code>{'{{variable}}'}</code> fills the matching field in the bound document
+        template. Leave it blank to default to the question label.
       </p>
 
       {sections.map((section, si) => (
-        <fieldset key={si} className="svc-fieldset qb-section">
-          <legend>
+        <section key={si} className="qb-card qb-section-card">
+          <div className="qb-card-head">
+            <span className="qb-num">Section {si + 1}</span>
             <input
-              className="qb-section-title"
+              className="qb-title-input"
               value={section.title}
               onChange={(e) => patchSection(si, { title: e.target.value })}
               placeholder={`Section ${si + 1} title`}
+              aria-label={`Section ${si + 1} title`}
             />
+            <div className="qb-actions">
+              <button
+                type="button"
+                className="qb-iconbtn"
+                onClick={() => onChange(moveTo(sections, si, si - 1))}
+                disabled={si === 0}
+                title="Move section up"
+                aria-label="Move section up"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="qb-iconbtn"
+                onClick={() => onChange(moveTo(sections, si, si + 1))}
+                disabled={si === sections.length - 1}
+                title="Move section down"
+                aria-label="Move section down"
+              >
+                ↓
+              </button>
+              {sections.length > 1 && (
+                <button
+                  type="button"
+                  className="qb-iconbtn qb-danger"
+                  title="Remove section"
+                  aria-label="Remove section"
+                  onClick={() => onChange(sections.filter((_, i) => i !== si))}
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="qb-es qb-es--section">
             <input
-              className="qb-section-title"
+              className="qb-field-label"
               value={section.titleI18n?.es ?? ''}
               onChange={(e) =>
                 patchSection(si, {
@@ -674,37 +707,7 @@ export function QuestionnaireBuilder({
               placeholder="Título (Español, opcional)"
               aria-label="Section title in Spanish"
             />
-            <button
-              type="button"
-              className="qb-remove"
-              onClick={() => onChange(moveTo(sections, si, si - 1))}
-              disabled={si === 0}
-              title="Move section up"
-              aria-label="Move section up"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="qb-remove"
-              onClick={() => onChange(moveTo(sections, si, si + 1))}
-              disabled={si === sections.length - 1}
-              title="Move section down"
-              aria-label="Move section down"
-            >
-              ↓
-            </button>
-            {sections.length > 1 && (
-              <button
-                type="button"
-                className="qb-remove"
-                title="Remove section"
-                onClick={() => onChange(sections.filter((_, i) => i !== si))}
-              >
-                Remove section
-              </button>
-            )}
-          </legend>
+          </div>
 
           {section.fields.map((field, fi) => (
             <FieldRow
@@ -725,29 +728,26 @@ export function QuestionnaireBuilder({
             />
           ))}
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 'var(--space-2)',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginTop: 'var(--space-2)',
-            }}
-          >
+          <div className="qb-add-row">
             <button
               type="button"
+              className="qb-add qb-add-q"
               onClick={() => patchSection(si, { fields: [...section.fields, NEW_FIELD()] })}
             >
-              + Add field
+              + Add question
             </button>
             <AddFromLibrary
               onPick={(lib) => patchSection(si, { fields: [...section.fields, fieldFromLib(lib)] })}
             />
           </div>
-        </fieldset>
+        </section>
       ))}
 
-      <button type="button" onClick={() => onChange([...sections, NEW_SECTION()])}>
+      <button
+        type="button"
+        className="qb-add"
+        onClick={() => onChange([...sections, NEW_SECTION()])}
+      >
         + Add section
       </button>
     </div>
