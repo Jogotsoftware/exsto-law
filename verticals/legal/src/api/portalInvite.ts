@@ -1,4 +1,5 @@
 import type { ActionContext } from '@exsto/substrate'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { getContact } from '../queries/contacts.js'
 import { queueNotification } from './notifications.js'
 import { restoreClientPortalAccess } from './portalAccess.js'
@@ -14,12 +15,6 @@ import { signPortalInviteToken } from './portalInviteToken.js'
 // Supabase Auth password and signs them straight in. Re-inviting is safe and
 // idempotent: it mints a fresh token and (on the route side) resets the password,
 // so this doubles as a password-reset path.
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 export interface PortalInviteResult {
   ok: boolean
@@ -56,7 +51,9 @@ export async function inviteClientToPortal(
     clientContactId: contactEntityId,
     tenantId: ctx.tenantId,
   })
-  const portalUrl = `${BASE_URL}/portal/set-password?token=${encodeURIComponent(token)}`
+  // ORIGIN-1: an invite link leaves the app on the firm's behalf — resolve the
+  // firm's own origin per call (never a module-level constant frozen at import).
+  const portalUrl = `${await firmOriginForTenant(ctx.tenantId)}/portal/set-password?token=${encodeURIComponent(token)}`
 
   await queueNotification(ctx, {
     routeKindName: 'client_portal_invite',

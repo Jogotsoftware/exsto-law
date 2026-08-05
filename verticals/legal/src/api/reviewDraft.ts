@@ -4,6 +4,7 @@ import {
   type ActionContext,
   type ActionResult,
 } from '@exsto/substrate'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { getMatter } from '../queries/matters.js'
 import { sendDraftLinkEmail, sendCommunicationDraft } from './email.js'
@@ -22,14 +23,6 @@ export interface DraftReviewInput {
   documentVersionId: string
   reviewNotes?: string
 }
-
-// Public base for the client-facing draft link (`/d/<versionId>`), server side —
-// mirrors clientRequests.ts. The browser builds the same URL via shareUrlFor().
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 // ─── P13: approve-time SYSTEM-token resolution ──────────────────────────────
 // The tokens the approve step itself can resolve, and their DETERMINISTIC
@@ -251,10 +244,12 @@ export async function approveDocument(
   if (!input.send) return { approved: true, sent: false }
 
   if (!draft) throw new Error(`Approved, but draft version not found to send: ${approvedVersionId}`)
+  // ORIGIN-1: the emailed `/d/<versionId>` link leaves the app on the firm's
+  // behalf — build it on the firm's own origin, resolved per call.
   await sendDraftLinkEmail(ctx, {
     matterEntityId: draft.matterEntityId,
     documentVersionId: approvedVersionId,
-    shareUrl: `${BASE_URL}/d/${approvedVersionId}`,
+    shareUrl: `${await firmOriginForTenant(ctx.tenantId)}/d/${approvedVersionId}`,
   })
   return { approved: true, sent: true }
 }

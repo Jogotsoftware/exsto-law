@@ -23,17 +23,12 @@ import {
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { requestOrigin } from '@/lib/requestOrigin'
 import { upsertConfirmedPasswordAccount, supabaseAdminConfigured } from '@/lib/supabaseAdmin'
 import { validatePassword } from '@/lib/passwordPolicy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-set-password:${clientIpFrom(request)}`)
@@ -123,9 +118,10 @@ export async function POST(request: Request) {
   }
 
   // Bind the proven identity into a portal session (re-checks active + re-resolves
-  // matterIds in the shared mint path) and sign them in.
+  // matterIds in the shared mint path) and sign them in. ORIGIN-1 rule 2: stay on
+  // the host the user is on — the session cookie set here is host-only.
   return mintClientSessionResponse(invite.tenantId, invite.clientContactId, {
-    redirect: `${BASE_URL}${dest}`,
+    redirect: `${requestOrigin(request)}${dest}`,
     path: dest,
   })
 }

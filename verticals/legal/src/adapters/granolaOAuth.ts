@@ -21,6 +21,7 @@
 // state. Refresh tokens are SINGLE-USE and rotate: every refresh returns a new
 // refresh_token that must be persisted, or the next refresh fails.
 import { createHash, randomBytes } from 'node:crypto'
+import { appBaseUrl } from '../lib/firmOrigin.js'
 
 const MCP_BASE = (process.env.GRANOLA_MCP_BASE ?? 'https://mcp.granola.ai').replace(/\/$/, '')
 
@@ -107,12 +108,9 @@ export function getGranolaRedirectUri(): string {
   // deterministic same-origin callback works with zero extra configuration.
   const override = process.env.GRANOLA_OAUTH_REDIRECT_URI
   if (override) return override.replace(/\/$/, '')
-  const base = (
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    process.env.URL ??
-    'https://exsto-law.netlify.app'
-  ).replace(/\/$/, '')
-  return `${base}/api/auth/granola/callback`
+  // ORIGIN-1 rule 3: OAuth callbacks live on the canonical host, never a firm
+  // subdomain — same base the callback route redirects from.
+  return `${appBaseUrl()}/api/auth/granola/callback`
 }
 
 // Scope: the protected-resource metadata (mcp.granola.ai/.well-known/

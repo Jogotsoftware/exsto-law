@@ -1,4 +1,5 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { quoteClientRequest, type RequestType, type RequestQuote } from './requestPricing.js'
 import { getRequestRecord, type RequestStatus } from '../queries/clientRequests.js'
 import { loadClientContactEmail, resolveClientMatterIds } from './clientIdentity.js'
@@ -9,12 +10,6 @@ import { queueNotification } from './notifications.js'
 // through an action handler; fulfilment also records the accepted amount as a matter
 // fee (legal.matter.add_fee) so it rolls into the next invoice. Status changes
 // notify the other party.
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 const TYPE_LABEL: Record<RequestType, string> = {
   meeting: 'Meeting',
@@ -103,7 +98,7 @@ export async function createClientRequest(
       request_type: TYPE_LABEL[input.requestType],
       amount: quote.amount,
       currency: quote.currency,
-      requests_url: `${BASE_URL}/attorney/requests`,
+      requests_url: `${await firmOriginForTenant(ctx.tenantId)}/attorney/requests`,
     },
   })
 
@@ -133,7 +128,7 @@ async function notifyClientOfUpdate(
     variables: {
       request_type: TYPE_LABEL[rec.requestType as RequestType] ?? rec.requestType,
       status,
-      portal_url: `${BASE_URL}/portal`,
+      portal_url: `${await firmOriginForTenant(ctx.tenantId)}/portal`,
     },
   })
 }

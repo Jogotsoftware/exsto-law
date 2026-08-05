@@ -20,16 +20,11 @@ import {
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { requestOrigin } from '@/lib/requestOrigin'
 import { emailConfirmationGate } from '@/lib/supabaseConfirmGuard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY
@@ -144,8 +139,10 @@ export async function POST(request: Request) {
     }
   }
 
+  // ORIGIN-1 rule 2: redirect on the host the user is on — the session cookie
+  // being set right here is host-only, so a cross-host redirect would strand it.
   return mintClientSessionResponse(contact.tenantId, contact.clientContactId, {
-    redirect: `${BASE_URL}${dest}`,
+    redirect: `${requestOrigin(request)}${dest}`,
     path: dest,
   })
 }

@@ -4,6 +4,7 @@ import {
   type ActionContext,
   type ActionResult,
 } from '@exsto/substrate'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { queueNotification } from './notifications.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import { assertEngagementAccepted } from './engagement.js'
@@ -20,8 +21,6 @@ import { assertEngagementAccepted } from './engagement.js'
 // both the portal and the attorney matter view: it returns only author + body +
 // sentAt (no actor names, no internal payload), tenant-scoped via RLS.
 // ───────────────────────────────────────────────────────────────────────────
-
-const BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? '').replace(/\/$/, '')
 
 export interface PortalMessage {
   author: 'client' | 'attorney'
@@ -106,7 +105,7 @@ export async function postClientMessage(
     variables: {
       matter_entity_id: input.matterEntityId,
       matter_number: matterNumber,
-      matter_url: BASE_URL ? `${BASE_URL}/attorney/matters/${input.matterEntityId}` : null,
+      matter_url: `${await firmOriginForTenant(ctx.tenantId)}/attorney/matters/${input.matterEntityId}`,
     },
   })
 
@@ -150,7 +149,7 @@ export async function postAttorneyMessage(
     variables: {
       matter_entity_id: input.matterEntityId,
       matter_number: matterNumber,
-      portal_url: BASE_URL ? `${BASE_URL}/portal` : null,
+      portal_url: `${await firmOriginForTenant(ctx.tenantId)}/portal`,
     },
   })
 

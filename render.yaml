@@ -33,3 +33,13 @@ services:
         sync: false
       - key: CLIENT_EMAIL_FROM
         value: noreply@revenueinstruments.com
+      # ORIGIN-1 — the worker builds absolute links in outgoing email (review
+      # links, signing links) and has no NEXT_PUBLIC_* injection, so it needs its
+      # own canonical base URL. Must match the Netlify site URL.
+      - key: APP_BASE_URL
+        sync: false
+      # Per-firm subdomain base (e.g. instruments.legal). Leave unset until the
+      # DNS cutover — unset keeps every generated URL on APP_BASE_URL. Must match
+      # the Netlify value when set.
+      - key: TENANT_BASE_DOMAIN
+        sync: false

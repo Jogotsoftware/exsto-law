@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import dns from 'node:dns'
-import { exchangeGoogleCode, resolvePlatformAdminByEmail } from '@exsto/legal'
+import { appBaseUrl, exchangeGoogleCode, resolvePlatformAdminByEmail } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { signSession, buildSessionCookie } from '@/lib/session'
 import { signAdminSession, buildAdminSessionCookie } from '@/lib/adminSession'
@@ -14,13 +14,10 @@ dns.setDefaultResultOrder('ipv4first')
 
 // Netlify Functions give Next.js a request.url with the internal port (80)
 // baked in, which leaks into NextResponse.redirect URLs and breaks the
-// browser's HTTPS handshake. Always build redirect targets off this hardcoded
-// base instead of trusting request.url's origin.
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
+// browser's HTTPS handshake. ORIGIN-1 rule 3: this whole OAuth flow lives on
+// the ONE registered redirect URI's host, so redirect targets are built off the
+// canonical appBaseUrl() — never request.url's origin, never a firm subdomain.
+const BASE_URL = appBaseUrl()
 
 function redirectToLoginWithError(message: string) {
   const safe = message && message.trim() ? message : 'unknown error'

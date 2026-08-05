@@ -1,5 +1,6 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { stageByKey } from '../lifecycle/resolve.js'
@@ -296,14 +297,13 @@ export async function getClientMatterTimeline(
       statusKey !== 'consultation_cancelled'
     let manageUrl: string | null = null
     if (upcoming) {
-      const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? '').replace(/\/$/, '')
-      if (baseUrl) {
-        try {
-          const tok = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
-          manageUrl = `${baseUrl}/book/manage/${tok}`
-        } catch {
-          manageUrl = null // signing secret unset — degrade to no manage link
-        }
+      // ORIGIN-1: the manage link is firm-facing — the firm's own origin.
+      const baseUrl = await firmOriginForTenant(ctx.tenantId)
+      try {
+        const tok = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
+        manageUrl = `${baseUrl}/book/manage/${tok}`
+      } catch {
+        manageUrl = null // signing secret unset — degrade to no manage link
       }
     }
 

@@ -8,6 +8,7 @@
 // thing N1 removes everywhere else.
 import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
+import { firmOriginForTenant } from '@exsto/legal'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 import { validatePassword } from '@/lib/passwordPolicy'
@@ -16,12 +17,6 @@ import type { ConfirmationEmailLang } from '@/lib/confirmationEmailTemplate'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-signup:${clientIpFrom(request)}`)
@@ -50,9 +45,11 @@ export async function POST(request: Request) {
 
   try {
     const pub = await resolvePublicTenant(request)
+    // ORIGIN-1: the confirmation link leaves the app on the firm's behalf —
+    // build it on the resolved firm's own origin.
     const account = await issuePortalConfirmationEmail(
       { tenantId: pub.tenantId, actorId: pub.actorId },
-      { email, password, baseUrl: BASE_URL, lang },
+      { email, password, baseUrl: await firmOriginForTenant(pub.tenantId), lang },
     )
     // 'exists' means an already-CONFIRMED account — don't claim we sent
     // anything; the client should sign in instead.

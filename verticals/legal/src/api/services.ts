@@ -12,6 +12,7 @@ import {
   resolveRepoDocumentTemplate,
   type IntakeQuestionnaire,
 } from '../templates/loader.js'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { parseTemplateEsignConfig, type TemplateEsignConfig } from '../queries/templates.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
@@ -2369,14 +2370,16 @@ export async function submitBooking(
 
   // Notifications (WP6, REQ-NOTIFY-01..03) — queued so the booking response
   // never waits on the Gmail API; failures retry in the worker.
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  // ORIGIN-1: every link in the confirmation emails is firm-facing — build them
+  // all on the firm's own origin, resolved once per booking.
+  const baseUrl = await firmOriginForTenant(ctx.tenantId)
   const firstName = input.clientFullName.split(/\s+/)[0]
   // Self-service manage-link token (minted once, reused for reschedule + cancel).
   // Best-effort: if the signing secret is unset, the email simply omits the
   // manage buttons (the booking itself must never fail over a missing link).
   // Intake-only matters have nothing to reschedule — no token, no manage links.
   let manageToken: string | null = null
-  if (baseUrl && scheduledAtIso) {
+  if (scheduledAtIso) {
     try {
       manageToken = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
     } catch (err) {
@@ -2424,14 +2427,14 @@ export async function submitBooking(
           timeZoneName: 'short',
         })
       : null,
-    matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
+    matter_url: `${baseUrl}/attorney/matters/${matterEntityId}`,
     // Client account access (PORTAL-1): when the contact has no portal account
     // yet, "Create your account" is a signed set-password invite (the same
     // token the send_portal_invite capability mints) — one click to a real
     // account, not a login form they have no password for. Existing accounts
     // get the login link, email pre-filled.
-    portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
-    account_url: baseUrl ? await buildAccountUrl() : null,
+    portal_url: `${baseUrl}/portal/login`,
+    account_url: await buildAccountUrl(),
     // Self-service reschedule / cancel: one HMAC-signed, tenant-bound token gates
     // the public /book/manage page (exsto-public-surface). The page opens on
     // reschedule; ?intent=cancel jumps straight to the cancel panel.
