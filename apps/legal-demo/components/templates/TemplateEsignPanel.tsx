@@ -3,8 +3,10 @@
 // ESIGN-UNIFY-1 ES-3 (§6.2, 15.20a) — the template editor's eSign panel. One
 // shared component for every template-editing surface (the standalone library
 // rail, the pop-up TemplateEditorModal, and — later — the service-builder
-// wizard's document step, §6.3): "Signable" toggle; role rows (label, key,
-// recipient-role select, bind select, order); a per-role "Insert block" button
+// wizard's document step, §6.3): "Signable" toggle; compact role cards
+// (UIWALK-2: label + corner ✕, order + recipient-role select, "Who is this?"
+// bind select — the marker key has no editor; it silently follows the label,
+// see the onChange in the label input); a per-role "Insert block" button
 // that inserts the role's canonical signature/name/date execution lines at the
 // cursor as RULED LINES (SignatureLine nodes carrying the marker in data
 // attributes — the attorney NEVER sees raw {{sign:…}} text, 15.16b; the
@@ -171,7 +173,8 @@ function CollectAtIntakeToggle({
 
   return (
     <div className="li-tplsign-slots li-tplsign-collectintake">
-      <label className="li-tplsign-collectintake-toggle">
+      {/* li-check (UIWALK-2, later in the sheet) wins the checkbox width reset. */}
+      <label className="li-check li-tplsign-collectintake-toggle">
         <input
           type="checkbox"
           checked={collecting}
@@ -291,15 +294,13 @@ export function TemplateEsignPanel({
       {config.signable && (
         <>
           <p className="li-tplsign-hint">
-            Who signs the finished document, in what order, and where each signer’s name and email
-            come from. Drag a field from <strong>Merge fields</strong> onto a signer to pull their
-            identity from the document — e.g. the client’s info onto the client, your info onto the
-            countersigner, an extra member’s onto a second signer.
+            Who signs, in what order, and where each signer’s name and email come from — drag a
+            field from <strong>Merge fields</strong> onto a signer to bind their identity.
           </p>
 
           {config.roles.map((role, i) => (
-            <div key={i} className="li-tplsign-role">
-              <div className="li-tplsign-role-row">
+            <div key={i} className="li-cc-card li-tplsign-role2">
+              <div className="li-cc-row">
                 <input
                   type="text"
                   className="li-tplsign-role-label"
@@ -321,28 +322,23 @@ export function TemplateEsignPanel({
                 />
                 <button
                   type="button"
-                  className="li-tplsign-role-remove"
+                  className="li-card-x"
                   aria-label={`Remove role ${role.label || role.key}`}
                   onClick={() => removeRole(i)}
                 >
                   <XIcon size={13} />
                 </button>
               </div>
-              <div className="li-tplsign-role-row li-tplsign-role-row--meta">
-                <label className="li-tplsign-field">
-                  <span>Marker key</span>
-                  <input
-                    type="text"
-                    value={role.key}
-                    aria-label={`Role ${i + 1} marker key`}
-                    onChange={(e) => patchRole(i, { key: slugKey(e.target.value) })}
-                  />
-                </label>
-                <label className="li-tplsign-field">
-                  <span>Signing order</span>
+              {/* UIWALK-2: the "Marker key" editor is gone — the key silently
+                  follows the role label (see above); attorneys never needed the
+                  slug, and drift chips below remain the recovery path. */}
+              <div className="li-cc-row">
+                <label className="li-cc-order">
+                  <span className="li-cc-label">Order</span>
                   <input
                     type="number"
                     min={1}
+                    className="li-cc-in"
                     value={role.order}
                     aria-label={`Role ${i + 1} signing order`}
                     onChange={(e) => {
@@ -351,57 +347,54 @@ export function TemplateEsignPanel({
                     }}
                   />
                 </label>
+                <select
+                  className="li-cc-select li-cc-grow"
+                  value={role.recipientRole}
+                  aria-label={`Role ${i + 1} recipient role`}
+                  onChange={(e) => {
+                    const recipientRole = e.target.value as EsignRecipientRole
+                    // "Add the next signer" only makes sense for a role that
+                    // actually signs interactively — drop it the moment this
+                    // row stops being needs_to_sign (parse would anyway).
+                    patchRole(i, {
+                      recipientRole,
+                      ...(recipientRole !== 'needs_to_sign' ? { allowAddNextSigner: false } : {}),
+                    })
+                  }}
+                >
+                  {RECIPIENT_ROLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="li-tplsign-role-row li-tplsign-role-row--meta">
-                <label className="li-tplsign-field">
-                  <span>Role</span>
-                  <select
-                    value={role.recipientRole}
-                    aria-label={`Role ${i + 1} recipient role`}
-                    onChange={(e) => {
-                      const recipientRole = e.target.value as EsignRecipientRole
-                      // "Add the next signer" only makes sense for a role that
-                      // actually signs interactively — drop it the moment this
-                      // row stops being needs_to_sign (parse would anyway).
-                      patchRole(i, {
-                        recipientRole,
-                        ...(recipientRole !== 'needs_to_sign' ? { allowAddNextSigner: false } : {}),
-                      })
-                    }}
-                  >
-                    {RECIPIENT_ROLE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="li-tplsign-field">
-                  <span>Resolves to</span>
-                  <select
-                    value={role.bind}
-                    aria-label={`Role ${i + 1} recipient binding`}
-                    onChange={(e) => {
-                      const bind = e.target.value as EsignRoleBindKind
-                      // Pre-signing is attorney-only — drop it if this row is no
-                      // longer the attorney (parse enforces this on save too).
-                      patchRole(i, {
-                        bind,
-                        ...(bind !== 'attorney_of_record' ? { presigned: false } : {}),
-                      })
-                    }}
-                  >
-                    {BIND_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                    {/* Preserve a loaded contact_role:* bind (read-only option). */}
-                    {role.bind.startsWith('contact_role:') && (
-                      <option value={role.bind}>Contact role: {role.bind.slice(13)}</option>
-                    )}
-                  </select>
-                </label>
+              <div className="li-cc-row">
+                <span className="li-cc-label">Who is this?</span>
+                <select
+                  className="li-cc-select li-cc-grow"
+                  value={role.bind}
+                  aria-label={`Role ${i + 1} recipient binding`}
+                  onChange={(e) => {
+                    const bind = e.target.value as EsignRoleBindKind
+                    // Pre-signing is attorney-only — drop it if this row is no
+                    // longer the attorney (parse enforces this on save too).
+                    patchRole(i, {
+                      bind,
+                      ...(bind !== 'attorney_of_record' ? { presigned: false } : {}),
+                    })
+                  }}
+                >
+                  {BIND_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                  {/* Preserve a loaded contact_role:* bind (read-only option). */}
+                  {role.bind.startsWith('contact_role:') && (
+                    <option value={role.bind}>Contact role: {role.bind.slice(13)}</option>
+                  )}
+                </select>
               </div>
 
               {/* PRESIGN-1 — the attorney can apply their saved signature
@@ -409,7 +402,7 @@ export function TemplateEsignPanel({
                   offered on the attorney row; the send blocks if no signature is
                   saved yet (Settings → signature). */}
               {role.bind === 'attorney_of_record' && (
-                <label className="li-tplsign-presign">
+                <label className="li-check">
                   <input
                     type="checkbox"
                     checked={role.presigned === true}
@@ -424,10 +417,7 @@ export function TemplateEsignPanel({
                       })
                     }
                   />
-                  <span>
-                    Pre-sign automatically — apply my saved signature at send, so only the client
-                    needs to sign.
-                  </span>
+                  <span>Pre-sign with my saved signature — only the client signs.</span>
                 </label>
               )}
 
@@ -438,16 +428,13 @@ export function TemplateEsignPanel({
                   auto-completing. Only meaningful for a role that actually
                   signs interactively. */}
               {role.recipientRole === 'needs_to_sign' && !role.presigned && (
-                <label className="li-tplsign-presign">
+                <label className="li-check">
                   <input
                     type="checkbox"
                     checked={role.allowAddNextSigner === true}
                     onChange={(e) => patchRole(i, { allowAddNextSigner: e.target.checked })}
                   />
-                  <span>
-                    Let this signer add another signer — offered instead of finishing, when their
-                    signature would otherwise be the last one.
-                  </span>
+                  <span>Signer can add another signer before finishing.</span>
                 </label>
               )}
 
@@ -457,15 +444,14 @@ export function TemplateEsignPanel({
                   party at drafting, and send creates one signature request per
                   party, each resolved to their contact captured at intake. */}
               {role.recipientRole === 'needs_to_sign' && !role.presigned && (
-                <label className="li-tplsign-presign">
+                <label className="li-check">
                   <input
                     type="checkbox"
                     checked={role.repeatPerParty === true}
                     onChange={(e) => patchRole(i, { repeatPerParty: e.target.checked })}
                   />
                   <span>
-                    One signature request per party — this role repeats for every contact on the
-                    matter (e.g. each LLC member captured at intake), however many there are.
+                    One signature request per contact on the matter (e.g. each LLC member).
                   </span>
                 </label>
               )}

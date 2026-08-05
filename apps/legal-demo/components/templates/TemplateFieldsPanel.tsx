@@ -1,12 +1,13 @@
 'use client'
 
 // Merge-fields panel — the right rail of the WP-E template editor (comp:
-// docs/design/legal-instruments TEMPLATE EDITOR § "Merge fields"). One card per
-// {{token}} already used in the body: the token chip (click to insert it again
-// at the cursor), a Required toggle, the humanized field label, and a type
-// select (7 types — text/textarea/date/number/currency/boolean/choice). Editing
-// type/required/default flows up via onChange as a TemplateVariables map, same
-// contract as before this restyle (this component's only consumer is
+// docs/design/legal-instruments TEMPLATE EDITOR § "Merge fields"). One compact
+// card per {{token}} already used in the body (UIWALK-2): row 1 = the token
+// chip (click to insert at the cursor, drag to place; grows + ellipsizes so
+// long tokens never wrap) and a ✱ required toggle; row 2 = type select (7
+// types — text/textarea/date/number/currency/boolean/choice) + default input.
+// Editing type/required/default flows up via onChange as a TemplateVariables
+// map, same contract as before this restyle (this component's only consumer is
 // app/attorney/templates/page.tsx).
 
 import type { TemplateVariables, TemplateVariableSpec, TemplateVariableType } from '@exsto/legal'
@@ -58,31 +59,33 @@ export function TemplateFieldsPanel({
       {tokens.map((t) => {
         const spec: TemplateVariableSpec = variables[t] ?? { type: 'text' }
         return (
-          <div key={t} className="li-tpl-field-card">
-            <div className="li-tpl-field-row">
+          <div key={t} className="li-cc-card">
+            <div className="li-cc-row">
               <button
                 type="button"
-                className="li-tpl-field-chip"
+                className="li-tpl-field-chip li-tpl-field-chip--grow"
                 onClick={() => onInsert?.(t)}
                 title={`Click to insert {{${t}}} at the cursor, or drag it onto the document or a signer`}
                 {...mergeFieldDragProps(t)}
               >
                 {`{{${t}}}`}
               </button>
-              <label className="li-tpl-field-required">
-                <input
-                  type="checkbox"
-                  checked={!!spec.required}
-                  onChange={(e) => update(t, { required: e.target.checked })}
-                  aria-label={`Require ${humanize(t)}`}
-                />
-                Required
-              </label>
+              <button
+                type="button"
+                className="li-cc-star"
+                aria-pressed={!!spec.required}
+                onClick={() => update(t, { required: !spec.required })}
+                title={
+                  spec.required ? 'Required — click to make optional' : 'Click to make required'
+                }
+                aria-label={`Require ${humanize(t)}`}
+              >
+                ✱
+              </button>
             </div>
-            <div className="li-tpl-field-row li-tpl-field-row--meta">
-              <span className="li-tpl-field-label">{humanize(t)}</span>
+            <div className="li-cc-row">
               <select
-                className="li-tpl-field-type"
+                className="li-cc-select li-tplf-type"
                 value={spec.type}
                 onChange={(e) => update(t, { type: e.target.value as TemplateVariableType })}
                 aria-label={`${humanize(t)} type`}
@@ -93,31 +96,32 @@ export function TemplateFieldsPanel({
                   </option>
                 ))}
               </select>
+              {spec.type === 'choice' ? (
+                <input
+                  type="text"
+                  className="li-cc-in li-tplf-default"
+                  placeholder="Option A, Option B, …"
+                  value={(spec.options ?? []).join(', ')}
+                  onChange={(e) =>
+                    update(t, {
+                      options: e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              ) : (
+                <input
+                  type="text"
+                  className="li-cc-in li-tplf-default"
+                  placeholder={spec.type === 'date' ? 'Default, e.g. today' : 'Default (optional)'}
+                  value={spec.default ?? ''}
+                  onChange={(e) => update(t, { default: e.target.value || undefined })}
+                  aria-label={`${humanize(t)} default`}
+                />
+              )}
             </div>
-            {spec.type === 'choice' ? (
-              <input
-                type="text"
-                className="li-tpl-field-default"
-                placeholder="Option A, Option B, …"
-                value={(spec.options ?? []).join(', ')}
-                onChange={(e) =>
-                  update(t, {
-                    options: e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            ) : (
-              <input
-                type="text"
-                className="li-tpl-field-default"
-                placeholder={spec.type === 'date' ? 'Default, e.g. today' : 'Default (optional)'}
-                value={spec.default ?? ''}
-                onChange={(e) => update(t, { default: e.target.value || undefined })}
-              />
-            )}
           </div>
         )
       })}

@@ -26991,3 +26991,175 @@ details.li-brief-research summary:hover {
 .li-dash-week .li-cal-root {
   padding: 0 22px 22px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UIWALK-2 — unified compact-card language (li-cc-*) + walkthrough-2 fixes.
+   Several rules below are same-specificity TAIL OVERRIDES of earlier blocks
+   (.li-esign2-ordertoggle, .li-tpl-fields, …) that win on source order only —
+   do not dedupe or reorder them into the earlier blocks.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Compact card — one unified card for rail/editor sub-items. position:relative
+   anchors the .li-card-x corner remove. */
+.li-cc-card {
+  position: relative;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-card);
+  padding: 8px 10px;
+}
+.li-cc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.li-cc-row + .li-cc-row {
+  margin-top: 6px;
+}
+.li-cc-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--li-muted-3);
+  flex: 0 0 auto;
+}
+/* Subtle borderless corner remove. Resets the global button padding/border —
+   the exact omission that collapsed .li-esign-wiz-rm's icon to 0 width. */
+.li-card-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--li-muted-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.li-card-x:hover:not(:disabled) {
+  color: var(--li-danger);
+  background: var(--li-danger-bg);
+}
+.li-card-x--inline {
+  position: static;
+  flex: 0 0 auto;
+}
+/* Checkbox + text row that defeats the global input { width: 100% } reset
+   (that reset gave checkbox flex items a 100% flex-basis and pushed their
+   label text outside the card). */
+.li-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 8px;
+  margin-bottom: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-check input {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--li-gold-deep);
+}
+.li-check > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Compact input/select (resets the global width:100% / 0.6rem padding). */
+.li-cc-in,
+.li-cc-select {
+  width: auto;
+  font-size: 12px;
+  color: var(--li-text);
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: var(--li-card);
+}
+.li-cc-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Star toggle = compact "required" control on merge-field cards. */
+.li-cc-star {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--li-muted-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.li-cc-star[aria-pressed='true'] {
+  color: var(--li-gold-deep);
+}
+.li-cc-star:hover:not(:disabled) {
+  background: var(--li-bg);
+}
+
+/* WP-1: merge-field cards — chip grows and ellipsizes (the old stacked rows
+   existed only because long tokens pushed "Required" off the card). */
+.li-tpl-field-chip--grow {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.li-tplf-type {
+  flex: 0 0 auto;
+}
+.li-tplf-default {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.li-tpl-fields {
+  gap: 7px;
+}
+
+/* WP-2: signer role cards on the unified compact card. */
+.li-tplsign-role2 {
+  margin-top: 10px;
+}
+.li-tplsign-role2 .li-tplsign-role-label {
+  margin-right: 20px;
+}
+.li-cc-order {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+.li-cc-order input {
+  width: 52px;
+}
+
+/* WP-6: eSign wizard — order toggle must not wrap into a column. */
+.li-esign2-ordertoggle {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.li-esign2-ordertoggle input {
+  width: auto;
+  flex: 0 0 auto;
+}
+.li-esign2-recip-tools {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}

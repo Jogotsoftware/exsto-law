@@ -892,9 +892,10 @@ export function EsignComposer({
                       {draft.recipients.length > 1 && (
                         <button
                           type="button"
-                          className="li-esign-wiz-rm"
+                          className="li-card-x li-card-x--inline"
                           onClick={() => removeRecipient(i)}
                           aria-label={`Remove recipient ${i + 1}`}
+                          title="Remove recipient"
                         >
                           <XIcon size={15} />
                         </button>
