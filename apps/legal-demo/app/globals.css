@@ -27165,6 +27165,138 @@ details.li-brief-research summary:hover {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   UIWALK-2 (PR-2) — template editor header + intake form builder.
+   Same-specificity tail overrides below (.li-tpl-name-input) win on source
+   order only — do not dedupe them into the earlier blocks.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The template name always shows a subtle underline so it reads as editable —
+   walkthrough finding: "No ability to edit the name" (it always was; the
+   borderless input just looked like a static title). */
+.li-tpl-name-input {
+  border-bottom-color: var(--li-border);
+}
+.li-tpl-name-input:hover,
+.li-tpl-name-input:focus {
+  border-bottom-color: var(--li-border-input);
+}
+
+/* One paperclip → a 2-item menu (attach-as-AI-context vs import-into-body).
+   Popover recipe borrowed from .li-esign-suggest. */
+.li-tpl-ai-attach-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.li-tpl-ai-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 260px;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(20, 32, 60, 0.14);
+  padding: 4px;
+}
+.li-tpl-ai-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--li-muted);
+}
+.li-tpl-ai-menu-item:hover:not(:disabled) {
+  background: var(--li-bg);
+}
+.li-tpl-ai-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.li-tpl-ai-menu-item svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.li-tpl-ai-menu-t {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-tpl-ai-menu-s {
+  display: block;
+  font-size: 11px;
+  color: var(--li-muted-2);
+  margin-top: 1px;
+}
+
+/* UIWALK-2 (PR-2): intake form builder on the revived qb-card family.
+   .qb-type kills the global select{width:100%} inheritance that forced the
+   type dropdown onto its own full-width line. */
+.qb-type {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 170px;
+  font-size: var(--text-sm);
+  padding: 0.35rem 0.5rem;
+}
+/* The token chip, previously inline-styled; the input sizes to content (ch
+   width set in TSX) so long variables read whole. */
+.qb-var {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.qb-var input {
+  min-width: 6rem;
+  max-width: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  padding: var(--space-1);
+  border: none;
+  background: transparent;
+}
+/* Spanish client-facing copy — present but quiet until focused. */
+.qb-es {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  opacity: 0.75;
+}
+.qb-es:focus-within {
+  opacity: 1;
+}
+.qb-es input,
+.qb-es textarea {
+  font-size: var(--text-sm);
+}
+.qb-es--section {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+}
+/* Per-member sub-questions sit one level in — lighter card, tighter padding. */
+.qb-q--member {
+  background: var(--surface);
+  padding: var(--space-3);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
    UIWALK-2 (PR-3) — firm brand color. --li-brand / --li-brand-deep are set
    INLINE on the shell roots (AttorneyShell on .li-shell; the portal page on
    .li-cp-shell) from the server-validated firm_header_color. The rules below
