@@ -22,6 +22,7 @@ import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientP
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
+import { brandVars } from '@/lib/brandColor'
 
 // LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
 // (docs/design/legal-instruments/legal-instruments.dc.html, Client Portal
@@ -194,6 +195,7 @@ interface HomeSummary {
     hasSignedAgreement: boolean
   }
   assistantEnabled: boolean
+  headerColor: string | null
 }
 
 interface NotificationItem {
@@ -323,7 +325,9 @@ export default function ClientPortalPage() {
 
   return (
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
-      <div className="li-cp-shell li-cpnav-shell">
+      {/* UIWALK-2: the firm's brand color rides the home summary; the portal
+          header (.li-cp-top tail rule) tints from --li-brand-deep. */}
+      <div className="li-cp-shell li-cpnav-shell" style={brandVars(home?.headerColor)}>
         <PortalSideNav
           items={navItems}
           active={view.kind}

@@ -321,6 +321,7 @@ export default function BookPage() {
   const [firmBranding, setFirmBranding] = useState<{
     firmName: string | null
     attorneyName: string | null
+    headerColor: string | null
   } | null>(null)
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
@@ -434,7 +435,11 @@ export default function BookPage() {
 
   // Resolve the firm's branding once on mount (topbar name + confirmation attorney).
   useEffect(() => {
-    callClientMcp<{ firmName: string | null; attorneyName: string | null }>({
+    callClientMcp<{
+      firmName: string | null
+      attorneyName: string | null
+      headerColor: string | null
+    }>({
       toolName: 'legal.public.firm_branding',
     })
       .then(setFirmBranding)
@@ -1053,7 +1058,10 @@ export default function BookPage() {
       <main className="bk-shell">
         <div className="bk-aurora" aria-hidden />
         <div className="bk-frame">
-          <BookTopbar firmName={firmBranding?.firmName ?? null} />
+          <BookTopbar
+            firmName={firmBranding?.firmName ?? null}
+            brandColor={firmBranding?.headerColor ?? null}
+          />
           <section className="bk-card bk-confirm" key="done">
             <div className="bk-success">
               <span className="bk-success-ring" aria-hidden />
@@ -1145,7 +1153,10 @@ export default function BookPage() {
       <main className="bk-shell">
         <div className="bk-aurora" aria-hidden />
         <div className="bk-frame">
-          <BookTopbar firmName={firmBranding?.firmName ?? null} />
+          <BookTopbar
+            firmName={firmBranding?.firmName ?? null}
+            brandColor={firmBranding?.headerColor ?? null}
+          />
           <section className="bk-card">
             <div className="bk-loading">
               <span className="bk-spinner" />
@@ -1168,6 +1179,7 @@ export default function BookPage() {
     return (
       <BookingChooser
         firmName={firmBranding?.firmName ?? null}
+        brandColor={firmBranding?.headerColor ?? null}
         onContinueAsNewClient={() => setChooserDismissed(true)}
       />
     )
@@ -1214,7 +1226,10 @@ export default function BookPage() {
     <main className="bk-shell">
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
-        <BookTopbar firmName={firmBranding?.firmName ?? null} />
+        <BookTopbar
+          firmName={firmBranding?.firmName ?? null}
+          brandColor={firmBranding?.headerColor ?? null}
+        />
         <BookProgress
           step={step}
           steps={PROGRESS_STEPS.filter(

@@ -50,22 +50,22 @@ export function AttorneyTopBar(): React.JSX.Element {
   // hardcoded FIRM_NAME literal: this bar renders for every firm's attorneys,
   // not just Pacheco's. Falls back to the product tagline while loading / if
   // a firm has not set a name yet — never a hardcoded firm literal.
-  // UIWALK-1: the bar also carries the firm's chosen header color (Settings →
-  // Firm Details) and, when one is uploaded, the firm logo (the same logo the
-  // invoice template owns) in place of the wordmark.
+  // UIWALK-1: when one is uploaded, the bar shows the firm logo (the same logo
+  // the invoice template owns) in place of the wordmark. The firm's brand
+  // color moved up to AttorneyShell (UIWALK-2) — CSS vars, not inline style.
   const [firmName, setFirmName] = useState<string | null>(null)
-  const [headerColor, setHeaderColor] = useState<string | null>(null)
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    callAttorneyMcp<{ settings: { firmName: string | null; headerColor: string | null } }>({
+    // UIWALK-2: the brand color no longer lives here — AttorneyShell sets
+    // --li-brand on .li-shell and the .li-topbar tail rule consumes it.
+    callAttorneyMcp<{ settings: { firmName: string | null } }>({
       toolName: 'legal.settings.get',
     })
       .then((r) => {
         if (cancelled) return
         setFirmName(r.settings.firmName)
-        setHeaderColor(r.settings.headerColor)
       })
       .catch(() => {
         /* leave the fallback tagline showing */
@@ -129,7 +129,7 @@ export function AttorneyTopBar(): React.JSX.Element {
   }
 
   return (
-    <header className="li-topbar" style={headerColor ? { background: headerColor } : undefined}>
+    <header className="li-topbar">
       <div className="li-topbar-firm">
         {logoDataUrl ? (
           <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="li-topbar-logo" />

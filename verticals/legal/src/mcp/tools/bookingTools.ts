@@ -24,18 +24,19 @@ const listServicesTool: Tool<Record<string, never>, { services: ServiceDefinitio
 // branding (topbar name + the confirmation's "consultation with …"). Runs under
 // the tenant the public route resolved, so each firm's funnel shows ITS OWN name
 // from data — never a hardcoded literal. Returns only the name + attorney display
-// name (no address/phone/email); honest nulls when a firm hasn't set them.
+// name + brand color (UIWALK-2 — a server-validated #rrggbb display color, no
+// address/phone/email); honest nulls when a firm hasn't set them.
 const firmBrandingTool: Tool<
   Record<string, never>,
-  { firmName: string | null; attorneyName: string | null }
+  { firmName: string | null; attorneyName: string | null; headerColor: string | null }
 > = {
   name: 'legal.public.firm_branding',
   description:
-    "The resolved firm's public identity for the booking page: firm name and attorney display name. Client-safe (name only).",
+    "The resolved firm's public identity for the booking page: firm name, attorney display name, and brand color. Client-safe (display fields only).",
   mode: 'read',
   handler: async (ctx: ActionContext) => {
     const s = await getTenantSettings(ctx)
-    return { firmName: s.firmName, attorneyName: s.attorneyName }
+    return { firmName: s.firmName, attorneyName: s.attorneyName, headerColor: s.headerColor }
   },
 }
 

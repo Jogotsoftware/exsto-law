@@ -4,6 +4,7 @@ import { resolveClientMatterIds } from '../api/clientIdentity.js'
 import { getEngagementConfig, getEngagementStatus } from '../api/engagement.js'
 import { getEngagementExecutedCopyRef } from '../api/engagementExecutedCopy.js'
 import { getLatestAttributeValue } from '../handlers/common.js'
+import { getFirmProfile } from '../api/tenantSettings.js'
 import { readPortalAssistantEnabled } from '../handlers/engagement.js'
 import { listClientDocuments } from '../api/esign.js'
 import { loadClientContactEmail, resolvePortalUserType } from '../api/clientIdentity.js'
@@ -58,6 +59,9 @@ export interface PortalHomeSummary {
     hasSignedAgreement: boolean
   }
   assistantEnabled: boolean
+  // UIWALK-2 (PR-3) — the firm's brand color (#rrggbb, server-validated) so the
+  // portal chrome can tint to the firm. Client-safe: a display color only.
+  headerColor: string | null
 }
 
 // Upcoming, non-cancelled consultations across the client's matters — the same
@@ -168,21 +172,31 @@ export async function getPortalHomeSummary(
   const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
   const email = await loadClientContactEmail(ctx.tenantId, clientContactId)
 
-  const [fullName, matters, consultations, esignDocs, invoices, feed, engagementStatus, config] =
-    await Promise.all([
-      withActionContext(ctx, (client) =>
-        getLatestAttributeValue<string>(client, ctx.tenantId, clientContactId, 'full_name'),
-      ),
-      listClientMatters(ctx, clientContactId, locale),
-      listUpcomingConsultations(ctx, matterIds),
-      email
-        ? listClientDocuments({ tenantId: ctx.tenantId, clientContactId, email, matterIds })
-        : Promise.resolve([]),
-      listClientInvoices(ctx, clientContactId),
-      listClientNotifications(ctx, clientContactId),
-      getEngagementStatus(ctx, clientContactId),
-      getEngagementConfig(ctx),
-    ])
+  const [
+    fullName,
+    matters,
+    consultations,
+    esignDocs,
+    invoices,
+    feed,
+    engagementStatus,
+    config,
+    firmProfile,
+  ] = await Promise.all([
+    withActionContext(ctx, (client) =>
+      getLatestAttributeValue<string>(client, ctx.tenantId, clientContactId, 'full_name'),
+    ),
+    listClientMatters(ctx, clientContactId, locale),
+    listUpcomingConsultations(ctx, matterIds),
+    email
+      ? listClientDocuments({ tenantId: ctx.tenantId, clientContactId, email, matterIds })
+      : Promise.resolve([]),
+    listClientInvoices(ctx, clientContactId),
+    listClientNotifications(ctx, clientContactId),
+    getEngagementStatus(ctx, clientContactId),
+    getEngagementConfig(ctx),
+    getFirmProfile(ctx),
+  ])
 
   const signatures: HomeAttentionSignature[] = esignDocs
     .filter((d) => d.state === 'awaiting_you')
@@ -245,5 +259,6 @@ export async function getPortalHomeSummary(
       hasSignedAgreement: Boolean(executedAgreementRef),
     },
     assistantEnabled,
+    headerColor: firmProfile.headerColor,
   }
 }

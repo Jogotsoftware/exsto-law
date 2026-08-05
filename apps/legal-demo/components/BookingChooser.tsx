@@ -16,9 +16,11 @@ import { useI18n } from '@/lib/i18n'
 // second path is chosen (the plan's "stepper appears only after choosing").
 export function BookingChooser({
   firmName,
+  brandColor = null,
   onContinueAsNewClient,
 }: {
   firmName: string | null
+  brandColor?: string | null
   onContinueAsNewClient: () => void
 }) {
   const { t } = useI18n()
@@ -29,7 +31,7 @@ export function BookingChooser({
     <main className="bk-shell">
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
-        <BookTopbar firmName={firmName} />
+        <BookTopbar firmName={firmName} brandColor={brandColor} />
         <section className="bk-card">
           <div className="bk-stage">
             <div className="bk-stage-head">
