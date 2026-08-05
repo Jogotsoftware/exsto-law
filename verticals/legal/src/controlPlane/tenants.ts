@@ -12,6 +12,7 @@ import {
   PLATFORM_TENANT_ID,
   SANDBOX_TENANT_ID,
 } from './context.js'
+import { validatePublicSlug } from '../lib/publicSlug.js'
 
 export interface TenantSummary {
   id: string
@@ -19,6 +20,7 @@ export interface TenantSummary {
   status: string
   createdAt: string
   reserved: boolean // platform/sandbox infrastructure tenant (not an ordinary firm)
+  publicSlug: string | null // the firm's subdomain handle ({slug}.instruments.legal)
 }
 
 export interface TenantDetail extends TenantSummary {
@@ -40,6 +42,7 @@ export async function listTenants(ctx: ActionContext): Promise<TenantSummary[]> 
       name: string
       status: string
       created_at: string
+      public_slug: string | null
     }>(`SELECT * FROM private.cp_list_tenants($1)`, [ctx.actorId])
     return r.rows
   })
@@ -49,6 +52,7 @@ export async function listTenants(ctx: ActionContext): Promise<TenantSummary[]> 
     status: t.status,
     createdAt: t.created_at,
     reserved: classify(t.id),
+    publicSlug: t.public_slug,
   }))
 }
 
@@ -65,6 +69,7 @@ export async function getTenant(
       created_at: string
       actor_count: string
       human_count: string
+      public_slug: string | null
     }>(`SELECT * FROM private.cp_get_tenant($1, $2)`, [ctx.actorId, tenantId])
     return r.rows[0] ?? null
   })
@@ -77,13 +82,43 @@ export async function getTenant(
     actorCount: Number(row.actor_count),
     humanCount: Number(row.human_count),
     reserved: classify(row.id),
+    publicSlug: row.public_slug,
   }
+}
+
+// Assign, rename, or clear (slug: null) a firm's public subdomain handle. Renames
+// are deliberately allowed — admin-only, and old-slug links break by design (the
+// console warns). Validation runs here AND in the SQL function (defense in depth).
+export async function setTenantSlug(
+  ctx: ActionContext,
+  input: { tenantId: string; slug: string | null },
+): Promise<{ tenantId: string; publicSlug: string | null }> {
+  await assertPlatformAdmin(ctx)
+  let slug: string | null = null
+  if (input.slug != null && input.slug.trim() !== '') {
+    const v = validatePublicSlug(input.slug)
+    if (!v.ok) throw new Error(v.error)
+    slug = v.slug
+  }
+  const publicSlug = await withAppRole(async (client) => {
+    const r = await client.query<{ id: string; public_slug: string | null }>(
+      `SELECT * FROM private.cp_set_tenant_slug($1, $2, $3)`,
+      [ctx.actorId, input.tenantId, slug],
+    )
+    if (!r.rows[0]) throw new Error('Slug update failed.')
+    return r.rows[0].public_slug
+  })
+  await recordControlPlaneAction(ctx, 'tenant.set_slug', input.tenantId, { slug }, { publicSlug })
+  return { tenantId: input.tenantId, publicSlug }
 }
 
 export interface BootstrapTenantInput {
   name: string
   ownerEmail: string
   ownerDisplayName?: string
+  // Optional subdomain handle assigned right after bootstrap (turn-key provisioning:
+  // firm + subdomain in one console action).
+  slug?: string
 }
 
 // Stand up a new tenant the substrate way (tenant -> actors -> cloned core kind
@@ -116,6 +151,20 @@ export async function bootstrapTenant(
     { name, ownerEmail, ownerDisplayName: input.ownerDisplayName ?? null },
     { tenantId, ownerActorId },
   )
+  // Slug last, after the bootstrap audit row: a slug collision must not orphan the
+  // audit trail. The tenant EXISTS at this point either way — so a slug failure is
+  // reported as exactly that, and the admin assigns a different slug from the
+  // tenant detail page rather than re-running bootstrap.
+  if (input.slug && input.slug.trim() !== '') {
+    try {
+      await setTenantSlug(ctx, { tenantId, slug: input.slug })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Tenant "${name}" was created (id ${tenantId}), but the subdomain could not be assigned: ${msg}`,
+      )
+    }
+  }
   return { tenantId, ownerActorId }
 }
 

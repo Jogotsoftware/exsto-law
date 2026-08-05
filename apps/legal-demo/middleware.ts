@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { PUBLIC_SLUG_RE, RESERVED_SLUGS } from '@exsto/legal/slug'
 
 // MULTI-TENANT-1 (Phase 1) — resolve WHICH firm a public funnel request is for,
 // source-agnostically, at the edge. This runs in the Edge runtime, so it does NO
@@ -15,8 +16,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 // default. An incoming x-firm-slug is always cleared first, so only this middleware —
 // never a forged request header — decides the slug.
 
-// A firm slug is a single DNS label: lowercase alphanumerics + hyphens.
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62})$/
+// A firm slug is a single DNS label — SLUG-PROV-1: the shared definition in
+// @exsto/legal/slug (dependency-free, Edge-safe) so middleware, the control-plane
+// write path, and the SQL validator can never disagree.
+const SLUG_RE = PUBLIC_SLUG_RE
 // Persist a ?firm= selection for an hour so the bare-host funnel keeps its firm across
 // the multi-step wizard without threading the query onto every fetch.
 const FIRM_COOKIE = 'firm_slug'
@@ -37,7 +40,10 @@ function slugFromHost(hostname: string): string | null {
   const host = hostname.toLowerCase()
   if (host === base || !host.endsWith(`.${base}`)) return null
   const label = host.slice(0, host.length - base.length - 1)
-  if (!label || label === 'www' || label.includes('.')) return null
+  if (!label || label.includes('.')) return null
+  // Reserved labels (www, app, api, admin, …) are infrastructure/product hosts,
+  // never firms — the canonical app host itself must resolve slug-less.
+  if (RESERVED_SLUGS.has(label)) return null
   return sanitizeSlug(label)
 }
 
