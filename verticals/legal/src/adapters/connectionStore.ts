@@ -227,6 +227,24 @@ export async function listConnections(
   })
 }
 
+// SECOND-FIRM-1 — every tenant with an ACTIVE connection for a provider, for
+// flows that arrive with NO tenant context at all (the single global Granola
+// webhook endpoint). Cross-tenant by necessity (withSuperuser, metadata only —
+// no secrets); consumers then resolve each tenant's own actor/secret and follow
+// the data from there. Ordered for determinism.
+export async function listConnectedTenants(provider: string): Promise<string[]> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{ tenant_id: string }>(
+      `SELECT DISTINCT tenant_id
+       FROM legal_integration_connection
+       WHERE provider = $1 AND status = 'connected'
+       ORDER BY tenant_id`,
+      [provider],
+    )
+    return res.rows.map((r) => r.tenant_id)
+  })
+}
+
 // The attorney whose connection firm-level flows use when no specific attorney is
 // in context — the public booking event + automated emails. Until per-attorney
 // booking links land (track B), this is the firm's primary (earliest-connected)

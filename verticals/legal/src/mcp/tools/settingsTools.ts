@@ -55,7 +55,7 @@ import {
   type EngagementLetterSummary,
   type EngagementTemplateValue,
 } from '../../index.js'
-import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
+import { firmSenderDisplayName } from '../../adapters/gmail.js'
 import type { ActionContext } from '@exsto/substrate'
 
 // ── Tenant settings (firm info + defaults) ───────────────────────────────────
@@ -122,7 +122,8 @@ registerTool({
   mode: 'read',
   handler: async (ctx: ActionContext) => ({
     signature: await getFirmSignature(ctx),
-    sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME,
+    // SECOND-FIRM-1: the read-out mirrors what sendEmail resolves per tenant.
+    sendAsDisplayName: firmSenderDisplayName((await getTenantSettings(ctx)).firmName),
   }),
 } satisfies Tool<Record<string, never>, SignatureGetResult>)
 
@@ -133,7 +134,10 @@ registerTool({
   mode: 'write',
   handler: async (ctx: ActionContext, input) => {
     const { signature } = await setFirmSignature(ctx, input)
-    return { signature, sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME }
+    return {
+      signature,
+      sendAsDisplayName: firmSenderDisplayName((await getTenantSettings(ctx)).firmName),
+    }
   },
 } satisfies Tool<SetFirmSignatureInput, SignatureGetResult>)
 

@@ -17,6 +17,7 @@ import type { FieldPlacement } from '../esign/placements.js'
 import { isSignatureImageDataUrl } from '../esign/fields.js'
 import type { StampField } from '../esign/stampPdf.js'
 import type { FileCertInput } from '../esign/fileCertificate.js'
+import { readProfileFirmName } from '../lib/firmDisplayName.js'
 import { renderDraftPdf, draftWatermarkText } from '../render/draftPdf.js'
 
 export type PlacementSource =
@@ -333,6 +334,10 @@ export async function loadExecutedStampPlan(
       consent: s.consent,
     }))
 
+    // SECOND-FIRM-1: the stamped certificate page names THIS tenant's firm (or
+    // stays generic) — never a hardcoded firm.
+    const certFirmName = (await readProfileFirmName(client, ctx.tenantId).catch(() => null)) ?? null
+
     const plans: ExecutedStampPlan[] = []
     for (let d = 0; d < docsRes.rows.length; d++) {
       const docRow = docsRes.rows[d]!
@@ -357,6 +362,7 @@ export async function loadExecutedStampPlan(
           sizeBytes: docRow.size_bytes ? Number(docRow.size_bytes) : null,
           sha256Hex: docRow.sha256_hex,
           signers: certSigners,
+          firmName: certFirmName,
         },
       })
     }
@@ -370,7 +376,7 @@ export async function loadExecutedStampPlan(
  *  bad token, empty array when nothing to stamp. */
 export async function loadExecutedStampPlanByToken(token: string): Promise<ExecutedStampPlan[]> {
   const tok = verifySigningToken(token)
-  return loadExecutedStampPlan(signingCtx(tok.tenantId), tok.envelopeId)
+  return loadExecutedStampPlan(await signingCtx(tok.tenantId), tok.envelopeId)
 }
 
 function safeParseRecord(raw: string | null): Record<string, string> | null {

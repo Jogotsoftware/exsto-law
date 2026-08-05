@@ -27,11 +27,19 @@ import {
   StripeNotConfiguredError,
 } from '../adapters/stripe.js'
 import { getClientInvoiceByNumber } from '../queries/clientBilling.js'
+import { ingestionContext } from './granolaIngestion.js'
 
-// The firm's public-intake SYSTEM actor — the webhook records payments as this
-// actor (the client's identity lives on client_contact, not the action actor;
-// mirrors granolaIngestion's ingestionContext). Overridable for tests/deploys.
-const SYSTEM_ACTOR = '00000000-0000-0000-0001-000000000001'
+// SECOND-FIRM-1: the webhook records payments as the RESOLVED tenant's own
+// system actor (ingestionContext — prefers the historical tenant-zero system
+// actor there, so attribution is unchanged; any other tenant gets its own
+// actor, where the tenant-zero id has no row and would FK-fail). The client's
+// identity lives on client_contact, not the action actor. LEGAL_PAYMENTS_ACTOR_ID
+// stays as an explicit per-deploy override for tests.
+async function paymentsCtx(tenantId: string): Promise<ActionContext> {
+  const override = process.env.LEGAL_PAYMENTS_ACTOR_ID
+  if (override) return { tenantId, actorId: override }
+  return ingestionContext(tenantId)
+}
 
 export interface FirmPaymentStatus {
   /** Platform Stripe keys present on this deployment at all. */
@@ -273,10 +281,7 @@ export interface RecordStripePaymentResult {
 export async function recordStripePayment(
   args: RecordStripePaymentArgs,
 ): Promise<RecordStripePaymentResult> {
-  const ctx: ActionContext = {
-    tenantId: args.tenantId,
-    actorId: process.env.LEGAL_PAYMENTS_ACTOR_ID ?? SYSTEM_ACTOR,
-  }
+  const ctx: ActionContext = await paymentsCtx(args.tenantId)
   const amount = (args.amountCents / 100).toFixed(2)
   // Structural idempotency: if the invoice is already paid, this is a duplicate
   // delivery (Stripe is at-least-once) — ack WITHOUT depending on the handler's
@@ -385,18 +390,15 @@ export async function handleStripeWebhook(
   if (event.type === 'account_updated') {
     const tenantId = await resolveTenantByStripeAccount(event.accountId)
     if (tenantId) {
-      await submitAction(
-        { tenantId, actorId: process.env.LEGAL_PAYMENTS_ACTOR_ID ?? SYSTEM_ACTOR },
-        {
-          actionKindName: 'legal.firm.connect_stripe',
-          intentKind: 'automatic_sync',
-          payload: {
-            account_id: event.accountId,
-            charges_enabled: event.chargesEnabled,
-            details_submitted: event.detailsSubmitted,
-          },
+      await submitAction(await paymentsCtx(tenantId), {
+        actionKindName: 'legal.firm.connect_stripe',
+        intentKind: 'automatic_sync',
+        payload: {
+          account_id: event.accountId,
+          charges_enabled: event.chargesEnabled,
+          details_submitted: event.detailsSubmitted,
         },
-      )
+      })
     }
     return { ok: true, status: 200, handled: 'account_updated' }
   }

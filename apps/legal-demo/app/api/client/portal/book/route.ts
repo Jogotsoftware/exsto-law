@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
   } catch (e) {
     if (e instanceof FirmNotFoundError) {
-      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+      return NextResponse.json({ error: e.message }, { status: 404 })
     }
     throw e
   }

@@ -54,11 +54,13 @@ const EMPTY: TenantSettings = {
 // foundation. Firm-settings editing arrives with the Phase 1 library layer
 // (schema-as-data, not a bespoke table); until then reads degrade to defaults
 // so Settings renders, and writes refuse loudly.
-const FIRM_DEFAULTS: TenantSettings = {
-  ...EMPTY,
-  firmName: 'Pacheco Law Firm',
-  attorneyName: 'Juan Carlos Pacheco',
-}
+// SECOND-FIRM-1: neutralized. This used to carry the demo firm's identity
+// (its firm + attorney name) — wrong for every other tenant the moment firm #2
+// exists, and the standing rule (#282-285) is that a firm default must NEVER
+// reach document merge. It is now honestly empty (unset renders generic "the
+// firm" copy at the call sites); the const is kept only so the two degrade
+// paths below stay visibly distinct in intent.
+const FIRM_DEFAULTS: TenantSettings = { ...EMPTY }
 
 // P13 — firm identity now lives the substrate-native way: firm_name /
 // firm_address / firm_phone / firm_email attributes on the per-tenant

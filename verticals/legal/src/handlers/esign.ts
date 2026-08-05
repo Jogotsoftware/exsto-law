@@ -48,6 +48,7 @@ import {
   type EsignField,
 } from '../esign/fields.js'
 import { buildFileCertificateMarkdown } from '../esign/fileCertificate.js'
+import { readProfileFirmName } from '../lib/firmDisplayName.js'
 import type { FieldPlacement } from '../esign/placements.js'
 // ESIGN-UNIFY-1 (ES-1, design §9.2): role-aware dispatch/completion decisions
 // are PURE functions (esign/routing.ts) so the sign/view/copy × order matrix is
@@ -1538,6 +1539,9 @@ async function writeExecutedVersion(
   // bytes via the SHA-256 recorded at upload. The file is untouched (immutable
   // in Storage); tamper-evidence is the hash, same doctrine as the markdown path.
   if (original.objectKey) {
+    // SECOND-FIRM-1: the certificate names THIS tenant's firm (profile read on
+    // the action-transaction client), or stays generic — never a hardcoded firm.
+    const firmName = (await readProfileFirmName(client, tenantId).catch(() => null)) ?? null
     const cert = buildFileCertificateMarkdown({
       envelopeId,
       filename: original.filename,
@@ -1545,6 +1549,7 @@ async function writeExecutedVersion(
       sizeBytes: original.sizeBytes,
       sha256Hex: original.sha256Hex,
       signers,
+      firmName,
     })
     const contentBlobId = await insertContentBlob(client, {
       tenantId,

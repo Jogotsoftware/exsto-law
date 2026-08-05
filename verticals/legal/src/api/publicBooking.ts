@@ -26,9 +26,11 @@ import { getGoogleStatus } from './google.js'
 // never an authenticated human. Client identity lives in the created contact row.
 // Resolve the RESOLVED firm's OWN system actor per booking: a single global const
 // (tenant zero's …0005) FK-fails booking.create/client.create for ANY other tenant,
-// whose …0005 does not exist. Falls back to the historical env/const so tenant-zero
-// behavior is unchanged.
-const PUBLIC_INTAKE_ACTOR_FALLBACK =
+// whose …0005 does not exist. SECOND-FIRM-1: this id is now only a PREFERENCE for
+// tenant zero's historical actor (stable attribution there) — it is never returned
+// for a tenant that doesn't contain it; a tenant with no system/agent actor FAILS
+// CLOSED instead (see below).
+const PUBLIC_INTAKE_ACTOR_PREFERRED =
   process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 // The tenant's own public-intake actor: the historical …0005 when it exists in this
@@ -51,9 +53,20 @@ export async function resolvePublicIntakeActor(tenantId: string): Promise<string
         ORDER BY (id = $2) DESC,
                  CASE actor_type WHEN 'system' THEN 0 ELSE 1 END, created_at
         LIMIT 1`,
-      [tenantId, PUBLIC_INTAKE_ACTOR_FALLBACK],
+      [tenantId, PUBLIC_INTAKE_ACTOR_PREFERRED],
     )
-    return res.rows[0]?.id ?? PUBLIC_INTAKE_ACTOR_FALLBACK
+    const id = res.rows[0]?.id
+    if (!id) {
+      // SECOND-FIRM-1: FAIL CLOSED. Returning tenant zero's …0005 here would not
+      // "work" for any other tenant anyway — the id has no actor row there, so
+      // every downstream write FK-fails with a far more confusing error. A tenant
+      // with no seeded system/agent actor is mis-provisioned; say so.
+      throw new Error(
+        `No active public-intake system actor in tenant ${tenantId} — ` +
+          'seed a system/agent actor (tenant provisioning) before exposing public surfaces.',
+      )
+    }
+    return id
   })
 }
 

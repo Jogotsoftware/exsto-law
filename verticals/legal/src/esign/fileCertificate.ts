@@ -21,6 +21,9 @@ export interface FileCertInput {
   sizeBytes: number | null
   sha256Hex: string | null
   signers: FileCertSigner[]
+  /** SECOND-FIRM-1: the executing firm's name, resolved per tenant by the
+   *  caller. Absent/null → generic wording, never a hardcoded firm. */
+  firmName?: string | null
 }
 
 // ES-2 (§5.4) — the SAME certificate content as plain text lines, for the
@@ -59,7 +62,9 @@ export function buildFileCertificateMarkdown(input: FileCertInput): string {
   return [
     '## Signature Certificate',
     '',
-    'This document was executed electronically via Pacheco Law. Each signer below',
+    `This document was executed electronically${
+      input.firmName ? ` via ${input.firmName}` : ''
+    }. Each signer below`,
     'reviewed the document and adopted their signature with intent to sign.',
     '',
     fileLine,

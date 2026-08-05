@@ -9,6 +9,7 @@
 // so an attacker without the link can reach nothing (exsto-public-surface §1).
 import { withActionContext, type ActionContext, type ActionResult } from '@exsto/substrate'
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
+import { resolvePublicIntakeActor } from './publicBooking.js'
 import { rescheduleBooking, cancelBooking } from './calendarWorkspace.js'
 import { getService } from './services.js'
 import { getTenantSettings } from './tenantSettings.js'
@@ -22,11 +23,12 @@ export { signBookingManageToken }
 
 // The public-intake SYSTEM actor in the firm's tenant (same actor the public
 // booking submit and e-sign link flows run as). Client identity lives on the
-// matter's client_contact, not this actor (ADR 0035).
-const MANAGE_ACTOR = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
-
-function manageCtx(tenantId: string): ActionContext {
-  return { tenantId, actorId: MANAGE_ACTOR }
+// matter's client_contact, not this actor (ADR 0035). SECOND-FIRM-1: resolved
+// PER TENANT off the SIGNED token's tenant (resolvePublicIntakeActor) — tenant
+// zero's global …0005 actor id has no row in any other tenant and would
+// FK-fail the reschedule/cancel writes there.
+async function manageCtx(tenantId: string): Promise<ActionContext> {
+  return { tenantId, actorId: await resolvePublicIntakeActor(tenantId) }
 }
 
 export interface ManageableBooking {
@@ -58,7 +60,7 @@ interface MatterRow {
 async function loadMatter(
   tok: BookingManageTokenPayload,
 ): Promise<{ ctx: ActionContext; row: MatterRow | null }> {
-  const ctx = manageCtx(tok.tenantId)
+  const ctx = await manageCtx(tok.tenantId)
   const row = await withActionContext(ctx, async (client) => {
     const res = await client.query<MatterRow>(
       `SELECT

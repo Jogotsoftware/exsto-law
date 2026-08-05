@@ -340,6 +340,10 @@ export default function BookPage() {
   const [step, setStep] = useState<Step>('service')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // SECOND-FIRM-1: a bare /book visit with no firm resolvable (no subdomain, no
+  // ?firm=, no cookie) fails closed server-side (404). Render a clear "use your
+  // firm's booking link" state instead of an endless spinner + raw error.
+  const [firmNotFound, setFirmNotFound] = useState(false)
 
   // A1.1: the two-path chooser gates the wizard on first paint — "Continue As
   // New Client" (or a ?service= preset, which already implies that choice)
@@ -457,7 +461,17 @@ export default function BookPage() {
       .then((r) =>
         setServices([...r.services.filter((s) => s.bookable === true), SOMETHING_ELSE_TILE]),
       )
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        // The MCP route 404s with the FirmNotFoundError copy when no firm is
+        // resolvable for this request (SECOND-FIRM-1 — the funnel never falls
+        // back to a default tenant). Show the dedicated state, not a raw error.
+        if (msg.includes('Request failed (404)')) {
+          setFirmNotFound(true)
+          return
+        }
+        setError(msg)
+      })
   }, [])
 
   // A signed-in client never sees the contact step (the ?service preset jumps
@@ -1259,7 +1273,24 @@ export default function BookPage() {
               </div>
             )}
 
-            {step === 'service' && (
+            {step === 'service' && firmNotFound && (
+              <div className="bk-notice" role="note">
+                <strong>
+                  {t('funnel.nofirm.title', undefined, 'Which firm are you booking with?')}
+                </strong>
+                <p style={{ marginTop: 8 }}>
+                  {t(
+                    'funnel.nofirm.body',
+                    undefined,
+                    'This page needs your firm’s own booking link to know who you are booking ' +
+                      'with — the firm’s web address (its subdomain) or a link that includes ' +
+                      '?firm=. Please use the booking link your firm shared with you, or ask ' +
+                      'the firm to send it.',
+                  )}
+                </p>
+              </div>
+            )}
+            {step === 'service' && !firmNotFound && (
               <>
                 {/* The "already working with us?" fork now lives on the
                     chooser screen (A1.1), rendered before this step is ever
