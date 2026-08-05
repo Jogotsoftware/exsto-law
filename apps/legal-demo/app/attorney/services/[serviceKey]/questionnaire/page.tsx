@@ -228,11 +228,8 @@ export default function QuestionnaireEditorPage() {
   return (
     <>
       {promptElement}
-      <p className="li-svc-hint">
-        Each question&rsquo;s <strong style={{ color: '#48546e' }}>variable</strong> is the{' '}
-        <code>{'{{token}}'}</code> its answer fills in the bound document. Leave it blank to default
-        to the question label.
-      </p>
+      {/* UIWALK-2: the {{token}} helper renders once, inside QuestionnaireBuilder
+          (qb-intro) — this page's duplicate copy is gone. */}
       <div
         style={{
           display: 'flex',

@@ -133,21 +133,27 @@ function humanize(token: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : token
 }
 
-// Normalize a typed document kind to the snake_case tag style the library uses
-// ("Operating Agreement" → operating_agreement) so promotion-time matching stays
-// exact-string. Keeps a trailing "_" so "operating_" types cleanly mid-word.
-function normKind(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .slice(0, 60)
+// UIWALK-2: the document kind is no longer typed by the attorney — it derives
+// from the template name on create. Local mirror of the server's
+// capabilityRuntime.slugifyDocKind (not imported: a runtime barrel import in
+// this client component trips the next-build client-barrel gotcha from #496);
+// generation/regeneration fall back to the SAME transform when docKind is null.
+function deriveDocKind(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'document'
+  )
 }
 
-// Canonical form for ASSOCIATION comparisons (review finding on #284): the
-// docKind combobox keeps trailing underscores while typing (normKind), MCP
-// writers store free-text kinds verbatim, and service documents are slugified —
-// three spellings of the same kind. Slug both sides of the includes() the same
-// way so "Operating Agreement " still associates with operating_agreement.
+// Canonical form for ASSOCIATION comparisons (review finding on #284): stored
+// kinds may carry trailing underscores (legacy combobox typing), MCP writers
+// store free-text kinds verbatim, and service documents are slugified — three
+// spellings of the same kind. Slug both sides of the includes() the same way
+// so "Operating Agreement " still associates with operating_agreement.
 function canonKind(s: string): string {
   return s
     .toLowerCase()
@@ -161,82 +167,10 @@ function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// Searchable document-kind combobox: the kinds already in the library as click
-// options, filtered as you type, plus "use as new kind" for anything novel (beta
-// feedback: the raw text input read as a schema field, not a control). Unchanged
-// by WP-E — an app-only meta control the comp's static demo doesn't model.
-function DocKindCombobox({
-  value,
-  kinds,
-  onChange,
-}: {
-  value: string
-  kinds: string[]
-  onChange: (v: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  // What the attorney typed, shown verbatim while editing; null means "not
-  // editing — display the stored slug in human form". The slug never surfaces.
-  const [text, setText] = useState<string | null>(null)
-  const needle = value.trim().toLowerCase()
-  const matches = needle ? kinds.filter((k) => k.includes(needle)) : kinds
-  const isNew = needle.length > 0 && !kinds.includes(needle)
-  return (
-    <span className="tpl-kind-combo">
-      <input
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-label="Document kind"
-        value={text ?? (value ? humanKind(value) : '')}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          setOpen(false)
-          setText(null)
-        }}
-        onChange={(e) => {
-          setText(e.target.value)
-          onChange(normKind(e.target.value))
-          setOpen(true)
-        }}
-        placeholder="Search or add a kind…"
-      />
-      {open && (matches.length > 0 || isNew) && (
-        <div className="tpl-kind-pop" role="listbox">
-          {matches.map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={`tpl-var-suggest-item${k === needle ? ' active' : ''}`}
-              // mousedown (not click) so the input's blur doesn't close the list first.
-              onMouseDown={(e) => {
-                e.preventDefault()
-                onChange(k)
-                setText(null)
-                setOpen(false)
-              }}
-            >
-              {humanKind(k)}
-            </button>
-          ))}
-          {isNew && (
-            <button
-              type="button"
-              className="tpl-var-suggest-item tpl-kind-new"
-              onMouseDown={(e) => {
-                e.preventDefault()
-                setText(null)
-                setOpen(false)
-              }}
-            >
-              + Use new kind “{humanKind(needle)}”
-            </button>
-          )}
-        </div>
-      )}
-    </span>
-  )
-}
+// UIWALK-2: the DocKindCombobox is gone — "Document kind" was a database
+// concept attorneys couldn't parse. New templates derive their kind from the
+// name (deriveDocKind above); existing templates keep their stored kind
+// untouched. MCP/AI template authoring still accepts an explicit docKind.
 
 // The kind badge shown on a gallery card and the editor header — real data (the
 // comp's "Letter"/"Agreement" badges are placeholder taxonomy this app doesn't
@@ -303,6 +237,29 @@ export default function TemplatesPage() {
   const [aiAttachName, setAiAttachName] = useState('')
   const [aiAttachText, setAiAttachText] = useState('')
   const [aiAttaching, setAiAttaching] = useState(false)
+  // UIWALK-2: the AI bar's two visually-identical icon buttons (attach-as-
+  // context vs import-into-body) read as duplicate uploads — one paperclip now
+  // opens a 2-item menu that says what each action does.
+  const [aiMenuOpen, setAiMenuOpen] = useState(false)
+  const aiMenuWrapRef = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    if (!aiMenuOpen) return
+    function onDocMouseDown(e: MouseEvent) {
+      if (aiMenuWrapRef.current && !aiMenuWrapRef.current.contains(e.target as Node)) {
+        setAiMenuOpen(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAiMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [aiMenuOpen])
 
   function load() {
     setError(null)
@@ -363,7 +320,9 @@ export default function TemplatesPage() {
   // list includes the draft's docKind. Their field ids are the only ones that
   // bind blue — a question existing elsewhere isn't a binding, it's a candidate.
   const associatedFields = useMemo(() => {
-    const dk = draft?.category === 'document' ? canonKind(draft.docKind) : ''
+    // UIWALK-2: an unsaved draft has no stored docKind — fall back to the name
+    // (the same derivation save() will write) so chips bind while authoring.
+    const dk = draft?.category === 'document' ? canonKind(draft.docKind || draft.name) : ''
     if (!dk) return new Set<string>()
     const producing = new Set(
       serviceDocuments
@@ -376,7 +335,7 @@ export default function TemplatesPage() {
         .filter((f) => f.services.some((sk) => producing.has(sk)))
         .map((f) => f.fieldId),
     )
-  }, [draft?.category, draft?.docKind, firmFieldEntries, serviceDocuments])
+  }, [draft?.category, draft?.docKind, draft?.name, firmFieldEntries, serviceDocuments])
 
   // A spec that carries no configuration. save() drops these to keep the stored
   // map lean; coloring must agree (a trivial spec is NOT a defined field), or
@@ -733,7 +692,12 @@ export default function TemplatesPage() {
             name: draft.name.trim(),
             category: draft.category,
             body: draft.body,
-            docKind: draft.category === 'document' ? draft.docKind.trim() || undefined : undefined,
+            // UIWALK-2: no attorney-facing kind field — derive from the name so
+            // chip association and docKind-keyed workflow matching keep working.
+            docKind:
+              draft.category === 'document'
+                ? draft.docKind.trim() || deriveDocKind(draft.name)
+                : undefined,
             variables,
             ...(draft.esignConfig.signable || draft.esignConfig.roles.length
               ? { esignConfig: draft.esignConfig }
@@ -1090,7 +1054,6 @@ export default function TemplatesPage() {
                 placeholder="Untitled template"
                 aria-label="Template name"
               />
-              <span className="li-tpl-kind-badge">{kindBadge(draft)}</span>
             </div>
             <div className="li-tpl-editor-actions">
               <button
@@ -1125,22 +1088,6 @@ export default function TemplatesPage() {
                 <option value="email">Email</option>
               </select>
             </label>
-            {draft.category === 'document' && (
-              <label className="li-tpl-meta-field">
-                <span>Document kind</span>
-                <DocKindCombobox
-                  value={draft.docKind}
-                  kinds={[
-                    ...new Set(
-                      (templates ?? [])
-                        .map((t) => (t.docKind ?? '').trim().toLowerCase())
-                        .filter(Boolean),
-                    ),
-                  ].sort()}
-                  onChange={(v) => setDraft((d) => (d ? { ...d, docKind: v } : d))}
-                />
-              </label>
-            )}
           </div>
 
           {/* Persistent inline AI-edit bar (comp: always visible under the header). */}
@@ -1164,7 +1111,7 @@ export default function TemplatesPage() {
                   : 'Draft with AI — e.g. “a mutual NDA for an LLC, 2-year term”…'
               }
             />
-            {aiAttachName ? (
+            {aiAttachName && (
               <span className="li-tpl-ai-chip" title={aiAttachName}>
                 <PaperclipIcon size={12} />
                 <span className="li-tpl-ai-chip-name">{aiAttachName}</span>
@@ -1179,28 +1126,61 @@ export default function TemplatesPage() {
                   <XIcon size={11} />
                 </button>
               </span>
-            ) : (
+            )}
+            <span className="li-tpl-ai-attach-wrap" ref={aiMenuWrapRef}>
               <button
                 type="button"
                 className="li-tpl-ai-icon-btn"
-                disabled={aiRunning || aiAttaching}
-                onClick={() => aiAttachRef.current?.click()}
-                title="Attach a reference document for AI context (optional)"
-                aria-label="Attach a reference document for AI context"
+                aria-haspopup="menu"
+                aria-expanded={aiMenuOpen}
+                disabled={aiRunning || aiAttaching || importing}
+                onClick={() => setAiMenuOpen((v) => !v)}
+                title={
+                  importing ? 'Importing…' : aiAttaching ? 'Attaching…' : 'Attach or import a file'
+                }
+                aria-label="Attach or import a file"
               >
                 <PaperclipIcon size={14} />
               </button>
-            )}
-            <button
-              type="button"
-              className="li-tpl-ai-icon-btn"
-              disabled={importing}
-              onClick={() => fileRef.current?.click()}
-              title={importing ? 'Importing…' : 'Import a document into the body'}
-              aria-label="Import a document into the body"
-            >
-              <FileTextIcon size={14} />
-            </button>
+              {aiMenuOpen && (
+                <div className="li-tpl-ai-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="li-tpl-ai-menu-item"
+                    onClick={() => {
+                      setAiMenuOpen(false)
+                      aiAttachRef.current?.click()
+                    }}
+                  >
+                    <PaperclipIcon size={14} />
+                    <span>
+                      <span className="li-tpl-ai-menu-t">Attach for AI context</span>
+                      <span className="li-tpl-ai-menu-s">
+                        The AI reads it as reference — nothing is inserted
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="li-tpl-ai-menu-item"
+                    onClick={() => {
+                      setAiMenuOpen(false)
+                      fileRef.current?.click()
+                    }}
+                  >
+                    <FileTextIcon size={14} />
+                    <span>
+                      <span className="li-tpl-ai-menu-t">Import into document</span>
+                      <span className="li-tpl-ai-menu-s">
+                        Converts the file into the template body
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </span>
             {aiRunning ? (
               <span className="li-tpl-ai-busy" role="status" aria-live="polite">
                 <span className="li-tpl-ai-spin" aria-hidden="true" />
