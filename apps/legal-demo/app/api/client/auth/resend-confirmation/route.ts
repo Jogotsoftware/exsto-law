@@ -10,6 +10,7 @@
 // silently for the other two). A caller cannot learn which case they hit.
 import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
+import { firmOriginForTenant } from '@exsto/legal'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 import { resendPortalConfirmationEmail } from '@/lib/portalConfirmationEmail'
@@ -17,12 +18,6 @@ import type { ConfirmationEmailLang } from '@/lib/confirmationEmailTemplate'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-resend-confirmation:${clientIpFrom(request)}`)
@@ -45,9 +40,11 @@ export async function POST(request: Request) {
 
   try {
     const pub = await resolvePublicTenant(request)
+    // ORIGIN-1: the confirmation link leaves the app on the firm's behalf —
+    // build it on the resolved firm's own origin.
     await resendPortalConfirmationEmail(
       { tenantId: pub.tenantId, actorId: pub.actorId },
-      { email, baseUrl: BASE_URL, lang },
+      { email, baseUrl: await firmOriginForTenant(pub.tenantId), lang },
     )
   } catch (e) {
     if (e instanceof FirmNotFoundError) {

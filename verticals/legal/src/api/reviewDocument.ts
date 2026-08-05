@@ -6,6 +6,7 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadReviewPrompt, loadRedlinePrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
@@ -646,8 +647,10 @@ export async function runDocumentReview(
     })
 
     // Same attorney "ready for review" email as drafting (reuses the route row).
+    // ORIGIN-1: firm origin resolved per call — this runs on the worker, where
+    // the old env chain was empty and the review link silently dropped.
     const { queueNotification } = await import('./notifications.js')
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+    const baseUrl = await firmOriginForTenant(agentCtx.tenantId)
     await queueNotification(agentCtx, {
       routeKindName: 'attorney_draft_completed',
       variables: {
@@ -656,10 +659,9 @@ export async function runDocumentReview(
         document_kind: REVIEW_MEMO_DOCUMENT_KIND,
         document_kind_label: `AI document review — ${filename}`,
         confidence: clampConfidence(result.reasoningTrace.confidence),
-        review_url:
-          baseUrl && genEffects.documentVersionId
-            ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
-            : null,
+        review_url: genEffects.documentVersionId
+          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+          : null,
       },
     })
   } catch (err) {

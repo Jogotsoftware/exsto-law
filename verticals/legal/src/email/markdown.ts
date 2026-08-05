@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import { appBaseUrl } from '../lib/firmOrigin.js'
 import { COLORS, FIRM, esc } from './brand.js'
 import { button } from './layout.js'
 
@@ -12,12 +13,6 @@ import { button } from './layout.js'
 // marked is configured conservatively: no raw-HTML passthrough (the body may
 // contain client-provided strings), GFM line breaks so single newlines render
 // as they read in plaintext.
-
-const PORTAL_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 function escapeRawHtml(md: string): string {
   // The drafters emit markdown, not HTML; anything angle-bracketed in the body
@@ -33,9 +28,13 @@ export interface RenderedMarkdownEmail {
 // firm's light shell and — because every Contract B send goes to a client — a
 // portal CTA button (deep-linked to the matter when known). The '-- ' signature
 // delimiter and everything after it is left to withSignature (called after us).
+//
+// ORIGIN-1: this module can't resolve a tenant itself, so the caller passes the
+// firm-derived origin (firmOriginForTenant) via `portalOrigin`; the canonical
+// appBaseUrl() fallback keeps a legacy caller's output unchanged while dormant.
 export function renderMarkdownEmailHtml(
   bodyMarkdown: string,
-  opts: { portalCta?: { label: string; url: string } | null } = {},
+  opts: { portalCta?: { label: string; url: string } | null; portalOrigin?: string } = {},
 ): RenderedMarkdownEmail {
   const parsed = marked.parse(escapeRawHtml(bodyMarkdown), {
     async: false,
@@ -48,7 +47,7 @@ export function renderMarkdownEmailHtml(
       ? ''
       : button(
           opts.portalCta?.label ?? 'Open your client portal',
-          opts.portalCta?.url ?? `${PORTAL_URL}/portal`,
+          opts.portalCta?.url ?? `${opts.portalOrigin ?? appBaseUrl()}/portal`,
         )
 
   const html = `<!doctype html>

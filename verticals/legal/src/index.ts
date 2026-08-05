@@ -74,6 +74,15 @@ export {
 // both point at the identical original binding that's not an error, but it's
 // needless duplication; list only what assistantModels.js doesn't already
 // forward.
+// ORIGIN-1 — firm-aware absolute-URL origins (see lib/firmOrigin.ts module header).
+export {
+  appBaseUrl,
+  tenantBaseDomain,
+  firmOriginFromSlug,
+  firmOriginForTenant,
+  getPublicSlugForTenant,
+  _clearFirmOriginCache,
+} from './lib/firmOrigin.js'
 export type { AiTask, ModelTier, RouteSignals, ResolvedModel } from './lib/modelRouter.js'
 export {
   TIER_MODEL,

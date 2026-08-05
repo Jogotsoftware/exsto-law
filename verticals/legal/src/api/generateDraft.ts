@@ -6,6 +6,7 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadDraftingPrompt } from '../templates/loader.js'
 import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
@@ -352,9 +353,11 @@ export async function runDraftGeneration(
     })
 
     // Same attorney "draft ready" email as the AI path (WP6, REQ-NOTIFY-01).
+    // ORIGIN-1: firm origin resolved per call — this runs on the worker, where
+    // the old env chain was empty and the review link silently dropped.
     const { queueNotification } = await import('./notifications.js')
     const mergeEffects = (merged.effects[0] ?? {}) as { documentVersionId?: string }
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+    const baseUrl = await firmOriginForTenant(agentCtx.tenantId)
     await queueNotification(agentCtx, {
       routeKindName: 'attorney_draft_completed',
       variables: {
@@ -363,10 +366,9 @@ export async function runDraftGeneration(
         document_kind: input.documentKind,
         document_kind_label: input.documentKind.replace(/_/g, ' '),
         confidence: null,
-        review_url:
-          baseUrl && mergeEffects.documentVersionId
-            ? `${baseUrl}/attorney/review/${mergeEffects.documentVersionId}`
-            : null,
+        review_url: mergeEffects.documentVersionId
+          ? `${baseUrl}/attorney/review/${mergeEffects.documentVersionId}`
+          : null,
       },
     })
 
@@ -525,10 +527,11 @@ export async function runDraftGeneration(
     },
   })
 
-  // Attorney email on async completion (WP6, REQ-NOTIFY-01).
+  // Attorney email on async completion (WP6, REQ-NOTIFY-01). ORIGIN-1: firm
+  // origin resolved per call (worker-safe — see the merge path above).
   const { queueNotification } = await import('./notifications.js')
   const genEffects = (generated.effects[0] ?? {}) as { documentVersionId?: string }
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  const baseUrl = await firmOriginForTenant(agentCtx.tenantId)
   await queueNotification(agentCtx, {
     routeKindName: 'attorney_draft_completed',
     variables: {
@@ -537,10 +540,9 @@ export async function runDraftGeneration(
       document_kind: input.documentKind,
       document_kind_label: input.documentKind.replace(/_/g, ' '),
       confidence: clampConfidence(result.reasoningTrace.confidence),
-      review_url:
-        baseUrl && genEffects.documentVersionId
-          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
-          : null,
+      review_url: genEffects.documentVersionId
+        ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+        : null,
     },
   })
 
@@ -661,7 +663,8 @@ export async function runSpanishTranslation(
 
   const { queueNotification } = await import('./notifications.js')
   const genEffects = (generated.effects[0] ?? {}) as { documentVersionId?: string }
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  // ORIGIN-1: firm origin resolved per call (worker-safe — see the merge path).
+  const baseUrl = await firmOriginForTenant(agentCtx.tenantId)
   await queueNotification(agentCtx, {
     routeKindName: 'attorney_draft_completed',
     variables: {
@@ -670,10 +673,9 @@ export async function runSpanishTranslation(
       document_kind: targetKind,
       document_kind_label: `${baseDocumentKind(source.documentKind).replace(/_/g, ' ')} (Spanish)`,
       confidence: clampConfidence(result.reasoningTrace.confidence),
-      review_url:
-        baseUrl && genEffects.documentVersionId
-          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
-          : null,
+      review_url: genEffects.documentVersionId
+        ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+        : null,
     },
   })
 

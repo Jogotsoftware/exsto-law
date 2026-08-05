@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { getMatter } from '../queries/matters.js'
 import { loadConnection } from '../adapters/connectionStore.js'
@@ -48,12 +49,10 @@ import { buildAndSubmitEnvelope, type RecipientRole } from './esignSend.js'
 
 const SIGNING_ACTOR = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
-function baseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    process.env.URL ??
-    'https://exsto-law.netlify.app'
-  ).replace(/\/$/, '')
+// ORIGIN-1: signing links leave the app on the firm's behalf — every emailed
+// /sign and /portal/sign URL is built on the firm's own origin, not a global one.
+function baseUrl(tenantId: string): Promise<string> {
+  return firmOriginForTenant(tenantId)
 }
 
 // Exported for the file-envelope surfaces (esignFile.ts): the public sign
@@ -372,7 +371,7 @@ export async function notifyDelivered(
       recipient_role: viewOnly ? 'needs_to_view' : 'needs_to_sign',
     }
     if (info.channel === 'portal') {
-      const url = `${baseUrl()}/portal/sign/${requestId}`
+      const url = `${await baseUrl(ctx.tenantId)}/portal/sign/${requestId}`
       await queueNotification(ctx, {
         routeKindName: 'esign_sign_request_portal',
         to: info.email,
@@ -386,7 +385,7 @@ export async function notifyDelivered(
         tenantId: ctx.tenantId,
         scope: viewOnly ? 'view' : 'sign',
       })
-      const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
+      const url = `${await baseUrl(ctx.tenantId)}/sign/${encodeURIComponent(token)}`
       await queueNotification(ctx, {
         routeKindName: 'esign_sign_request',
         to: info.email,
@@ -614,7 +613,7 @@ export async function sendEnvelopeCompletionCopies(
       tenantId: ctx.tenantId,
       scope: 'view',
     })
-    const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
+    const url = `${await baseUrl(ctx.tenantId)}/sign/${encodeURIComponent(token)}`
     try {
       await deliverNotification(ctx, {
         routeKindName: 'esign_copy_delivered',

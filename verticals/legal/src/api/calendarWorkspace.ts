@@ -22,6 +22,7 @@ import {
   type BusyInterval,
 } from '../adapters/googleCalendar.js'
 import { redactSecret } from '../adapters/redact.js'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { getMatter } from '../queries/matters.js'
 import { listMatterConsultations, type UpcomingBooking, type BookingCategory } from './calendar.js'
 
@@ -353,7 +354,9 @@ export async function createConsultation(
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
 
   const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'http://localhost:3000'
+  // ORIGIN-1: the invite's matter/reschedule links leave the app on the firm's
+  // behalf — use the firm's own origin.
+  const baseUrl = await firmOriginForTenant(ctx.tenantId)
   let googleEventId: string | null = null
   let googleEventUrl: string | null = null
   if (creds) {

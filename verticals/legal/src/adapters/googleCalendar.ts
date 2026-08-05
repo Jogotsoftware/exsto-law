@@ -647,7 +647,7 @@ export interface CreateEventInput {
   clientName: string
   matterId: string
   matterReschedulePath: string // e.g. /book/reschedule/<matter_id>
-  bookingBaseUrl: string // e.g. https://exsto-law.netlify.app
+  bookingBaseUrl: string // the firm's origin (firmOriginForTenant) — callers resolve it
   // Attach a Google Meet link to the event (video consultation).
   includeMeet?: boolean
 }

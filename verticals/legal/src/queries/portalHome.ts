@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
 import { resolveClientMatterIds } from '../api/clientIdentity.js'
 import { getEngagementConfig, getEngagementStatus } from '../api/engagement.js'
@@ -95,20 +96,19 @@ async function listUpcomingConsultations(
          AND e.metadata ->> 'scheduled_at' IS NOT NULL`,
       [ctx.tenantId, matterIds],
     )
-    const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? '').replace(/\/$/, '')
+    // ORIGIN-1: the manage link is firm-facing — the firm's own origin.
+    const baseUrl = await firmOriginForTenant(ctx.tenantId)
     const out: HomeAttentionConsultation[] = []
     for (const row of res.rows) {
       const at = Date.parse(row.scheduled_at)
       if (!Number.isFinite(at) || at <= Date.now()) continue
       if (row.status === 'consultation_cancelled') continue
       let manageUrl: string | null = null
-      if (baseUrl) {
-        try {
-          const tok = signBookingManageToken({ matterEntityId: row.id, tenantId: ctx.tenantId })
-          manageUrl = `${baseUrl}/book/manage/${tok}`
-        } catch {
-          manageUrl = null // signing secret unset — degrade to no manage link
-        }
+      try {
+        const tok = signBookingManageToken({ matterEntityId: row.id, tenantId: ctx.tenantId })
+        manageUrl = `${baseUrl}/book/manage/${tok}`
+      } catch {
+        manageUrl = null // signing secret unset — degrade to no manage link
       }
       out.push({
         kind: 'consultation',

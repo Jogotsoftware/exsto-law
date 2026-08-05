@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server'
 import dns from 'node:dns'
-import { exchangeGranolaConnect } from '@exsto/legal'
+import { appBaseUrl, exchangeGranolaConnect } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 
 export const runtime = 'nodejs'
 
 // See the Google callback for why these are needed on the Netlify Functions
-// runtime (IPv6 reachability + a hardcoded HTTPS base for redirect targets).
+// runtime (IPv6 reachability + the canonical HTTPS base for redirect targets —
+// ORIGIN-1 rule 3: the OAuth flow lives on the canonical host).
 dns.setDefaultResultOrder('ipv4first')
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
+const BASE_URL = appBaseUrl()
 
 function redirectToSettingsError(message: string) {
   const safe = message && message.trim() ? message : 'unknown error'

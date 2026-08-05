@@ -14,6 +14,7 @@ import {
   type AvailabilitySlot,
   type CreatedEvent,
 } from '../adapters/googleCalendar.js'
+import { firmOriginForTenant } from '../lib/firmOrigin.js'
 import { lookupActorByEmail } from './identity.js'
 import { recordIntegrationProbe } from './integrations.js'
 import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
@@ -327,8 +328,9 @@ export async function tryCreateBookingEvent(
   const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
   const status = await getGoogleStatus(ctx, firmActor)
   if (!status.connected) return null
-  const baseUrl =
-    process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'https://exsto-law.netlify.app'
+  // ORIGIN-1: the event's reschedule link is firm-facing — the firm's own origin
+  // (NOT the OAuth redirect URI, which stays pinned to the canonical host).
+  const baseUrl = await firmOriginForTenant(ctx.tenantId)
   const attorneyEmail = status.accountEmail ?? ATTORNEY_FALLBACK_EMAIL
 
   const descriptionHtml = `

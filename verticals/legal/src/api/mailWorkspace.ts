@@ -566,8 +566,11 @@ export async function enqueueClientEmail(
   if (!html) {
     try {
       const { renderMarkdownEmailHtml } = await import('../email/markdown.js')
+      const { firmOriginForTenant } = await import('../lib/firmOrigin.js')
       html = renderMarkdownEmailHtml(input.body, {
         portalCta: input.portalCta === null ? null : (input.portalCta ?? undefined),
+        // ORIGIN-1: the CTA button is firm-facing — thread the firm's origin in.
+        portalOrigin: await firmOriginForTenant(ctx.tenantId),
       }).html
     } catch {
       html = undefined // plaintext-only is still a correct email

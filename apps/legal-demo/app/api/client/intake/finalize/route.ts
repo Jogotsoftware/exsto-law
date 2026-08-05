@@ -28,6 +28,7 @@ import '@exsto/legal/mcp'
 import {
   stageIntakeLead,
   findClientContactIdByEmail,
+  firmOriginForTenant,
   provisionClientPortalActor,
   resolveServiceFeeQuote,
   grantServiceFeeConsent,
@@ -48,11 +49,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 // MULTI-TENANT-1: tenant + public-intake actor resolved per request (lib/publicTenant.ts).
-const BASE_URL = (
-  process.env.NEXT_PUBLIC_BASE_URL ??
-  process.env.URL ??
-  'https://exsto-law.netlify.app'
-).replace(/\/$/, '')
 
 interface FinalizeBody {
   clientFullName?: unknown
@@ -175,10 +171,12 @@ export async function POST(request: Request) {
     // UNCONFIRMED one (mintSignupConfirmation regenerates its token) — either
     // way a fresh confirmation email goes out.
     const lang: ConfirmationEmailLang = str(body.lang) === 'es' ? 'es' : 'en'
+    // ORIGIN-1: the confirmation link leaves the app on the firm's behalf —
+    // build it on the resolved firm's own origin.
     const account = await issuePortalConfirmationEmail(publicCtx, {
       email,
       password,
-      baseUrl: BASE_URL,
+      baseUrl: await firmOriginForTenant(tenantId),
       lang,
     })
 
