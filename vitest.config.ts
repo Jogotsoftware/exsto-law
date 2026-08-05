@@ -26,6 +26,10 @@ export default defineConfig({
       '@exsto/legal/esign': fileURLToPath(
         new URL('./verticals/legal/dist/esign/executionBlock.js', import.meta.url),
       ),
+      // Dependency-free slug definition (SLUG-PROV-1); shared with the Edge middleware.
+      '@exsto/legal/slug': fileURLToPath(
+        new URL('./verticals/legal/dist/lib/publicSlug.js', import.meta.url),
+      ),
       '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
       // legal-demo uses the `@/` path alias for app-local imports. Route-handler
       // tests import those files, so map it here too. The key must be '@' (not

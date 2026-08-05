@@ -9,6 +9,7 @@ import {
   listTenants,
   getTenant,
   bootstrapTenant,
+  setTenantSlug,
   setTenantStatus,
   controlPlaneAuditLog,
   listCatalog,
@@ -72,16 +73,44 @@ registerTool({
       name: { type: 'string', description: 'Firm / tenant display name' },
       ownerEmail: { type: 'string', description: "The owner's Google sign-in email" },
       ownerDisplayName: { type: 'string', description: "The owner's display name (optional)" },
+      slug: {
+        type: 'string',
+        description:
+          'Optional subdomain handle ({slug}.instruments.legal) assigned right after bootstrap. Lowercase letters/numbers/hyphens; reserved labels rejected.',
+      },
     },
     required: ['name', 'ownerEmail'],
   },
   handler: async (
     ctx: ActionContext,
-    input: { name: string; ownerEmail: string; ownerDisplayName?: string },
+    input: { name: string; ownerEmail: string; ownerDisplayName?: string; slug?: string },
   ) => bootstrapTenant(ctx, input),
 } satisfies Tool<
-  { name: string; ownerEmail: string; ownerDisplayName?: string },
+  { name: string; ownerEmail: string; ownerDisplayName?: string; slug?: string },
   { tenantId: string; ownerActorId: string }
+>)
+
+registerTool({
+  name: 'admin.tenant.set_slug',
+  description:
+    "Assign, rename, or clear (null) a tenant's public subdomain handle ({slug}.instruments.legal). Renames break previously shared links — warn before renaming. Platform admin only.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      tenantId: { type: 'string', description: 'Tenant UUID' },
+      slug: {
+        type: 'string',
+        description: 'The new handle; omit (or pass empty) to remove the subdomain',
+      },
+    },
+    required: ['tenantId'],
+  },
+  handler: async (ctx: ActionContext, input: { tenantId: string; slug?: string }) =>
+    setTenantSlug(ctx, { tenantId: input.tenantId, slug: input.slug?.trim() || null }),
+} satisfies Tool<
+  { tenantId: string; slug?: string },
+  { tenantId: string; publicSlug: string | null }
 >)
 
 registerTool({

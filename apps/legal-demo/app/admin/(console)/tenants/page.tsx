@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { formatDate } from '@/lib/datetime'
 import { callAdminMcp } from '@/lib/mcpAdmin'
+import { validatePublicSlug } from '@exsto/legal/slug'
 
 interface TenantSummary {
   id: string
@@ -10,6 +11,7 @@ interface TenantSummary {
   status: string
   createdAt: string
   reserved: boolean
+  publicSlug: string | null
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -17,6 +19,10 @@ const STATUS_BADGE: Record<string, string> = {
   suspended: 'warn',
   archived: 'info',
 }
+
+// The base domain firms hang off of. Display-only here (the server never trusts it);
+// mirrors TENANT_BASE_DOMAIN, which isn't exposed to the client bundle.
+const BASE_DOMAIN = 'instruments.legal'
 
 export default function AdminTenantsPage() {
   const [tenants, setTenants] = useState<TenantSummary[] | null>(null)
@@ -27,7 +33,12 @@ export default function AdminTenantsPage() {
   const [name, setName] = useState('')
   const [ownerEmail, setOwnerEmail] = useState('')
   const [ownerDisplayName, setOwnerDisplayName] = useState('')
+  const [slug, setSlug] = useState('')
   const [createMsg, setCreateMsg] = useState<string | null>(null)
+
+  // Per-row subdomain editor (one row at a time keeps the table stateless otherwise)
+  const [editingSlugFor, setEditingSlugFor] = useState<string | null>(null)
+  const [slugDraft, setSlugDraft] = useState('')
 
   const load = useCallback(async () => {
     setError(null)
@@ -45,20 +56,34 @@ export default function AdminTenantsPage() {
     load()
   }, [load])
 
+  // Client-side validation is a convenience only — the control-plane wrapper and the
+  // SQL function both re-validate.
+  const slugCheck = slug.trim() ? validatePublicSlug(slug) : null
+
   async function createTenant(e: React.FormEvent) {
     e.preventDefault()
+    if (slugCheck && !slugCheck.ok) return
     setBusy(true)
     setCreateMsg(null)
     setError(null)
     try {
       const res = await callAdminMcp<{ tenantId: string }>({
         toolName: 'admin.tenant.bootstrap',
-        input: { name, ownerEmail, ownerDisplayName: ownerDisplayName || undefined },
+        input: {
+          name,
+          ownerEmail,
+          ownerDisplayName: ownerDisplayName || undefined,
+          slug: slug.trim() || undefined,
+        },
       })
-      setCreateMsg(`Created tenant ${res.tenantId}. Owner signs in with ${ownerEmail}.`)
+      setCreateMsg(
+        `Created tenant ${res.tenantId}. Owner signs in with ${ownerEmail}.` +
+          (slug.trim() ? ` Live at https://${slug.trim().toLowerCase()}.${BASE_DOMAIN}` : ''),
+      )
       setName('')
       setOwnerEmail('')
       setOwnerDisplayName('')
+      setSlug('')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -72,6 +97,33 @@ export default function AdminTenantsPage() {
     setError(null)
     try {
       await callAdminMcp({ toolName: 'admin.tenant.set_status', input: { tenantId, status } })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveSlug(tenantId: string) {
+    const next = slugDraft.trim()
+    if (next) {
+      const v = validatePublicSlug(next)
+      if (!v.ok) {
+        setError(v.error)
+        return
+      }
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await callAdminMcp({
+        toolName: 'admin.tenant.set_slug',
+        // Omitting slug clears the subdomain (the tool schema is string-or-absent).
+        input: next ? { tenantId, slug: next } : { tenantId },
+      })
+      setEditingSlugFor(null)
+      setSlugDraft('')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -123,10 +175,26 @@ export default function AdminTenantsPage() {
               style={{ width: '100%' }}
             />
           </label>
+          <label>
+            Subdomain (optional)
+            <input
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder="acme-legal"
+              style={{ width: '100%' }}
+            />
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
+              {slug.trim()
+                ? slugCheck && !slugCheck.ok
+                  ? slugCheck.error
+                  : `Firm will be live at https://${slug.trim().toLowerCase()}.${BASE_DOMAIN}`
+                : `Gives the firm its own site: {subdomain}.${BASE_DOMAIN}`}
+            </span>
+          </label>
           <button
             className="primary"
             type="submit"
-            disabled={busy}
+            disabled={busy || Boolean(slugCheck && !slugCheck.ok)}
             style={{ justifySelf: 'start' }}
           >
             {busy ? 'Working…' : 'Bootstrap tenant'}
@@ -146,6 +214,7 @@ export default function AdminTenantsPage() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Subdomain</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Actions</th>
@@ -164,6 +233,44 @@ export default function AdminTenantsPage() {
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>{t.id}</div>
                   </td>
                   <td>
+                    {editingSlugFor === t.id ? (
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                        <input
+                          value={slugDraft}
+                          onChange={(e) => setSlugDraft(e.target.value)}
+                          placeholder="acme-legal"
+                          style={{ width: 140 }}
+                          autoFocus
+                        />
+                        <button disabled={busy} onClick={() => saveSlug(t.id)}>
+                          Save
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            setEditingSlugFor(null)
+                            setSlugDraft('')
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : t.publicSlug ? (
+                      <div>
+                        <a
+                          href={`https://${t.publicSlug}.${BASE_DOMAIN}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: 'var(--text-sm)' }}
+                        >
+                          {t.publicSlug}.{BASE_DOMAIN}
+                        </a>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>—</span>
+                    )}
+                  </td>
+                  <td>
                     <span className={`badge ${STATUS_BADGE[t.status] ?? 'info'}`}>{t.status}</span>
                   </td>
                   <td style={{ fontSize: 'var(--text-sm)' }}>{formatDate(t.createdAt)}</td>
@@ -171,7 +278,26 @@ export default function AdminTenantsPage() {
                     {t.reserved ? (
                       <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>—</span>
                     ) : (
-                      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            // Renames break links already shared under the old subdomain —
+                            // make the admin acknowledge that before editing an existing slug.
+                            if (
+                              t.publicSlug &&
+                              !window.confirm(
+                                `Changing or removing "${t.publicSlug}.${BASE_DOMAIN}" breaks any links already shared under it. Continue?`,
+                              )
+                            ) {
+                              return
+                            }
+                            setEditingSlugFor(t.id)
+                            setSlugDraft(t.publicSlug ?? '')
+                          }}
+                        >
+                          {t.publicSlug ? 'Edit subdomain' : 'Set subdomain'}
+                        </button>
                         {t.status !== 'active' && (
                           <button disabled={busy} onClick={() => setStatus(t.id, 'active')}>
                             Activate
