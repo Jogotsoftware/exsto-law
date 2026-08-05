@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { TagInput } from '@/components/TagInput'
+import { ColorWheelField } from '@/components/ColorWheelField'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 import { US_STATE_OPTIONS } from '@/lib/usStates'
 
@@ -148,7 +149,7 @@ export default function FirmDetailsPage(): React.ReactElement {
             <div className="li-set-firm-head-text">
               <div className="li-set-firm-name">{settings.firmName ?? 'Your firm'}</div>
               <div className="li-set-firm-sub">
-                Firm logo — shown on documents, invoices, and the client portal
+                Firm logo — shown on your invoices and the console header
               </div>
             </div>
             <Link href="/attorney/settings/invoice-template" className="li-set-btn">
@@ -230,30 +231,13 @@ export default function FirmDetailsPage(): React.ReactElement {
                   />
                 </label>
                 <label className="li-set-label">
-                  <span>Header color</span>
-                  <span className="li-set-colorrow">
-                    <input
-                      type="color"
-                      value={settings.headerColor ?? '#1b2a4a'}
-                      onChange={(e) => updateField('headerColor', e.target.value)}
-                      aria-label="Pick the header color"
-                    />
-                    <input
-                      className="li-set-input"
-                      value={settings.headerColor ?? ''}
-                      placeholder="Default navy"
-                      onChange={(e) => updateField('headerColor', e.target.value || null)}
-                    />
-                    {settings.headerColor && (
-                      <button
-                        type="button"
-                        className="li-set-btn"
-                        onClick={() => updateField('headerColor', null)}
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </span>
+                  <span>Brand color</span>
+                  <ColorWheelField
+                    value={settings.headerColor}
+                    onChange={(hex) => updateField('headerColor', hex)}
+                    defaultHex="#1b2a4a"
+                    label="Brand color"
+                  />
                 </label>
               </div>
               <label className="li-set-label">
@@ -266,9 +250,10 @@ export default function FirmDetailsPage(): React.ReactElement {
                 />
               </label>
               <p className="li-set-hint">
-                These fields fill the firm identity on generated documents and letterheads. The
-                header color restyles the top bar across the console. The home jurisdiction is the
-                firm-wide fallback — each matter carries its own governing law (from intake,
+                These fields fill the firm identity where templates merge them. The brand color
+                tints your console header and sidebar, the client portal header, and the booking
+                page — generated legal documents stay neutral by design. The home jurisdiction is
+                the firm-wide fallback — each matter carries its own governing law (from intake,
                 editable on the matter page), which always wins. Type a practice area and press
                 Enter to add it as a pill.
               </p>
@@ -333,7 +318,7 @@ export default function FirmDetailsPage(): React.ReactElement {
                 </div>
               </div>
               <div>
-                <div className="li-set-kv-label">Header color</div>
+                <div className="li-set-kv-label">Brand color</div>
                 <div className="li-set-kv-value">
                   {settings.headerColor ? (
                     <span className="li-set-colorswatch">

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AttorneyRail } from '@/components/AttorneyRail'
+import { AttorneyShell } from '@/components/AttorneyShell'
 import { AttorneyTopBar } from '@/components/AttorneyTopBar'
 import { AttorneyAuthGate } from '@/components/AttorneyAuthGate'
 import { FeedbackChat } from '@/components/FeedbackChat'
@@ -11,7 +12,9 @@ export default function AttorneyLayout({ children }: { children: ReactNode }) {
       <a href="#main" className="skip-link">
         Skip to content
       </a>
-      <div className="li-shell">
+      {/* UIWALK-2: AttorneyShell renders the .li-shell div and stamps the firm
+          brand-color CSS vars on it (topbar + rail tint from one source). */}
+      <AttorneyShell>
         <AttorneyRail />
         <div className="li-main-col">
           {/* UIWALK-1: the top bar lives INSIDE the scroll region so it slides
@@ -23,7 +26,7 @@ export default function AttorneyLayout({ children }: { children: ReactNode }) {
             </main>
           </div>
         </div>
-      </div>
+      </AttorneyShell>
       {/* Floating beta-feedback assistant — inside the gate, so attorneys only. */}
       <FeedbackChat />
     </AttorneyAuthGate>

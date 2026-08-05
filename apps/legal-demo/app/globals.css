@@ -27163,3 +27163,47 @@ details.li-brief-research summary:hover {
   flex-wrap: wrap;
   row-gap: 8px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UIWALK-2 (PR-3) — firm brand color. --li-brand / --li-brand-deep are set
+   INLINE on the shell roots (AttorneyShell on .li-shell; the portal page on
+   .li-cp-shell) from the server-validated firm_header_color. The rules below
+   are same-specificity TAIL OVERRIDES that win on source order — do not
+   dedupe them into the earlier blocks. Unset vars fall back to the product
+   navy pair, so chrome is unchanged for firms with no brand color.
+   Generated legal documents intentionally consume NONE of these vars
+   (guarded by apps/legal-demo/tests/documentNeutrality.test.ts).
+   ══════════════════════════════════════════════════════════════════════════ */
+.li-topbar {
+  background: var(--li-brand, var(--li-topbar-bg));
+}
+.li-rail {
+  background: var(--li-brand-deep, var(--li-rail-bg));
+}
+.li-cp-top {
+  background: var(--li-brand-deep, var(--li-navy-deep));
+}
+
+/* The brand-color wheel (react-colorful) in Settings → Firm Details. */
+.li-colorwheel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 230px;
+}
+.li-colorwheel .react-colorful {
+  width: 100%;
+  height: 160px;
+}
+.li-colorwheel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-colorwheel-swatch {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  border: 1px solid var(--li-border);
+}
