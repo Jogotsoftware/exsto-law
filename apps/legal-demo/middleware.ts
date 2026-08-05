@@ -33,8 +33,9 @@ function sanitizeSlug(raw: string | null | undefined): string | null {
 // The firm subdomain of the configured base domain, if any. Dormant (returns null)
 // until TENANT_BASE_DOMAIN is set — so localhost / *.netlify.app never misparse.
 // Only a single-label subdomain counts ('pacheco' in pacheco.instruments.legal);
-// the apex and 'www' are not firms.
-function slugFromHost(hostname: string): string | null {
+// the apex and 'www' are not firms. Exported for the unit test — Next only
+// reads the `middleware`/`config` exports, so this is invisible to routing.
+export function slugFromHost(hostname: string): string | null {
   const base = (process.env.TENANT_BASE_DOMAIN ?? '').trim().toLowerCase()
   if (!base) return null
   const host = hostname.toLowerCase()
@@ -49,22 +50,38 @@ function slugFromHost(hostname: string): string | null {
 
 export function middleware(request: NextRequest): NextResponse {
   const fromHost = slugFromHost(request.nextUrl.hostname)
-  const fromQuery = sanitizeSlug(request.nextUrl.searchParams.get('firm'))
-  const fromCookie = sanitizeSlug(request.cookies.get(FIRM_COOKIE)?.value)
-  const slug = fromHost ?? fromQuery ?? fromCookie
 
-  // Rebuild the request headers: strip any client-supplied x-firm-slug (only this
-  // middleware may set it), then inject the resolved slug for the Node helper.
+  // Rebuild the request headers: strip any client-supplied x-firm-slug/x-firm-host
+  // (only this middleware may set them), then inject the resolved slug for the Node
+  // helpers.
   const headers = new Headers(request.headers)
   headers.delete('x-firm-slug')
+  headers.delete('x-firm-host')
+
+  // HOST-TENANCY-1: on a firm subdomain the HOST is the single source of truth.
+  // ?firm= and the cookie are ignored entirely — a stale selector must never move
+  // a request off the firm the user is literally standing on. x-firm-host lets
+  // Node code distinguish "slug came from the host" (authoritative; unknown slug
+  // must 404, session mismatch must fail closed) from "slug came from a query/
+  // cookie fallback" (legacy hosts only).
+  if (fromHost) {
+    headers.set('x-firm-slug', fromHost)
+    headers.set('x-firm-host', '1')
+    return NextResponse.next({ request: { headers } })
+  }
+
+  // Legacy hosts (netlify.app, localhost, previews): the historical ?firm= >
+  // cookie precedence, unchanged, so old booking links keep working.
+  const fromQuery = sanitizeSlug(request.nextUrl.searchParams.get('firm'))
+  const fromCookie = sanitizeSlug(request.cookies.get(FIRM_COOKIE)?.value)
+  const slug = fromQuery ?? fromCookie
   if (slug) headers.set('x-firm-slug', slug)
 
   const response = NextResponse.next({ request: { headers } })
 
   // Persist an explicit ?firm= choice so the rest of the funnel stays on that firm.
-  // A subdomain needs no cookie (the host carries it every request); the cookie is
-  // purely the bare-host / preview fallback. Only refresh it when the query differs
-  // from what's already stored, to keep the TTL sliding sensibly.
+  // Only refresh it when the query differs from what's already stored, to keep the
+  // TTL sliding sensibly. Never set on firm hosts (the host carries the firm).
   if (fromQuery && fromQuery !== fromCookie) {
     response.cookies.set(FIRM_COOKIE, fromQuery, {
       path: '/',
@@ -77,20 +94,14 @@ export function middleware(request: NextRequest): NextResponse {
   return response
 }
 
-// Only the PUBLIC funnel: the booking page, the unauthenticated client API, and
-// the pre-session portal auth screens (sign-in, invite/set-password,
-// forgot/reset-password — PT-3) whose ?firm= a client may land on cold (a
-// reset-email click on a device with no firm_slug cookie yet, e.g.). The
-// authed portal dashboard and its subpaths resolve tenant from their session
-// cookie and are deliberately NOT in this list — only these specific
-// unauthenticated entry points.
+// HOST-TENANCY-1: every route except static assets. The firm slug must reach ALL
+// surfaces on a firm host — the landing page at /, the authed portal/attorney
+// layouts (which VALIDATE session-vs-host, see lib/hostTenantGuard.ts), /sign/*,
+// /d/*, and the public funnel. The middleware itself stays cheap and DB-free, so
+// running on every request costs a header rewrite, nothing more. Session-cookie
+// tenancy is still decided by the session readers — x-firm-slug never authorizes.
 export const config = {
   matcher: [
-    '/book',
-    '/api/client/:path*',
-    '/portal/login',
-    '/portal/set-password',
-    '/portal/forgot-password',
-    '/portal/reset-password',
+    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|ico|css|js|map|txt|webp|woff2?)$).*)',
   ],
 }

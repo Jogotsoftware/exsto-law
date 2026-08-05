@@ -46,6 +46,7 @@ export class FirmNotFoundError extends Error {
 
 export async function resolvePublicTenant(request: Request): Promise<PublicTenant> {
   const slug = (request.headers.get(FIRM_SLUG_HEADER) ?? '').trim().toLowerCase() || null
+  const fromFirmHost = request.headers.get('x-firm-host') === '1'
 
   if (slug) {
     const firm = await resolvePublicFirm(slug)
@@ -58,7 +59,13 @@ export async function resolvePublicTenant(request: Request): Promise<PublicTenan
     }
   }
 
-  // No firm named anywhere → demoted env default (Phase 1 no-regression on the bare host).
+  // HOST-TENANCY-1 belt-and-suspenders: a firm HOST with no resolvable slug must
+  // never fall through to the env default — middleware always sets both headers
+  // together, so this is unreachable unless something upstream broke. Fail closed.
+  if (fromFirmHost) throw new FirmNotFoundError('(firm host without slug)')
+
+  // No firm named anywhere → demoted env default (legacy hosts only; removed
+  // entirely in the Phase-8 hardening pass).
   return {
     tenantId: DEFAULT_TENANT_ID,
     actorId: await resolvePublicIntakeActor(DEFAULT_TENANT_ID),

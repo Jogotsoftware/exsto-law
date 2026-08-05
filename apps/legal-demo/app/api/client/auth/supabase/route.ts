@@ -141,8 +141,10 @@ export async function POST(request: Request) {
 
   // ORIGIN-1 rule 2: redirect on the host the user is on — the session cookie
   // being set right here is host-only, so a cross-host redirect would strand it.
-  return mintClientSessionResponse(contact.tenantId, contact.clientContactId, {
-    redirect: `${requestOrigin(request)}${dest}`,
-    path: dest,
-  })
+  return mintClientSessionResponse(
+    contact.tenantId,
+    contact.clientContactId,
+    { redirect: `${requestOrigin(request)}${dest}`, path: dest },
+    request,
+  )
 }

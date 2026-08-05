@@ -36,7 +36,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 400 },
     )
   }
-  const result = await mintClientSession(tenantId, contactId)
+  const result = await mintClientSession(tenantId, contactId, request)
   if (!result.ok || !result.cookie) {
     return NextResponse.json({ error: result.error ?? 'Could not mint session.' }, { status: 401 })
   }
