@@ -13,11 +13,16 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import '@exsto/legal/mcp'
 import {
+  appBaseUrl,
   findClientContactMembershipsByEmail,
+  firmOriginFromSlug,
+  getPublicSlugForTenant,
   resolvePortalActorId,
   confirmPortalEmail,
 } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
+import { mintHandoffToken, handoffRedirectUrl } from '@/lib/authHandoff'
+import { firmHostFromRequest } from '@/lib/hostTenantGuard'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { requestOrigin } from '@/lib/requestOrigin'
@@ -110,9 +115,24 @@ export async function POST(request: Request) {
       { status: 403 },
     )
   }
+  // AUTH-HANDOFF-1 amendment to the stance above: a *firm HOST* (not the cookie)
+  // may narrow the default membership to the firm the user is literally signing
+  // in on — x-firm-host is middleware-set and unforgeable, unlike the stale
+  // ?firm= cookie that comment guards against. An explicit tenantId still wins;
+  // a member of firms A+B signing in on A's subdomain lands in A, not "oldest".
+  let hostPreferred: (typeof memberships)[number] | undefined
+  const firmHost = firmHostFromRequest(request)
+  if (!requestedTenantId && firmHost) {
+    for (const m of memberships) {
+      if ((await getPublicSlugForTenant(m.tenantId)) === firmHost.slug) {
+        hostPreferred = m
+        break
+      }
+    }
+  }
   const contact = requestedTenantId
     ? memberships.find((m) => m.tenantId === requestedTenantId)
-    : memberships[0]
+    : (hostPreferred ?? memberships[0])
   if (!contact) {
     return NextResponse.json(
       {
@@ -136,6 +156,30 @@ export async function POST(request: Request) {
         { tenantId: contact.tenantId, actorId },
         { clientContactId: contact.clientContactId },
       ).catch((e: unknown) => console.error('[client-auth-supabase] confirmPortalEmail failed', e))
+    }
+  }
+
+  // AUTH-HANDOFF-1: when the selected membership's firm lives on its own
+  // subdomain and this request is NOT already on it (neutral /signin, legacy
+  // host, or the in-portal switcher hopping firms), mint NO cookie here —
+  // respond with the firm host's single-use handoff URL and let the browser
+  // complete sign-in there. The host never SELECTS the membership (the
+  // deliberate stance above stands); it only decides whether a hop is needed.
+  // Dormant-safe: without TENANT_BASE_DOMAIN the origins always match.
+  const firmSlug = await getPublicSlugForTenant(contact.tenantId)
+  if (firmSlug) {
+    const firmOrigin = firmOriginFromSlug(firmSlug)
+    if (firmOrigin !== requestOrigin(request) && firmOrigin !== appBaseUrl()) {
+      const handoff = mintHandoffToken(
+        { kind: 'client', tenantId: contact.tenantId, clientContactId: contact.clientContactId },
+        firmSlug,
+        dest,
+      )
+      return NextResponse.json({
+        ok: true,
+        redirect: handoffRedirectUrl(firmSlug, handoff),
+        path: dest,
+      })
     }
   }
 

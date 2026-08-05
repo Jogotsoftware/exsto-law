@@ -21,7 +21,7 @@ export async function bridgeSupabaseSession(
   // of their email). Tells the bridge route to record the provenanced
   // portal.email_confirmed event; a plain password sign-in leaves it false.
   confirmed = false,
-): Promise<{ path: string }> {
+): Promise<{ path: string; handedOff: boolean }> {
   const sb = getSupabaseBrowser()
   const res = await fetch('/api/client/auth/supabase', {
     method: 'POST',
@@ -29,17 +29,35 @@ export async function bridgeSupabaseSession(
     credentials: 'same-origin',
     body: JSON.stringify({ accessToken, continue: continuePath, confirmed }),
   })
-  const data = (await res.json().catch(() => null)) as { error?: string; path?: string } | null
+  const data = (await res.json().catch(() => null)) as {
+    error?: string
+    path?: string
+    redirect?: string
+  } | null
   await sb?.auth.signOut().catch(() => {})
   if (!res.ok) throw new Error(data?.error ?? 'We could not sign you in.')
-  return { path: typeof data?.path === 'string' ? data.path : '/portal' }
+  // AUTH-HANDOFF-1: the firm's portal lives on its own subdomain — no cookie was
+  // set here. Follow the server-built single-use handoff URL (same-origin API
+  // response, not user input) with a full navigation; callers must do nothing.
+  if (typeof data?.redirect === 'string') {
+    try {
+      const target = new URL(data.redirect, window.location.origin)
+      if (target.origin !== window.location.origin) {
+        window.location.assign(target.href)
+        return { path: typeof data?.path === 'string' ? data.path : '/portal', handedOff: true }
+      }
+    } catch {
+      // fall through — an unparseable redirect is treated as same-host
+    }
+  }
+  return { path: typeof data?.path === 'string' ? data.path : '/portal', handedOff: false }
 }
 
 export async function signInWithPasswordAndBridge(input: {
   email: string
   password: string
   continuePath: string
-}): Promise<{ path: string }> {
+}): Promise<{ path: string; handedOff: boolean }> {
   const sb = getSupabaseBrowser()
   if (!sb) throw new Error('Sign-in is not configured for this environment.')
   const { data, error } = await sb.auth.signInWithPassword({
@@ -90,8 +108,10 @@ export function PortalSignInInline({
     setWorking(true)
     setError(null)
     try {
-      await signInWithPasswordAndBridge({ email, password, continuePath })
-      await onSignedIn()
+      const { handedOff } = await signInWithPasswordAndBridge({ email, password, continuePath })
+      // A cross-host handoff already navigated the whole page — the wizard is
+      // gone; re-fetching /me here would race the unload for nothing.
+      if (!handedOff) await onSignedIn()
     } catch (err) {
       setError(
         err instanceof Error && err.message

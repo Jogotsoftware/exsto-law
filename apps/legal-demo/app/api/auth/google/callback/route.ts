@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server'
 import dns from 'node:dns'
-import { appBaseUrl, exchangeGoogleCode, resolvePlatformAdminByEmail } from '@exsto/legal'
+import {
+  appBaseUrl,
+  exchangeGoogleCode,
+  firmOriginFromSlug,
+  getPublicSlugForTenant,
+  resolvePlatformAdminByEmail,
+} from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
+import { mintHandoffToken, handoffRedirectUrl } from '@/lib/authHandoff'
+import { requestOrigin } from '@/lib/requestOrigin'
 import { signSession, buildSessionCookie } from '@/lib/session'
 import { signAdminSession, buildAdminSessionCookie } from '@/lib/adminSession'
 
@@ -88,6 +96,31 @@ export async function GET(request: Request) {
         return redirectToLoginWithError(
           `The Google account ${result.accountEmail} is not authorized to access this workspace. Sign in with an authorized account.`,
         )
+      }
+
+      // AUTH-HANDOFF-1: if this attorney's firm lives on its own subdomain, the
+      // session must be minted THERE — the cookie is host-only, and this whole
+      // flow runs on the one registered OAuth host. Hand off with a single-use
+      // 60s token; the firm host's /api/auth/handoff mints the real cookie.
+      // Dormant-safe: with no TENANT_BASE_DOMAIN, firmOriginFromSlug returns the
+      // canonical base, the origins match, and the direct path below runs as ever.
+      const firmSlug = await getPublicSlugForTenant(result.tenantId)
+      if (firmSlug) {
+        const firmOrigin = firmOriginFromSlug(firmSlug)
+        if (firmOrigin !== requestOrigin(request) && firmOrigin !== BASE_URL) {
+          const handoff = mintHandoffToken(
+            {
+              kind: 'attorney',
+              tenantId: result.tenantId,
+              actorId: result.actorId,
+              email: result.accountEmail,
+              displayName: result.displayName ?? result.accountEmail,
+            },
+            firmSlug,
+            safeReturnTo,
+          )
+          return NextResponse.redirect(handoffRedirectUrl(firmSlug, handoff))
+        }
       }
 
       // Mint a signed, httpOnly session cookie server-side. The identity NEVER

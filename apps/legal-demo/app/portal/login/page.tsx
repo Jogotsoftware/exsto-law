@@ -76,8 +76,9 @@ export default function ClientPortalLoginPage() {
   // route to record the provenanced portal.email_confirmed event — a plain
   // password sign-in never re-fires it.
   async function bridge(accessToken: string, cont: string, confirmed = false) {
-    const { path } = await bridgeSupabaseSession(accessToken, cont, confirmed)
-    router.replace(safeInternalPath(path, '/portal'))
+    const { path, handedOff } = await bridgeSupabaseSession(accessToken, cont, confirmed)
+    // AUTH-HANDOFF-1: a cross-host handoff already navigated the page.
+    if (!handedOff) router.replace(safeInternalPath(path, '/portal'))
   }
 
   // On mount: handle an email-confirmation return (?code=) and pre-fill ?email=.
@@ -166,12 +167,12 @@ export default function ClientPortalLoginPage() {
         setSubmitting(false)
         setPhase('check-email')
       } else {
-        const { path } = await signInWithPasswordAndBridge({
+        const { path, handedOff } = await signInWithPasswordAndBridge({
           email,
           password,
           continuePath: continueParam,
         })
-        router.replace(safeInternalPath(path, '/portal'))
+        if (!handedOff) router.replace(safeInternalPath(path, '/portal'))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
