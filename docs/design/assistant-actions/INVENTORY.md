@@ -561,3 +561,27 @@ plan this stale finding sits under).
   ClientTool in `buildAttorneyClientTools` — `verticals/legal/src/api/assistantChat.ts:710`.
   Deliberate non-gap: tagline/about are NOT merge tokens (public marketing copy, never
   document content — the FIRM_DEFAULTS/merge-neutrality rule).
+
+- **2026-08-06 (FIRM-BRANDING-1, #TBD):** the firm logo moved off the invoice-template
+  config onto the `firm_profile` singleton (`firm_logo` + `firm_logo_tone`, migrations
+  0202/0203), Settings → Firm Details became the one place it is uploaded, and every
+  firm-chrome surface (attorney top bar, client portal band, `/book` funnel, public
+  landing page, OG card, portal pay page, e-sign signing pages, invoice PDF) now reads
+  it. New MCP read tool `legal.firm.get_branding` (`mcp/tools/settingsTools.ts`) and two
+  new `legal.settings.firm_profile.set` fields (`logoDataUrl`, `logoTone`, TS-typed
+  pass-through). **Missing:** the attorney chat still has no firm-profile ClientTool at
+  all (same gap the 2026-08-05 FIRM-LANDING-2 entry opened), so "change my brand color"
+  is not chat-doable — `verticals/legal/src/api/assistantChat.ts:710`. Deliberate
+  non-gaps: the LOGO itself is a file upload, not something a chat turn can produce, and
+  branding is never a merge token (documents stay visually neutral —
+  `apps/legal-demo/tests/documentNeutrality.test.ts`).
+- **2026-08-06 (FIRM-BRANDING-1) — transactional email chrome is still hardcoded:**
+  `verticals/legal/src/email/brand.ts` pins a navy header band and the literal
+  `FIRM.name = 'Pacheco Law Firm, PLLC'` / address / attorney, and
+  `email/layout.ts:127` renders that band on every builder in `email/templates.ts`.
+  Emails therefore do NOT follow the firm's logo or brand color, and would print the
+  pilot firm's name for a second tenant. NOT wired here because that design kit is
+  currently DORMANT (nothing outside `src/email/` imports it — verified by grep), so
+  fixing it means first deciding whether it replaces the live notification templates
+  (`api/notificationTemplates.ts`) and then threading per-tenant branding through the
+  notification variables bag — a real wave, not a one-line addition.

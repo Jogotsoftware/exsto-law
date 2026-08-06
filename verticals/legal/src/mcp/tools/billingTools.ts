@@ -342,8 +342,8 @@ registerTool({
     required: ['config'],
     additionalProperties: false,
   },
-  handler: async (_ctx: ActionContext, input) => ({
-    pdf: await renderInvoiceTemplatePreviewBase64(input.config),
+  handler: async (ctx: ActionContext, input) => ({
+    pdf: await renderInvoiceTemplatePreviewBase64(ctx, input.config),
   }),
 } satisfies Tool<{ config: Partial<InvoiceTemplateConfig> }, { pdf: InvoicePdf }>)
 

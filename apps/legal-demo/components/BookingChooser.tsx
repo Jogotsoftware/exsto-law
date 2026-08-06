@@ -17,10 +17,14 @@ import { useI18n } from '@/lib/i18n'
 export function BookingChooser({
   firmName,
   brandColor = null,
+  logoDataUrl = null,
+  logoTone = null,
   onContinueAsNewClient,
 }: {
   firmName: string | null
   brandColor?: string | null
+  logoDataUrl?: string | null
+  logoTone?: 'light' | 'dark' | null
   onContinueAsNewClient: () => void
 }) {
   const { t } = useI18n()
@@ -31,7 +35,12 @@ export function BookingChooser({
     <main className="bk-shell">
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
-        <BookTopbar firmName={firmName} brandColor={brandColor} />
+        <BookTopbar
+          firmName={firmName}
+          brandColor={brandColor}
+          logoDataUrl={logoDataUrl}
+          logoTone={logoTone}
+        />
         <section className="bk-card">
           <div className="bk-stage">
             <div className="bk-stage-head">

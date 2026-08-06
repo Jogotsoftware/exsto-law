@@ -29,6 +29,8 @@ import {
   updateEmailDraftingConfig,
   getFirmProfile,
   setFirmProfile,
+  getFirmBranding,
+  type FirmBranding,
   getTenantSettings,
   listIntegrationStatuses,
   setAttorneySignature,
@@ -104,6 +106,23 @@ registerTool({
   mode: 'write',
   handler: async (ctx: ActionContext, input) => ({ profile: await setFirmProfile(ctx, input) }),
 } satisfies Tool<SetFirmProfileInput, { profile: FirmProfileFields }>)
+
+// ── Firm branding (FIRM-BRANDING-1) ──────────────────────────────────────────
+// The chrome read: firm name + brand color + logo, in one call. Its own tool
+// because the LOGO is a ~100 KB data URL and deliberately does not ride in
+// legal.settings.get (which every page load, document merge and AI context build
+// already pays for). Settings → Firm Details is where all three are edited
+// (legal.settings.firm_profile.set); everything else — top bar, portal, booking
+// funnel, landing page, invoice PDF — only reads.
+
+registerTool({
+  name: 'legal.firm.get_branding',
+  description:
+    "The firm's visual identity for chrome: firm name, brand color (#rrggbb or null for the product navy), and logo as an image data URL (or null). The logo resolves from the firm profile, falling back to a logo uploaded on the older invoice-template config where the firm has never set one.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ branding: await getFirmBranding(ctx) }),
+} satisfies Tool<Record<string, never>, { branding: FirmBranding }>)
 
 // ── Email signature (fix #10) ────────────────────────────────────────────────
 // The signature is applied in the central Contract B send path; this is its

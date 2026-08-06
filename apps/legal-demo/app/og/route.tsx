@@ -23,9 +23,13 @@ export async function GET(): Promise<Response> {
   const h = await headers()
   const slug = (h.get('x-firm-slug') ?? '').trim().toLowerCase()
   let brand = DEFAULT_BRAND
+  // FIRM-BRANDING-1 — a firm that uploaded a logo gets THAT on the share card;
+  // only firms with no art of their own fall back to the tinted crest.
+  let logoDataUrl: string | null = null
   if (slug && h.get('x-firm-host') === '1') {
     const site = await getPublicFirmSite(slug).catch(() => null)
     if (site && isHexColor(site.headerColor)) brand = site.headerColor
+    if (site?.logoDataUrl) logoDataUrl = site.logoDataUrl
   }
   return new ImageResponse(
     <div
@@ -43,7 +47,7 @@ export async function GET(): Promise<Response> {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 400,
+          width: logoDataUrl ? 460 : 400,
           height: 400,
           borderRadius: 96,
           background: '#FFFFFF',
@@ -51,7 +55,11 @@ export async function GET(): Promise<Response> {
           boxShadow: '0 40px 90px rgba(19, 41, 75, 0.18)',
         }}
       >
-        <FirmMarkGlyph brand={brand} size={300} />
+        {logoDataUrl ? (
+          <img src={logoDataUrl} alt="" width={320} height={200} style={{ objectFit: 'contain' }} />
+        ) : (
+          <FirmMarkGlyph brand={brand} size={300} />
+        )}
       </div>
     </div>,
     { width: 1200, height: 630 },
