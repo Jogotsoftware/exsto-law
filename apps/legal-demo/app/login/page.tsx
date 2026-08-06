@@ -16,7 +16,15 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { EB_Garamond } from 'next/font/google'
 import { fetchSession } from '@/lib/auth'
+import { Wavefield } from '@/components/Wavefield'
 import styles from './login.module.css'
+
+// FIRM-LANDING-3 follow-up: the sign-in sits in the same comp shell as the
+// firm landing (cream radial + wavefield + halo) so the door matches the
+// front door. The waves use the landing's default blue — this is the PRODUCT's
+// sign-in (it exists on every host), so it never tints to a firm's color.
+const WAVE_BRAND = '#4B9CD3'
+const WAVE_BRAND_DEEP = '#35719A'
 
 // The app's global serif (app/layout.tsx) loads EB Garamond 500/600/700 — the
 // marketing sign-in's "Sign in" is the lighter 400 face. Loading that one weight
@@ -55,6 +63,13 @@ export default function LoginPage() {
 
   return (
     <main className={styles.page}>
+      <Wavefield
+        brand={WAVE_BRAND}
+        brandDeep={WAVE_BRAND_DEEP}
+        className={styles.waves}
+        idSuffix="login"
+      />
+      <div className={styles.halo} aria-hidden />
       <div className={styles.masthead}>
         <a href="https://instruments.legal" className={styles.wordmarkLink}>
           <img

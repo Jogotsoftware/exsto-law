@@ -11,4 +11,7 @@
 // generic wording ("the firm"), never a guess at whose name it is.
 export const PRODUCT_TAGLINE = 'Legal Instruments'
 export const PRODUCT_STAGE = 'beta'
-export const PRODUCT_NAME = `${PRODUCT_TAGLINE} (${PRODUCT_STAGE})`
+// Share cards / tab titles carry the clean product name — never the stage
+// ("Legal Instruments (beta)" in an iMessage preview reads unfinished). The
+// stage still shows INSIDE the product (the attorney rail's chip).
+export const PRODUCT_NAME = PRODUCT_TAGLINE
