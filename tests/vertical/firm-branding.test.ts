@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeFirmProfileFieldValue } from '../../verticals/legal/src/handlers/firmProfile.js'
 import {
   DEFAULT_INVOICE_TEMPLATE,
-  logoPlateColor,
+  legibleInk,
   resolveInvoiceTemplate,
 } from '../../verticals/legal/src/billing/invoicePdf.js'
 
@@ -79,11 +79,11 @@ describe('invoice template defaults', () => {
   })
 })
 
-describe('logoPlateColor — legibility of the accent on paper', () => {
+describe('legibleInk — legibility of the accent on paper', () => {
   it('darkens a pale brand color until it can carry white text', () => {
     // The pilot firm's legacy invoice accent printed a white-on-baby-blue
-    // table header; the plate/ink derived from it must be materially darker.
-    const out = logoPlateColor('#8ac6f4')
+    // table header; the ink derived from it must be materially darker.
+    const out = legibleInk('#8ac6f4')
     expect(out).not.toBe('#8ac6f4')
     const lum = (hex: string): number =>
       (0.299 * parseInt(hex.slice(1, 3), 16) +
@@ -94,12 +94,65 @@ describe('logoPlateColor — legibility of the accent on paper', () => {
   })
 
   it('leaves an already-dark brand color alone so the firm keeps its hue', () => {
-    expect(logoPlateColor('#5b2333')).toBe('#5b2333')
-    expect(logoPlateColor('#1b2a4a')).toBe('#1b2a4a')
+    expect(legibleInk('#5b2333')).toBe('#5b2333')
+    expect(legibleInk('#1b2a4a')).toBe('#1b2a4a')
   })
 
   it('falls back to the product navy for a missing/invalid color', () => {
-    expect(logoPlateColor('')).toBe('#14213d')
-    expect(logoPlateColor('rebeccapurple')).toBe('#14213d')
+    expect(legibleInk('')).toBe('#14213d')
+    expect(legibleInk('rebeccapurple')).toBe('#14213d')
+  })
+})
+
+describe('BRANDING-SECTION-1 — secondary color + header logo write validation', () => {
+  it('accepts a hex secondary color and lowercases it', () => {
+    expect(normalizeFirmProfileFieldValue('firm_secondary_color', '#A6812F')).toBe('#a6812f')
+  })
+
+  it('rejects a non-hex secondary color — it lands in an inline style', () => {
+    expect(() => normalizeFirmProfileFieldValue('firm_secondary_color', 'gold')).toThrow(
+      /hex color/,
+    )
+  })
+
+  it('clears the secondary color on empty (companion goes back to derived)', () => {
+    expect(normalizeFirmProfileFieldValue('firm_secondary_color', '')).toBe('')
+    expect(normalizeFirmProfileFieldValue('firm_secondary_color', null)).toBe('')
+  })
+
+  it('holds the header logo to the SAME guards as the firm logo', () => {
+    expect(normalizeFirmProfileFieldValue('firm_logo_secondary', PNG)).toBe(PNG)
+    expect(() =>
+      normalizeFirmProfileFieldValue('firm_logo_secondary', 'https://evil.test/x.png'),
+    ).toThrow(/PNG\/JPG/)
+    expect(() =>
+      normalizeFirmProfileFieldValue(
+        'firm_logo_secondary',
+        'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+      ),
+    ).toThrow(/PNG\/JPG/)
+    expect(() =>
+      normalizeFirmProfileFieldValue(
+        'firm_logo_secondary',
+        `data:image/png;base64,${'A'.repeat(700_001)}`,
+      ),
+    ).toThrow(/too large/)
+  })
+
+  it('holds the header logo tone to the closed set', () => {
+    expect(normalizeFirmProfileFieldValue('firm_logo_secondary_tone', 'dark')).toBe('dark')
+    expect(() => normalizeFirmProfileFieldValue('firm_logo_secondary_tone', 'medium')).toThrow(
+      /light.*dark/,
+    )
+  })
+})
+
+describe('BRANDING-SECTION-1 — the invoice no longer plates reversed artwork', () => {
+  it('resolves a light-tone logo without any plate decision left in the config', () => {
+    // The renderer prints t.logoDataUrl bare; tone survives only as a measured
+    // fact. This guards the removal: nothing downstream may branch on it.
+    const t = resolveInvoiceTemplate({ logoDataUrl: PNG, logoTone: 'light' })
+    expect(t.logoDataUrl).toBe(PNG)
+    expect(t.logoTone).toBe('light')
   })
 })

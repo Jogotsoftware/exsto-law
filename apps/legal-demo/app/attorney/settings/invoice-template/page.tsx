@@ -24,7 +24,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { plateHex } from '@/lib/brandColor'
 import { usePdfDocument, renderPageToCanvas } from '@/components/esign/usePdfDocument'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
@@ -190,16 +189,11 @@ export default function InvoiceTemplatePage(): React.ReactElement {
             </p>
             {saved && <SettingsAlert tone="success">Saved.</SettingsAlert>}
 
-            {/* FIRM-BRANDING-1 — read-only. One place owns firm identity. */}
+            {/* FIRM-BRANDING-1 — read-only. One place owns firm identity.
+                BRANDING-SECTION-1 — the mark previews bare, exactly as it
+                prints; no plate is painted behind it. */}
             <div className="li-set-brandref">
-              <span
-                className={`li-set-brandref-logo${cfg.logoDataUrl ? ' has-logo' : ''}${
-                  cfg.logoDataUrl && cfg.logoTone === 'dark' ? ' on-light' : ''
-                }`}
-                style={{
-                  background: cfg.logoTone === 'dark' ? '#fff' : plateHex(cfg.accentColor),
-                }}
-              >
+              <span className={`li-set-brandref-logo${cfg.logoDataUrl ? ' has-logo' : ''}`}>
                 {cfg.logoDataUrl ? <img src={cfg.logoDataUrl} alt="" /> : null}
               </span>
               <div className="li-set-brandref-text">

@@ -37,38 +37,84 @@ export function mixHex(hex: string, base: string, weight: number): string {
   return `#${channel(1)}${channel(3)}${channel(5)}`
 }
 
+// BRANDING-SECTION-1 — the companion tone that sits beside the primary brand
+// color (the console rail under the top bar, the funnel's deeper blue, the
+// landing page's deep ink). It was always DERIVED by darkening the one stored
+// color, which keeps a single-color firm coherent but can never produce a real
+// brand PAIR (navy + gold, maroon + cream). A stored secondary color now wins
+// wherever a companion is needed; unset, the derivation is exactly what it was,
+// so no existing firm's chrome moves.
+function companion(
+  hex: string,
+  secondary: string | null | undefined,
+  derivedDarken: number,
+): string {
+  return isHexColor(secondary) ? secondary : darkenHex(hex, derivedDarken)
+}
+
 // The CSS custom properties a shell root sets from the firm's brand color.
 // Consumed by tail rules in globals.css: var(--li-brand, <product default>).
-export function brandVars(hex: string | null | undefined): React.CSSProperties | undefined {
+export function brandVars(
+  hex: string | null | undefined,
+  secondary?: string | null,
+): React.CSSProperties | undefined {
   if (!isHexColor(hex)) return undefined
   return {
     ['--li-brand' as string]: hex,
-    ['--li-brand-deep' as string]: darkenHex(hex, 0.18),
+    ['--li-brand-deep' as string]: companion(hex, secondary, 0.18),
   }
 }
 
 // COMP-RESTYLE-1 — the booking funnel's brand vars. Set ONLY when the firm has
 // stored a color: unset, the .bk-* fallbacks are the intake comp's exact
 // light-blue pair (#7bafd4 / #5a97c4); set, the whole funnel re-tints.
-export function bookBrandVars(hex: string | null | undefined): React.CSSProperties | undefined {
+export function bookBrandVars(
+  hex: string | null | undefined,
+  secondary?: string | null,
+): React.CSSProperties | undefined {
   if (!isHexColor(hex)) return undefined
   return {
     ['--bk-brand' as string]: hex,
-    ['--bk-brand-deep' as string]: darkenHex(hex, 0.12),
+    ['--bk-brand-deep' as string]: companion(hex, secondary, 0.12),
+  }
+}
+
+// BRANDING-SECTION-1 — the landing page's brand family (COMP-RESTYLE-1's
+// --fl-* set), in one place instead of inline in the component, so the
+// secondary-color override lands the same way it does for the console and the
+// funnel. `--fl-brand-icon` (the tile/arrow ink) and `--fl-brand-deep` are the
+// two companion tones there.
+export function landingBrandVars(
+  hex: string | null | undefined,
+  secondary?: string | null,
+): React.CSSProperties | undefined {
+  if (!isHexColor(hex)) return undefined
+  return {
+    ['--fl-brand' as string]: hex,
+    ['--fl-brand-deep' as string]: companion(hex, secondary, 0.28),
+    ['--fl-brand-icon' as string]: companion(hex, secondary, 0.1),
+    // The cream shell's tint stays keyed to the PRIMARY: it is a wash of the
+    // page background, not a companion ink, and mixing a contrasting secondary
+    // into it muddies the paper.
+    ['--fl-bg-tint' as string]: mixHex(hex, '#fdfbf5', 0.13),
   }
 }
 
 // FIRM-BRANDING-1 — a firm uploads ONE logo file, and roughly half of real firm
 // logos are "reversed" artwork: white/light ink drawn for a dark website header.
-// That file is invisible on a white invoice; a dark-ink file is equally
-// invisible on the navy console bar. Nothing about a data URL says which it is,
-// so the uploader MEASURES it once — average luminance over the non-transparent
-// pixels — and the answer is stored as a firm fact (firm_logo_tone, migration
-// 0203) that both the browser and the server-side invoice renderer read.
+// Nothing about a data URL says which it is, so the uploader MEASURES it once —
+// average luminance over the non-transparent pixels — and the answer is stored
+// as a firm fact (firm_logo_tone, migration 0203).
 //
-// Returns 'light' when the ink is light (needs a dark backdrop), 'dark'
-// otherwise. Resolves to null if the image can't be measured — callers treat
-// that as "unknown" and render the logo bare, which is the pre-0203 behaviour.
+// BRANDING-SECTION-1 — that fact is now ADVISORY ONLY. It used to drive an
+// automatic plate/box behind reversed artwork on light surfaces; that backdrop
+// is gone (founder call — the product must not decorate a firm's mark). Tone
+// now only powers the uploader's hint that a light mark may be hard to see on
+// light pages, where the answer is to upload a dark variant and put the light
+// one in the header-logo slot.
+//
+// Returns 'light' when the ink is light, 'dark' otherwise. Resolves to null if
+// the image can't be measured — callers treat that as "unknown" and say nothing.
 export async function measureLogoTone(dataUrl: string): Promise<'light' | 'dark' | null> {
   if (typeof window === 'undefined') return null
   try {
@@ -107,31 +153,9 @@ export async function measureLogoTone(dataUrl: string): Promise<'light' | 'dark'
   }
 }
 
-// Relative luminance (0..1) of an #rrggbb, Rec. 601. Used to decide whether a
-// color is dark enough to sit behind light artwork.
-export function hexLuminance(hex: string): number {
-  if (!isHexColor(hex)) return 0
-  const ch = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
-  return 0.299 * ch(1) + 0.587 * ch(3) + 0.114 * ch(5)
-}
-
-// FIRM-BRANDING-1 — the fill for a plate that sits BEHIND light (reversed)
-// artwork. A firm's brand color can itself be pale (the pilot firm's legacy
-// invoice accent is #8ac6f4), and white artwork on pale blue is as unreadable
-// as white on white — so a light brand color is darkened until it can carry
-// light ink. A brand color that is already dark is used as-is, so the plate
-// still reads as the firm's color.
-export function plateHex(hex: string | null | undefined): string {
-  if (!isHexColor(hex)) return '#14213d'
-  let out = hex
-  for (let i = 0; i < 6 && hexLuminance(out) > 0.32; i++) out = darkenHex(out, 0.25)
-  return out
-}
-
-// The CSS var a light surface sets so a reversed logo's plate takes the FIRM's
-// color rather than the product navy. Paired with .li-logo-chip-dark, which
-// reads var(--li-logo-plate, #14213d).
-export function logoPlateVars(hex: string | null | undefined): React.CSSProperties | undefined {
-  if (!isHexColor(hex)) return undefined
-  return { ['--li-logo-plate' as string]: plateHex(hex) }
-}
+// BRANDING-SECTION-1 — `hexLuminance` / `plateHex` / `logoPlateVars` were
+// removed here. They existed to compute the fill of an automatic plate behind
+// reversed artwork; the product no longer paints anything behind an uploaded
+// logo (see measureLogoTone above). A firm that needs its mark to read on both
+// a light page and the dark console bar uploads the right variant into each of
+// the two logo slots — the product does not invent a backdrop on their behalf.

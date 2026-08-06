@@ -35,11 +35,12 @@ const firmBrandingTool: Tool<
     headerColor: string | null
     logoDataUrl: string | null
     logoTone: 'light' | 'dark' | null
+    secondaryColor: string | null
   }
 > = {
   name: 'legal.public.firm_branding',
   description:
-    "The resolved firm's public identity for the booking page: firm name, attorney display name, brand color, and logo. Client-safe (display fields only).",
+    "The resolved firm's public identity for the booking page: firm name, attorney display name, brand color, secondary brand color, and logo. Client-safe (display fields only).",
   mode: 'read',
   handler: async (ctx: ActionContext) => {
     // FIRM-BRANDING-1 — the logo comes from getFirmLogo (firm profile, legacy
@@ -52,6 +53,7 @@ const firmBrandingTool: Tool<
       headerColor: s.headerColor,
       logoDataUrl,
       logoTone: s.logoTone,
+      secondaryColor: s.secondaryColor,
     }
   },
 }

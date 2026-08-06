@@ -108,6 +108,13 @@ interface FirmProfileSetPayload {
   // FIRM-BRANDING-1 (migration 0203) — 'light' | 'dark', the tone of the ink in
   // that logo, measured by the uploader; '' clears (unknown → render bare).
   firm_logo_tone?: string | null
+  // BRANDING-SECTION-1 (migration 0204) — the firm's SECOND brand color as
+  // '#rrggbb'; '' clears (companion tones go back to derived-from-primary).
+  firm_secondary_color?: string | null
+  // BRANDING-SECTION-1 (migration 0204) — the HEADER logo (attorney console top
+  // bar only) as an image data URL, and its measured tone; '' clears either.
+  firm_logo_secondary?: string | null
+  firm_logo_secondary_tone?: string | null
   // FIRM-LANDING-2 (migration 0200) — the public landing page's hero tagline
   // and about paragraph. Plain text, trimmed, '' clears; length-capped below
   // (these render verbatim on the firm's public page — a paste-a-document
@@ -129,6 +136,9 @@ const PROFILE_FIELDS = [
   'firm_header_color',
   'firm_logo',
   'firm_logo_tone',
+  'firm_secondary_color',
+  'firm_logo_secondary',
+  'firm_logo_secondary_tone',
   'firm_tagline',
   'firm_about',
 ] as const
@@ -218,34 +228,35 @@ export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown)
       `firm_about must be at most ${ABOUT_CHAR_CAP} characters (got ${text.length}); leave empty to clear.`,
     )
   }
-  if (kind === 'firm_header_color' && text) {
+  // BRANDING-SECTION-1 — the same three guards now cover both brand colors and
+  // both logo slots. One rule per SHAPE, not per field, so a future slot cannot
+  // be added with weaker validation than its sibling.
+  if ((kind === 'firm_header_color' || kind === 'firm_secondary_color') && text) {
     // Store only a well-formed hex color — anything else would be injected
     // verbatim into an inline style on every page's header.
     if (!/^#[0-9a-fA-F]{6}$/.test(text)) {
       throw new Error(
-        `firm_header_color must be a hex color like #1b2a4a (got "${text}"); leave empty to clear.`,
+        `${kind} must be a hex color like #1b2a4a (got "${text}"); leave empty to clear.`,
       )
     }
     return text.toLowerCase()
   }
-  if (kind === 'firm_logo' && text) {
+  if ((kind === 'firm_logo' || kind === 'firm_logo_secondary') && text) {
     if (text.length > LOGO_CHAR_CAP) {
       throw new Error(
-        `firm_logo is too large (${text.length} characters); use an image under 500 KB. Leave empty to clear.`,
+        `${kind} is too large (${text.length} characters); use an image under 500 KB. Leave empty to clear.`,
       )
     }
     if (!LOGO_DATA_URL_RE.test(text)) {
       throw new Error(
-        'firm_logo must be a PNG/JPG/GIF/WEBP image data URL (data:image/png;base64,…); leave empty to clear.',
+        `${kind} must be a PNG/JPG/GIF/WEBP image data URL (data:image/png;base64,…); leave empty to clear.`,
       )
     }
     return text
   }
-  if (kind === 'firm_logo_tone' && text) {
+  if ((kind === 'firm_logo_tone' || kind === 'firm_logo_secondary_tone') && text) {
     if (text !== 'light' && text !== 'dark') {
-      throw new Error(
-        `firm_logo_tone must be 'light' or 'dark' (got "${text}"); leave empty to clear.`,
-      )
+      throw new Error(`${kind} must be 'light' or 'dark' (got "${text}"); leave empty to clear.`)
     }
     return text
   }
@@ -266,7 +277,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color, firm_logo, firm_logo_tone, firm_tagline, firm_about.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color, firm_secondary_color, firm_logo, firm_logo_tone, firm_logo_secondary, firm_logo_secondary_tone, firm_tagline, firm_about.',
     )
   }
 

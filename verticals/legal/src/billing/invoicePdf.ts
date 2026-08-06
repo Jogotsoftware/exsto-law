@@ -96,11 +96,17 @@ function kindLabel(kind: string): string {
   return kind.replace(/_/g, ' ')
 }
 
-// FIRM-BRANDING-1 — the fill behind reversed (light-ink) artwork on the invoice.
-// A firm's brand color can itself be pale, and white artwork on pale blue is as
-// unreadable on paper as on screen — so a light color is darkened until it can
-// carry light ink; an already-dark brand color is used as-is. Mirrors
-// apps/legal-demo/lib/brandColor.plateHex so screen and paper agree.
+// FIRM-BRANDING-1 / BRANDING-SECTION-1 — accent INK legibility. Every accent
+// use in this document either carries WHITE text (the table header) or IS text
+// on white paper (the INVOICE title, the totals). A pale brand color made both
+// unreadable — the pilot firm's legacy accent (#8ac6f4) printed a
+// white-on-baby-blue table header. Darkening a light accent keeps the firm's
+// hue and makes the document readable; an already-dark color passes through.
+//
+// This is about TEXT CONTRAST only. It used to double as the fill of a plate
+// behind reversed logo artwork; that plate is gone (BRANDING-SECTION-1 — the
+// product no longer paints a backdrop behind a firm's mark), which is why the
+// function is named for ink rather than for a plate.
 function luminance(hex: string): number {
   const ch = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
   return 0.299 * ch(1) + 0.587 * ch(3) + 0.114 * ch(5)
@@ -114,7 +120,7 @@ function darken(hex: string, amount: number): string {
   return `#${ch(1)}${ch(3)}${ch(5)}`
 }
 
-export function logoPlateColor(accent: string): string {
+export function legibleInk(accent: string): string {
   if (!/^#[0-9a-f]{6}$/i.test(accent)) return '#14213d'
   let out = accent
   for (let i = 0; i < 6 && luminance(out) > 0.32; i++) out = darken(out, 0.25)
@@ -122,13 +128,7 @@ export function logoPlateColor(accent: string): string {
 }
 
 function buildStyles(rawAccent: string) {
-  // FIRM-BRANDING-1 — every accent use below either carries WHITE text (the
-  // table header) or IS text on white paper (the INVOICE title, the totals).
-  // A pale brand color made both unreadable — the pilot firm's legacy invoice
-  // accent (#8ac6f4) printed a white-on-baby-blue table header. Darkening a
-  // light accent to a legible ink keeps the firm's hue and makes the document
-  // readable; an already-dark brand color passes through untouched.
-  const accent = logoPlateColor(rawAccent)
+  const accent = legibleInk(rawAccent)
   return StyleSheet.create({
     page: { padding: 40, fontSize: 10, color: '#1f2937', fontFamily: 'Helvetica' },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -138,13 +138,6 @@ function buildStyles(rawAccent: string) {
     // a 48 pt box — an illegible smudge). A wide box with objectFit:'contain'
     // letterboxes tall marks and lets wordmarks read at their natural ratio.
     logo: { width: 150, height: 46, objectFit: 'contain' },
-    // Letterhead block for reversed (light-ink) artwork — see logoTone.
-    logoPlate: {
-      backgroundColor: accent,
-      borderRadius: 6,
-      paddingVertical: 7,
-      paddingHorizontal: 12,
-    },
     firmName: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: accent },
     firmMeta: { fontSize: 9, color: '#6b7280', marginTop: 2 },
     invoiceTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', color: accent, textAlign: 'right' },
@@ -249,15 +242,12 @@ export async function renderInvoicePdf(
           View,
           { key: 'firm', style: s.firmBlock },
           [
-            t.logoDataUrl
-              ? t.logoTone === 'light'
-                ? h(
-                    View,
-                    { key: 'logo', style: s.logoPlate },
-                    h(Image, { style: s.logo, src: t.logoDataUrl }),
-                  )
-                : h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl })
-              : null,
+            // BRANDING-SECTION-1 — the firm's artwork prints BARE, at its own
+            // proportions. A light-ink logo used to get a colored letterhead
+            // plate here; the product no longer decorates a firm's mark, on
+            // paper or on screen. A firm whose invoice needs a dark-ink mark
+            // uploads one (the header slot keeps their reversed variant).
+            t.logoDataUrl ? h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl }) : null,
             h(
               View,
               { key: 'fb' },

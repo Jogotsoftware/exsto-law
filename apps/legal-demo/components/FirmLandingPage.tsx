@@ -4,7 +4,7 @@ import Link from 'next/link'
 import type { PublicFirmSite } from '@exsto/legal'
 import { LanguageToggle } from '@/components/LanguageToggle'
 import { useI18n } from '@/lib/i18n'
-import { darkenHex, isHexColor, logoPlateVars, mixHex } from '@/lib/brandColor'
+import { darkenHex, isHexColor, landingBrandVars } from '@/lib/brandColor'
 import { Wavefield } from '@/components/Wavefield'
 import { FirmMarkGlyph } from '@/components/FirmMarkGlyph'
 import {
@@ -43,27 +43,18 @@ const DEFAULT_BRAND = '#4B9CD3'
 // plug-and-play mark for a firm that has uploaded no art of its own.
 // FIRM-BRANDING-1: once a firm uploads a logo (Settings → Firm Details) it
 // takes the crest's place here, the same as on every other firm surface.
+// BRANDING-SECTION-1: an uploaded mark renders BARE — no tile, no plate, no
+// background. The product does not decorate a firm's artwork.
 function FirmMark({
   brand,
-  brandColor,
   logoDataUrl,
-  logoTone,
 }: {
   brand: string
-  // The firm's OWN stored color (null when unset) — the plate should not take
-  // the landing page's Carolina-blue default, only a real firm color.
-  brandColor: string | null
   logoDataUrl: string | null
-  logoTone: 'light' | 'dark' | null
 }): React.JSX.Element {
   if (logoDataUrl) {
-    // The tile is white; reversed (light-ink) artwork needs the brand plate.
     return (
-      <span
-        className={`fl-mark fl-mark-logo${logoTone === 'light' ? ' fl-mark-logo-plate' : ''}`}
-        aria-hidden
-        style={logoPlateVars(brandColor)}
-      >
+      <span className="fl-mark fl-mark-logo" aria-hidden>
         <img src={logoDataUrl} alt="" />
       </span>
     )
@@ -116,24 +107,15 @@ export function FirmLandingPage({ site }: { site: PublicFirmSite }): React.JSX.E
   // and a themed firm derives its whole blue family from the one stored color.
   const hasBrand = isHexColor(site.headerColor)
   const brand = hasBrand ? (site.headerColor as string) : DEFAULT_BRAND
-  const brandDeep = darkenHex(brand, 0.28)
+  // BRANDING-SECTION-1 — the deep companion is the firm's SECONDARY color when
+  // they set one, else the darkened primary (COMP-RESTYLE-1's derivation).
+  const brandDeep = isHexColor(site.secondaryColor) ? site.secondaryColor : darkenHex(brand, 0.28)
   const { contact } = site
   const hasContact = Boolean(contact.phone || contact.email || contact.address)
   return (
     <main
       className="fl-shell"
-      style={
-        hasBrand
-          ? {
-              ['--fl-brand' as string]: brand,
-              ['--fl-brand-deep' as string]: brandDeep,
-              // Icon/arrow ink: a slightly deepened brand (the comp's #5A97C4
-              // relationship to its #4B9CD3 base).
-              ['--fl-brand-icon' as string]: darkenHex(brand, 0.1),
-              ['--fl-bg-tint' as string]: mixHex(brand, '#fdfbf5', 0.13),
-            }
-          : undefined
-      }
+      style={landingBrandVars(hasBrand ? brand : null, site.secondaryColor)}
     >
       <Wavefield brand={brand} brandDeep={brandDeep} className="fl-waves" idSuffix="landing" />
       <div className="fl-halo" aria-hidden />
@@ -152,19 +134,17 @@ export function FirmLandingPage({ site }: { site: PublicFirmSite }): React.JSX.E
                 the comp's bare 52px wordmark, replacing the crest + name.
                 Reversed (light-ink) artwork can't sit bare on the cream shell,
                 so it keeps the FIRM-BRANDING-1 plated tile + name lockup. */}
-            {site.logoDataUrl && site.logoTone !== 'light' ? (
+            {/* COMP-RESTYLE-1 — an uploaded mark replaces the crest + name and
+                renders at the comp's 52px wordmark size, bare, whatever its
+                tone (BRANDING-SECTION-1: no plate for reversed artwork). */}
+            {site.logoDataUrl ? (
               <div className="fl-brand-row">
                 <img src={site.logoDataUrl} alt="" className="fl-logo" />
                 <h1 className="sr-only">{site.firmName}</h1>
               </div>
             ) : (
               <div className="fl-brand-row">
-                <FirmMark
-                  brand={brand}
-                  brandColor={site.headerColor}
-                  logoDataUrl={site.logoDataUrl}
-                  logoTone={site.logoTone}
-                />
+                <FirmMark brand={brand} logoDataUrl={null} />
                 <h1 className="fl-name">{site.firmName}</h1>
               </div>
             )}

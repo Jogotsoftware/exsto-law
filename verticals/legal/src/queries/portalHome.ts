@@ -69,6 +69,9 @@ export interface PortalHomeSummary {
   // display asset only, the same one the booking funnel and invoices show.
   logoDataUrl: string | null
   logoTone: 'light' | 'dark' | null
+  // BRANDING-SECTION-1 — the firm's second brand color, so the portal's deep
+  // chrome tone matches the console's. Client-safe: a display color only.
+  secondaryColor: string | null
 }
 
 // Upcoming, non-cancelled consultations across the client's matters — the same
@@ -270,5 +273,6 @@ export async function getPortalHomeSummary(
     headerColor: firmProfile.headerColor,
     logoDataUrl: firmLogoDataUrl,
     logoTone: firmProfile.logoTone,
+    secondaryColor: firmProfile.secondaryColor,
   }
 }

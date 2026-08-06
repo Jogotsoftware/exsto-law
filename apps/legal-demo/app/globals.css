@@ -9623,21 +9623,12 @@ input[type='number'] {
   max-width: 260px;
   object-fit: contain;
 }
-/* FIRM-BRANDING-1 — the two backdrops a firm logo may need, driven by the
-   MEASURED tone of the artwork (firm_logo_tone, migration 0203) rather than by
-   a guess. A reversed (light-ink) logo gets a brand-colored plate on light
-   surfaces; a paper (dark-ink) logo gets a white chip on dark chrome. When the
-   tone is unknown the logo renders bare, exactly as before 0203. */
-.li-logo-chip-light {
-  background: #fff;
-  border-radius: 8px;
-  padding: 4px 10px;
-}
-.li-logo-chip-dark {
-  background: var(--li-logo-plate, #14213d);
-  border-radius: 8px;
-  padding: 5px 11px;
-}
+/* BRANDING-SECTION-1 — the .li-logo-chip-* plates were removed here. The
+   product used to paint a backdrop behind a firm's uploaded artwork based on
+   its measured tone; it no longer decorates a firm's mark anywhere. A firm
+   whose logo needs to read on both light pages and the dark console bar
+   uploads the right variant into each of the two logo slots (Settings → Firm
+   Details → Branding). */
 /* UIWALK-1: the scroll region now wraps the top bar + main, so the bar slides
    away with the page instead of staying pinned. */
 .li-scrollcol {
@@ -10632,18 +10623,14 @@ input[type='number'] {
 }
 /* FIRM-BRANDING-1: a real firm logo is a WIDE wordmark, not a 64px app icon —
    squeezing one into the square crest well made it an illegible smudge. When a
-   logo is present the well grows sideways. It stays NAVY (which is what
-   reversed artwork needs, and what the well always was); a measured dark-ink
-   logo flips it to white via .on-light. */
+   logo is present the well grows sideways. (BRANDING-SECTION-1 removed the
+   tone-driven .on-light flip; the Branding section's own slots supersede this
+   well, which now only backs the crest fallback.) */
 .li-set-firm-logo.has-logo {
   width: auto;
   min-width: 96px;
   max-width: 240px;
   padding: 6px 12px;
-}
-.li-set-firm-logo.has-logo.on-light {
-  background: #fff;
-  border: 1px solid var(--li-border-soft);
 }
 .li-set-firm-logo img {
   width: 100%;
@@ -11160,10 +11147,6 @@ input[type='number'] {
   min-width: 72px;
   max-width: 176px;
   padding: 5px 10px;
-}
-.li-set-brandref-logo.has-logo.on-light {
-  background: #fff !important;
-  border: 1px solid var(--li-border-soft);
 }
 .li-set-brandref-logo.has-logo img {
   width: auto;
@@ -22285,8 +22268,7 @@ details.li-brief-research summary:hover {
   color: var(--li-rail-gold);
 }
 /* FIRM-BRANDING-1: the firm's uploaded logo stands in for the scales crest in
-   the portal band. Bare on the dark band; a measured dark-ink logo picks up
-   .li-logo-chip-light so it does not disappear. */
+   the portal band, rendered bare (BRANDING-SECTION-1 — no chip, no plate). */
 .li-cp-brand-logo {
   display: block;
   height: 34px;
@@ -27915,11 +27897,6 @@ details.li-brief-research summary:hover {
   max-height: 40px;
   object-fit: contain;
 }
-/* Reversed (light-ink) artwork needs the brand plate, not the white tile. */
-.fl-mark-logo-plate {
-  background: var(--li-logo-plate, #14213d);
-  border-color: transparent;
-}
 .fl-name {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: 33px;
@@ -28085,4 +28062,91 @@ details.li-brief-research summary:hover {
     grid-template-columns: 1fr;
     margin-top: 30px;
   }
+}
+
+/* ── Settings → Firm Details · Branding section (BRANDING-SECTION-1) ─────────
+   Its own card above firm identity, everything visible without an Edit click.
+   Two logo slots and two color wheels side by side; each slot previews the
+   artwork BARE (no plate, no tile) so the preview is honest about how the mark
+   actually renders on the surfaces that use it. The header slot previews on a
+   dark strip because the console top bar is the only place it appears. */
+.li-set-branding .li-set-hint {
+  max-width: 70ch;
+}
+.li-set-brandgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin: 16px 0 4px;
+  align-items: start;
+}
+.li-set-logoslot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.li-set-logoslot-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.li-set-logoslot-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-fg);
+}
+.li-set-logoslot-pending {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--li-rail-gold, #a6812f);
+}
+.li-set-logoslot-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 92px;
+  padding: 14px 16px;
+  border: 1px solid var(--li-border-soft);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+.li-set-logoslot-preview.on-dark {
+  background: var(--li-brand, #1b2a4a);
+  border-color: transparent;
+}
+.li-set-logoslot-preview img {
+  max-width: 100%;
+  max-height: 56px;
+  object-fit: contain;
+  display: block;
+}
+.li-set-logoslot-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--li-fg-muted);
+}
+.li-set-logoslot-preview.on-dark .li-set-logoslot-empty {
+  color: rgba(255, 255, 255, 0.62);
+}
+.li-set-logoslot-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--li-fg-muted);
+}
+.li-set-logoslot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.li-set-logoslot-tone {
+  font-size: 11px;
+  color: var(--li-fg-muted);
 }

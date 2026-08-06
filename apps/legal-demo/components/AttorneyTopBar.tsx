@@ -11,7 +11,7 @@ import Link from 'next/link'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import { RailBrandLockup } from '@/components/RailBrandLockup'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { logoChipClass, useFirmBranding } from '@/lib/firmBranding'
+import { headerMark, useFirmBranding } from '@/lib/firmBranding'
 import { parseTimestamp, formatDate } from '@/lib/datetime'
 import { SearchBar } from '@/components/SearchBar'
 import { BellIcon } from '@/components/icons'
@@ -59,7 +59,13 @@ export function AttorneyTopBar(): React.JSX.Element {
   // of legal.firm.get_branding for the whole shell, refreshed in place when
   // Settings → Firm Details saves), not from the invoice-template config the
   // logo used to be buried in.
-  const { firmName, logoDataUrl, logoTone } = useFirmBranding()
+  // BRANDING-SECTION-1 — the bar prefers the firm's dedicated HEADER logo when
+  // they uploaded one (a narrow dark strip often wants a different variant than
+  // the invoice/portal mark), else the firm logo. Rendered bare: the product no
+  // longer paints a chip or plate behind a firm's artwork.
+  const branding = useFirmBranding()
+  const { firmName } = branding
+  const logoDataUrl = headerMark(branding)
 
   // Load the attorney's in-app notifications (resolved beta feedback).
   useEffect(() => {
@@ -114,11 +120,7 @@ export function AttorneyTopBar(): React.JSX.Element {
       <RailBrandLockup idPrefix="att" pinLabel="Pin sidebar open" unpinLabel="Unpin sidebar" />
       <div className="li-topbar-firm">
         {logoDataUrl ? (
-          <img
-            src={logoDataUrl}
-            alt={firmName ?? 'Firm logo'}
-            className={`li-topbar-logo${logoChipClass(logoTone, 'dark')}`}
-          />
+          <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="li-topbar-logo" />
         ) : (
           (firmName ?? PRODUCT_TAGLINE)
         )}

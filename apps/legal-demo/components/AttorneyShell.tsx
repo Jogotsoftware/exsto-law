@@ -18,7 +18,7 @@ import { useFirmBranding } from '@/lib/firmBranding'
 import { RailShellProvider } from '@/components/RailShellState'
 
 export function AttorneyShell({ children }: { children: ReactNode }): React.ReactElement {
-  const brand = useFirmBranding().headerColor
+  const { headerColor: brand, secondaryColor } = useFirmBranding()
 
   return (
     // RAIL-FOLLOWUPS-1: `li-brandsurface` tells the CSS that a firm brand
@@ -27,7 +27,7 @@ export function AttorneyShell({ children }: { children: ReactNode }): React.Reac
     // can pick the surface color but cannot branch the text color with it.
     <div
       className={`li-shell${isHexColor(brand) ? ' li-brandsurface' : ''}`}
-      style={brandVars(brand)}
+      style={brandVars(brand, secondaryColor)}
     >
       {/* RAIL-FOLLOWUPS-1: the top bar owns the brand lockup and the pin
           button while the rail owns the hover target, so both read the rail's

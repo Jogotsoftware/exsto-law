@@ -20,8 +20,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
-import { logoChipClass } from '@/lib/firmBranding'
-import { logoPlateVars } from '@/lib/brandColor'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
@@ -344,13 +342,7 @@ export function SignDocument({
         <div>
           <div className="pd-brandrow">
             {doc.firmLogoDataUrl ? (
-              <img
-                src={doc.firmLogoDataUrl}
-                alt=""
-                className={`pd-brand-logo${logoChipClass(doc.firmLogoTone, 'light')}`}
-                style={logoPlateVars(doc.brandColor)}
-                aria-hidden
-              />
+              <img src={doc.firmLogoDataUrl} alt="" className="pd-brand-logo" aria-hidden />
             ) : (
               <>
                 <span className="cp-crest" aria-hidden>

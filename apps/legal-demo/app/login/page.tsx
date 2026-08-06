@@ -18,7 +18,6 @@ import { useRouter } from 'next/navigation'
 import { Poppins } from 'next/font/google'
 import { fetchSession } from '@/lib/auth'
 import { callClientMcp } from '@/lib/mcpClient'
-import { logoPlateVars } from '@/lib/brandColor'
 import { Wavefield } from '@/components/Wavefield'
 import styles from './login.module.css'
 
@@ -111,16 +110,10 @@ export default function LoginPage() {
         <div className={styles.card}>
           <div className={styles.inner}>
             <div className={styles.lockup}>
+              {/* BRANDING-SECTION-1 — the firm's mark renders bare on the
+                  card; the product no longer plates reversed artwork. */}
               {firmLogo ? (
-                // Reversed (light-ink) artwork can't sit bare on the white
-                // card — it takes the FIRM-BRANDING-1 plate.
-                firmLogo.tone === 'light' ? (
-                  <span className={styles.logoPlate} style={logoPlateVars(firmLogo.headerColor)}>
-                    <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
-                  </span>
-                ) : (
-                  <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
-                )
+                <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
               ) : (
                 <img src="/brand/li-tile-navy-bluegold.svg" alt="" className={styles.tile} />
               )}

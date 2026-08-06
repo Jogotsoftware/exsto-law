@@ -48,6 +48,9 @@ export interface ClientInvoiceDetail extends ClientInvoiceSummary {
   firmLogoDataUrl: string | null
   firmLogoTone: 'light' | 'dark' | null
   brandColor: string | null
+  // BRANDING-SECTION-1 — the firm's second brand color, so the pay page's deep
+  // tone matches every other branded surface.
+  secondaryColor: string | null
 }
 
 // 'paid' stays 'paid'; everything else a client can see (issued/sent) is "due".
@@ -172,10 +175,12 @@ export async function getClientInvoiceByNumber(
   let firmLogoDataUrl: string | null = null
   let firmLogoTone: 'light' | 'dark' | null = null
   let brandColor: string | null = null
+  let secondaryColor: string | null = null
   try {
     const settings = await getTenantSettings(ctx)
     firmName = settings.firmName
     brandColor = settings.headerColor
+    secondaryColor = settings.secondaryColor
     firmLogoTone = settings.logoTone
     firmLogoDataUrl = await getFirmLogo(ctx)
   } catch {
@@ -184,8 +189,9 @@ export async function getClientInvoiceByNumber(
     firmLogoDataUrl = null
     firmLogoTone = null
     brandColor = null
+    secondaryColor = null
   }
-  return { ...detail, firmName, firmLogoDataUrl, firmLogoTone, brandColor }
+  return { ...detail, firmName, firmLogoDataUrl, firmLogoTone, brandColor, secondaryColor }
 }
 
 // PORTAL-1 (WP6) — the magic-link pay door: resolve the CLIENT CONTACT the

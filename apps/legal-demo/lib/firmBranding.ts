@@ -17,28 +17,40 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 export interface FirmBranding {
   firmName: string | null
   headerColor: string | null
+  // BRANDING-SECTION-1 (migration 0204) — the firm's second brand color. When
+  // set it IS the companion tone (rail, deep inks) instead of the darkened
+  // primary; null keeps the derivation.
+  secondaryColor: string | null
   logoDataUrl: string | null
-  // 'light' = reversed artwork (needs a dark backdrop on light surfaces);
-  // 'dark' = made for paper; null = unknown, render bare.
+  // Measured tone of that artwork. ADVISORY ONLY — nothing paints from it (the
+  // automatic plate behind reversed logos was removed in BRANDING-SECTION-1);
+  // the Settings uploader uses it to warn about a light mark on light pages.
   logoTone: 'light' | 'dark' | null
+  // BRANDING-SECTION-1 (migration 0204) — the optional HEADER logo: a second
+  // upload used only on the attorney console top bar, for firms whose main mark
+  // is the wrong variant for a narrow dark strip. Null = the bar shows
+  // logoDataUrl, exactly as before.
+  headerLogoDataUrl: string | null
+  headerLogoTone: 'light' | 'dark' | null
 }
 
 const EMPTY: FirmBranding = {
   firmName: null,
   headerColor: null,
+  secondaryColor: null,
   logoDataUrl: null,
   logoTone: null,
+  headerLogoDataUrl: null,
+  headerLogoTone: null,
 }
 
-// The class a logo <img> wears so it reads against the surface it sits on.
-// `surface` is the tone of what the logo is being placed ON.
-export function logoChipClass(
-  tone: 'light' | 'dark' | null | undefined,
-  surface: 'dark' | 'light',
-): string {
-  if (!tone) return '' // unknown — render bare (pre-0203 behaviour)
-  if (surface === 'dark') return tone === 'dark' ? ' li-logo-chip-light' : ''
-  return tone === 'light' ? ' li-logo-chip-dark' : ''
+/**
+ * The mark the ATTORNEY CONSOLE header bar shows: the dedicated header logo
+ * when the firm uploaded one, otherwise the firm logo. One helper so the bar
+ * and the Settings preview can never disagree about which file wins.
+ */
+export function headerMark(b: FirmBranding): string | null {
+  return b.headerLogoDataUrl ?? b.logoDataUrl
 }
 
 let current: FirmBranding = EMPTY

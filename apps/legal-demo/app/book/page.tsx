@@ -327,6 +327,9 @@ export default function BookPage() {
     // FIRM-BRANDING-1 — the firm's logo, so the funnel wears the firm's mark.
     logoDataUrl: string | null
     logoTone: 'light' | 'dark' | null
+    // BRANDING-SECTION-1 — the firm's second brand color; when set it is the
+    // funnel's deep companion tone instead of the darkened primary.
+    secondaryColor: string | null
   } | null>(null)
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
@@ -450,6 +453,7 @@ export default function BookPage() {
       headerColor: string | null
       logoDataUrl: string | null
       logoTone: 'light' | 'dark' | null
+      secondaryColor: string | null
     }>({
       toolName: 'legal.public.firm_branding',
     })
@@ -1076,7 +1080,10 @@ export default function BookPage() {
     const [scheduledMiddle, scheduledAfter] = (restAfterAttorney ?? '').split('__WHEN__')
     const [emailBefore, emailAfter] = emailTemplate.split('__EMAIL__')
     return (
-      <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+      <main
+        className="bk-shell"
+        style={bookBrandVars(firmBranding?.headerColor, firmBranding?.secondaryColor)}
+      >
         <Wavefield
           brand="#7BAFD4"
           brandDeep="#5A97C4"
@@ -1089,7 +1096,6 @@ export default function BookPage() {
             firmName={firmBranding?.firmName ?? null}
             brandColor={firmBranding?.headerColor ?? null}
             logoDataUrl={firmBranding?.logoDataUrl ?? null}
-            logoTone={firmBranding?.logoTone ?? null}
           />
           <section className="bk-card bk-confirm" key="done">
             <div className="bk-success">
@@ -1179,7 +1185,10 @@ export default function BookPage() {
   // flashes in on top of an already-rendered service grid.
   if (portalMe === undefined) {
     return (
-      <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+      <main
+        className="bk-shell"
+        style={bookBrandVars(firmBranding?.headerColor, firmBranding?.secondaryColor)}
+      >
         <Wavefield
           brand="#7BAFD4"
           brandDeep="#5A97C4"
@@ -1192,7 +1201,6 @@ export default function BookPage() {
             firmName={firmBranding?.firmName ?? null}
             brandColor={firmBranding?.headerColor ?? null}
             logoDataUrl={firmBranding?.logoDataUrl ?? null}
-            logoTone={firmBranding?.logoTone ?? null}
           />
           <section className="bk-card">
             <div className="bk-loading">
@@ -1217,8 +1225,8 @@ export default function BookPage() {
       <BookingChooser
         firmName={firmBranding?.firmName ?? null}
         brandColor={firmBranding?.headerColor ?? null}
+        secondaryColor={firmBranding?.secondaryColor ?? null}
         logoDataUrl={firmBranding?.logoDataUrl ?? null}
-        logoTone={firmBranding?.logoTone ?? null}
         onContinueAsNewClient={() => setChooserDismissed(true)}
       />
     )
@@ -1262,7 +1270,10 @@ export default function BookPage() {
               : t('slot.subtitle')
 
   return (
-    <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+    <main
+      className="bk-shell"
+      style={bookBrandVars(firmBranding?.headerColor, firmBranding?.secondaryColor)}
+    >
       <Wavefield
         brand="#7BAFD4"
         brandDeep="#5A97C4"
@@ -1275,7 +1286,6 @@ export default function BookPage() {
           firmName={firmBranding?.firmName ?? null}
           brandColor={firmBranding?.headerColor ?? null}
           logoDataUrl={firmBranding?.logoDataUrl ?? null}
-          logoTone={firmBranding?.logoTone ?? null}
         />
         <BookProgress
           step={step}
