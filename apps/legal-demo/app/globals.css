@@ -9287,12 +9287,23 @@ input[type='number'] {
    Next 15.5 treats it as an early comment terminator and fails the prod build.)
    ========================================================================== */
 
-/* The shell is the flex viewport: rail (spacer + absolute overlay) then the
-   main column. Augments the token-bearing .li-shell rule in the foundation. */
+/* The shell is the flex viewport. RAIL-FOLLOWUPS-1 turned it into a COLUMN:
+   a full-width top bar, then .li-shell-body which is the old row layout —
+   rail (spacer + absolute overlay) then the main column. The rail therefore
+   anchors to the body, i.e. it starts BENEATH the bar instead of beside it.
+   Augments the token-bearing .li-shell rule in the foundation. */
 .li-shell {
   position: relative;
   display: flex;
+  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+}
+.li-shell-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
   overflow: hidden;
 }
 
@@ -9628,8 +9639,12 @@ input[type='number'] {
   display: flex;
   flex-direction: column;
 }
+/* RAIL-FOLLOWUPS-1: the bar is now the shell's first row, so it spans the full
+   viewport width across the rail. z-index keeps it above the rail (z 40) in
+   case the expanded glass panel's shadow ever reaches up to it. */
 .li-topbar {
   position: relative;
+  z-index: 50;
   height: 64px;
   flex: 0 0 auto;
   min-height: 64px;
@@ -24922,7 +24937,18 @@ details.li-brief-research summary:hover {
   --li-topbar-bg: #14213d;
   position: relative;
   display: flex;
+  /* RAIL-FOLLOWUPS-1: COLUMN — a full-width header band, then the old row
+     layout in .li-cpnav-body. Mirrors the attorney shell so the glass rail
+     starts beneath the band instead of leaving a light notch beside it. */
+  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+}
+.li-cpnav-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
   overflow: hidden;
 }
 .li-cpnav-col {
@@ -24933,6 +24959,8 @@ details.li-brief-research summary:hover {
 }
 .li-cpnav-header {
   flex: 0 0 auto;
+  position: relative;
+  z-index: 50;
 }
 .li-cpnav-scroll {
   flex: 1 1 auto;
@@ -27308,9 +27336,11 @@ details.li-brief-research summary:hover {
 .li-topbar {
   background: var(--li-brand, var(--li-topbar-bg));
 }
-/* Rail tint. RAIL-WEBSITE-STYLE-1 made this INERT for the ATTORNEY rail — it
-   carries .li-rail--glass, whose tail block below has no colored surface to
-   tint. Kept for the client portal's rail (PortalSideNav, same classes). */
+/* Rail tint. Both rails now carry .li-rail--glass, whose tail block sets
+   background-color per state: transparent collapsed, --li-brand-deep expanded
+   (RAIL-FOLLOWUPS-1 — the founder wants the open panel on the firm's color,
+   not the marketing cream). This shorthand therefore no longer decides the
+   rail's surface; it is kept as the fallback any non-glass rail would use. */
 .li-rail {
   background: var(--li-brand-deep, var(--li-rail-bg));
 }
@@ -27343,112 +27373,212 @@ details.li-brief-research summary:hover {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   RAIL-WEBSITE-STYLE-1 — the attorney rail wears the marketing site's rail
-   (legal-instruments/Sidebar.dc.html). Two states, no new mechanics:
-     collapsed → NO surface at all (transparent, no border, no shadow): a bare
-       icon column floating over the page;
-     expanded  → the site's cream glass panel with navy labels, a gold shimmer
-       accent bar on the active row.
-   Everything is scoped to .li-rail--glass, which ONLY AttorneyRail.tsx sets.
-   PortalSideNav.tsx PORTS the same li-rail-. chrome classes (see the li-cpnav
-   block above), so an unscoped restyle would silently repaint the client
-   portal's dark rail too.
-   Appended at the tail (append-only discipline) so these win on source order
-   over both the base .li-rail block and the UIWALK-2 firm-brand tint rule —
-   which means --li-brand-deep is now INERT for the attorney rail by design:
-   it has no colored surface left to tint. The top bar (--li-brand) and the
-   portal chrome still tint exactly as before.
+   THE GLASS RAIL (.li-rail--glass) — shared by the attorney console
+   (AttorneyRail) and the client portal (PortalSideNav). RAIL-WEBSITE-STYLE-1
+   took the interaction feel from the marketing site's rail; RAIL-FOLLOWUPS-1
+   pulled the SURFACE back on-brand and made the two states one motion.
+
+   Collapsed  no surface at all — transparent, no border, no shadow. A bare
+              icon column floating over the page. The active row is the gold
+              icon ALONE: no accent bar, no fill.
+   Expanded   a tinted glass panel: the FIRM'S brand color when one is set,
+              otherwise the platform's own page color (--li-bg, #f4f6fb). Not
+              the marketing cream — the console should read as the app.
+
+   Contrast follows the surface. Default (light) is navy-on-light. When a firm
+   brand color is set the shells stamp `.li-brandsurface` on their root and the
+   palette flips to light-on-dark, the same convention the brand-tinted top bar
+   already uses (it is white-on-brand unconditionally). The flip is scoped to
+   .li-rail--expanded because the COLLAPSED rail floats over the light page no
+   matter what the brand color is — its icons must stay navy.
+
+   Everything keys off .li-rail--glass, set by both rail components. Nothing
+   here is unscoped, so any future non-glass rail keeps the old dark chrome.
+   Motion is a single 0.4s curve shared by width, surface, shadow and the head
+   lockup, so expanding reads as one gesture rather than a snap. The global
+   prefers-reduced-motion block near the top of this file already zeroes every
+   transition-duration with !important, so none of this needs re-stating there.
    (Never write a star immediately followed by a slash inside this comment —
    it terminates the comment early and breaks the CSS minifier.)
    ══════════════════════════════════════════════════════════════════════════ */
 .li-rail--glass {
-  /* Site palette: navy-on-cream, flipped from the old light-on-navy. */
+  /* Default palette: navy on the platform's light page color. */
+  --li-glass-surface: rgba(244, 246, 251, 0.97);
   --li-glass-fg: rgba(27, 42, 74, 0.68);
   --li-glass-fg-strong: #16203a;
   --li-glass-hover: rgba(27, 42, 74, 0.07);
   --li-glass-active: rgba(201, 162, 95, 0.2);
   --li-glass-line: rgba(27, 42, 74, 0.12);
+  --li-glass-chip: rgba(27, 42, 74, 0.1);
   --li-glass-gold: #8a6a30;
-  background: transparent;
+  --li-glass-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  background: none;
+  background-color: transparent;
   border: none;
   box-shadow: none;
+  border-radius: 0 16px 16px 0;
   color: var(--li-glass-fg);
   transition:
-    width 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
-    background 0.35s ease,
-    box-shadow 0.35s ease;
+    width 0.4s var(--li-glass-ease),
+    background-color 0.4s var(--li-glass-ease),
+    box-shadow 0.4s var(--li-glass-ease),
+    backdrop-filter 0.4s var(--li-glass-ease),
+    -webkit-backdrop-filter 0.4s var(--li-glass-ease);
 }
-/* Expanded (hover or pinned): the site's glass panel. The app rail runs the
-   full viewport height, so the radius stays on the right edge only. */
+/* Keep the spacer on the rail's curve so a pin/unpin reflow is one motion. */
+.li-rail-spacer {
+  transition: width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* Firm brand color set: tint the panel from it and flip to light-on-dark.
+   Scoped to --expanded on purpose (see the header note). */
+.li-brandsurface .li-rail--glass.li-rail--expanded {
+  --li-glass-surface: var(--li-brand-deep);
+  --li-glass-fg: rgba(255, 255, 255, 0.76);
+  --li-glass-fg-strong: #ffffff;
+  --li-glass-hover: rgba(255, 255, 255, 0.1);
+  --li-glass-active: rgba(212, 192, 130, 0.18);
+  --li-glass-line: rgba(255, 255, 255, 0.12);
+  --li-glass-chip: rgba(255, 255, 255, 0.14);
+  --li-glass-gold: #d8c084;
+}
 .li-rail--glass.li-rail--expanded {
-  background: linear-gradient(100deg, rgba(251, 248, 243, 0.97) 0%, rgba(248, 244, 236, 0.93) 100%);
+  background-color: var(--li-glass-surface);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow: 0 22px 54px -24px rgba(38, 62, 108, 0.26);
-  border-radius: 0 16px 16px 0;
 }
 
-/* Head — the brand lockup. Collapsed: the twinkle mark alone. Expanded: the
-   full wordmark (which carries the same stars at its tail). Both live in the
-   pin button, so the pin/unpin control is unchanged. */
-.li-rail--glass .li-rail-head {
-  border-bottom: none;
+/* ── Brand lockup, in the TOP BAR ───────────────────────────────────────────
+   RAIL-FOLLOWUPS-1 moved the lockup out of the rail: the twinkle mark sits at
+   the bar's left edge, centered over the rail's 58px icon column, and slides
+   right along the bar into the tail of the wordmark as the rail opens. The
+   mark is always mounted and animates with TRANSFORM only — the wordmark
+   underneath just fades. The button is also the rail's pin control.
+
+   The geometry is derived, not eyeballed. See components/RailBrandLockup.tsx —
+   the constants below are its arithmetic:
+     wordmark height 26px  ->  s = 26/64 = 0.40625, width 360s = 146.25px
+     stars group           ->  translate(302 10) scale(0.9) in the asset
+     mark home box         ->  left 302s = 122.6875, top 10s = 4.0625,
+                               w 31.5(0.9)s = 11.5172, h 27.5(0.9)s = 10.0547
+     collapsed             ->  26px wide over the icon column. The lockup starts
+                               at x = 15, the rail's 20px nav icons are centered
+                               at x = 32, so the mark's left must be x = 4 within
+                               the lockup, giving
+                               scale 26/11.5172 = 2.2575,
+                               dx 4 - 122.6875 = -118.6875,
+                               dy (26 - 10.0547(2.2575))/2 - 4.0625 = -2.412
+   Change the height and every number here changes with it.
+
+   One colourway: the bar is navy or the firm's brand color, and both bars have
+   always assumed that surface is dark (they set white text unconditionally),
+   so the lockup is the white/gold pairing. The RAIL below adapts; the bar does
+   not, and this follows the bar. */
+.li-brandlock {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 15px;
 }
-.li-rail--glass.li-rail--expanded .li-rail-head {
-  border-bottom: 1px solid var(--li-glass-line);
-}
-.li-rail--glass .li-rail-pin {
-  color: var(--li-glass-fg);
+.li-brandlock-btn {
+  display: flex;
+  align-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border: none;
   border-radius: 9px;
+  cursor: pointer;
+  overflow: visible;
+  transition:
+    width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1),
+    background-color 0.2s ease;
 }
-.li-rail--glass .li-rail-pin:hover {
-  background: var(--li-glass-hover);
+.li-brandlock.is-open .li-brandlock-btn {
+  width: 146.25px;
 }
-.li-rail--glass .li-rail-pin.is-pinned {
-  background: var(--li-glass-active);
+.li-brandlock-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
 }
-.li-rail--glass .li-rail-mark {
+.li-brandlock-btn.is-pinned,
+.li-brandlock-btn.is-pinned:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+.li-brandlock-inner {
+  position: relative;
   display: block;
-}
-.li-rail--glass .li-rail-mark-word {
-  display: none;
-  height: 24px;
-  width: auto;
+  width: 146.25px;
   flex: 0 0 auto;
+  pointer-events: none;
 }
-.li-rail--glass.li-rail--expanded .li-rail-pin {
-  width: auto;
-  min-width: 34px;
-  padding: 0 6px;
+.li-brandlock-word {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 146.25px;
+  height: 26px;
+  opacity: 0;
+  transition: opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.li-rail--glass.li-rail--expanded .li-rail-mark {
-  display: none;
+.li-brandlock.is-open .li-brandlock-word {
+  opacity: 1;
 }
-.li-rail--glass.li-rail--expanded .li-rail-mark-word {
-  display: block;
+.li-brandlock-mark {
+  position: absolute;
+  left: 122.6875px;
+  top: 4.0625px;
+  width: 11.5172px;
+  height: 10.0547px;
+  transform-origin: 0 0;
+  transform: translate(-118.6875px, -2.412px) scale(2.2575);
+  transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* Stage chip, restyled to read on cream. */
-.li-rail--glass .li-rail-beta {
+.li-brandlock.is-open .li-brandlock-mark {
+  transform: none;
+}
+/* Stage chip, riding the open end of the lockup. */
+.li-brandlock-chip {
   flex: 0 0 auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(27, 42, 74, 0.08);
-  color: var(--li-glass-fg);
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-weight: 700;
   font-size: 10px;
   letter-spacing: 0.12em;
-  background-clip: border-box;
-  -webkit-background-clip: border-box;
-  animation: none;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.82);
+  opacity: 0;
+  transition: opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.li-brandlock.is-open .li-brandlock-chip {
+  opacity: 1;
+}
+/* The bar's own left padding yields to the lockup, which carries its own. */
+.li-topbar {
+  padding-left: 0;
+}
+/* The portal band becomes a row so the lockup can sit at its true left edge
+   while the (max-width, auto-margin) inner keeps centering in what remains. */
+.li-cp-top {
+  display: flex;
+  align-items: center;
+}
+.li-cp-top-inner {
+  flex: 1 1 auto;
 }
 
-/* Nav rows. */
+/* ── Nav rows ─────────────────────────────────────────────────────────────── */
 .li-rail--glass .li-rail-item,
 .li-rail--glass .li-rail-subitem {
   color: var(--li-glass-fg);
 }
-/* text-decoration: the rail's leaves are anchors, so the global a:hover
-   underline (0,1,1) out-specified .li-rail-item's `text-decoration: none`
-   (0,1,0). Invisible on the old navy, obvious on cream. */
+/* text-decoration: the attorney rail's leaves are anchors, so the global
+   a:hover underline (0,1,1) out-specified .li-rail-item's `text-decoration:
+   none` (0,1,0). Invisible on the old navy, obvious on a light panel. */
 .li-rail--glass .li-rail-item:hover,
 .li-rail--glass .li-rail-subitem:hover {
   background: var(--li-glass-hover);
@@ -27459,12 +27589,13 @@ details.li-brief-research summary:hover {
   color: var(--li-glass-fg-strong);
   background: var(--li-glass-active);
 }
-/* Active accent: the site's animated gold shimmer bar + gold icon. The icon
-   shimmer runs #8a6a30 → #c9a25f rather than the site's #c9a25f → #f0dca6:
-   the console's page background is #f4f6fb, and the site's lighter peak drops
-   the icon to roughly 1.3:1 against it. This range holds ~4.4:1 at its darkest
-   and still reads as gold at its brightest. The BAR keeps the site's exact
-   gradient (its light stop is bracketed by dark ones, so it never washes out). */
+/* Active accent: an animated gold shimmer bar plus a gold icon. On the light
+   default the icon shimmer runs #8a6a30 -> #c9a25f rather than the marketing
+   site's #c9a25f -> #f0dca6: the page behind is #f4f6fb, where that lighter
+   peak falls to roughly 1.3:1. This range holds ~4.4:1 at its darkest and
+   still reads as gold. On a dark brand surface the opposite is true, so
+   .li-brandsurface swaps in the lighter pair. The BAR keeps the site's exact
+   gradient in both — its light stop is bracketed by dark ones. */
 @keyframes li-rail-bar-shim {
   0% {
     background-position: 0 0;
@@ -27485,6 +27616,15 @@ details.li-brief-research summary:hover {
     color: #c9a25f;
   }
 }
+@keyframes li-rail-icon-shim-lift {
+  0%,
+  100% {
+    color: #d8c084;
+  }
+  50% {
+    color: #f3e3b8;
+  }
+}
 .li-rail--glass .li-rail-item.is-active .li-rail-bar {
   background: linear-gradient(180deg, #8a6a30, #c9a25f, #f0dca6, #c9a25f, #8a6a30);
   background-size: 100% 300%;
@@ -27495,11 +27635,13 @@ details.li-brief-research summary:hover {
   color: var(--li-glass-gold);
   animation: li-rail-icon-shim 9s ease-in-out infinite;
 }
-/* Collapsed: the active row is the gold icon ALONE — no bar, no fill (the
-   site's .li-rail:not(:hover) rules). */
+.li-brandsurface .li-rail--glass.li-rail--expanded .li-rail-item.is-active .li-rail-ico,
+.li-brandsurface .li-rail--glass.li-rail--expanded .li-rail-subitem.is-active .li-rail-subico {
+  animation-name: li-rail-icon-shim-lift;
+}
+/* Collapsed: the active row is the gold icon ALONE — no bar, no fill. */
 .li-rail--glass:not(.li-rail--expanded) .li-rail-item,
 .li-rail--glass:not(.li-rail--expanded) .li-rail-item.is-active,
-.li-rail--glass:not(.li-rail--expanded) .li-rail-pin.is-pinned,
 .li-rail--glass:not(.li-rail--expanded) .li-rail-user-btn {
   background: transparent;
 }
@@ -27507,11 +27649,11 @@ details.li-brief-research summary:hover {
   display: none;
 }
 .li-rail--glass .li-rail-nav::-webkit-scrollbar-thumb {
-  background: rgba(27, 42, 74, 0.18);
+  background: var(--li-glass-chip);
   background-clip: content-box;
 }
 
-/* User block. */
+/* ── User block ───────────────────────────────────────────────────────────── */
 .li-rail--glass .li-rail-user {
   border-top: none;
 }
@@ -27522,14 +27664,33 @@ details.li-brief-research summary:hover {
   background: var(--li-glass-hover);
 }
 .li-rail--glass .li-rail-avatar {
-  background: rgba(27, 42, 74, 0.12);
+  background: var(--li-glass-chip);
   color: var(--li-glass-fg-strong);
 }
 .li-rail--glass .li-rail-user-name {
   color: var(--li-glass-fg-strong);
 }
 .li-rail--glass .li-rail-user-role {
-  color: rgba(27, 42, 74, 0.55);
+  color: var(--li-glass-fg);
+}
+
+/* ── Client-portal specifics ──────────────────────────────────────────────────
+   The li-cpnav block above re-asserts the DARK rail hover treatment at (0,4,0)
+   because the portal's nav items are BUTTONS and the legacy global
+   button:hover reset out-specifies the shared (0,3,0) rail rules. Those four
+   rules would paint white-on-panel, so they are matched here at equal
+   specificity and win on source order (tail discipline). */
+.li-rail--glass .li-cpnav-item:hover:not(:disabled) {
+  background: var(--li-glass-hover);
+  border-color: transparent;
+}
+.li-rail--glass .li-cpnav-item.is-active:hover:not(:disabled) {
+  background: var(--li-glass-active);
+}
+/* Collapsed, the portal's BUTTON rows go surfaceless too. */
+.li-rail--glass:not(.li-rail--expanded) .li-cpnav-item,
+.li-rail--glass:not(.li-rail--expanded) .li-cpnav-item.is-active {
+  background: transparent;
 }
 
 /* ==========================================================================

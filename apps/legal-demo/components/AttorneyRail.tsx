@@ -1,25 +1,30 @@
 'use client'
 
 // Legal Instruments left rail (attorney-console redesign — binding comp in
-// docs/design/legal-instruments). RAIL-WEBSITE-STYLE-1 re-skins it to the
-// marketing site's rail (legal-instruments/Sidebar.dc.html): no surface at all
-// when collapsed (a bare icon column floating over the page), a cream glass
-// panel with navy labels when expanded. The mechanics below are unchanged:
-//   - 58px collapsed / 256px expanded (tightened per founder walk), pinned state persisted in localStorage.
+// docs/design/legal-instruments). RAIL-WEBSITE-STYLE-1 re-skinned it to the
+// marketing site's rail (legal-instruments/Sidebar.dc.html) and
+// RAIL-FOLLOWUPS-1 pulled the surface back on-brand: no surface at all when
+// collapsed (a bare icon column floating over the page), a tinted glass panel
+// when expanded — the firm's brand color when one is set, the platform's own
+// page color otherwise. The mechanics below are unchanged:
+//   - 58px collapsed / 256px expanded (tightened per founder walk). RAIL-FOLLOWUPS-1
+//     moved the open/pin state into RailShellState (a context shared with the
+//     top bar, which now owns the brand lockup and the pin button) and the head
+//     lockup out of the rail entirely — this rail is pure nav + user block.
 //   - An absolutely-positioned overlay sitting over a flow "spacer" so a
 //     hover-expand floats over content instead of shoving it.
 //   - Primary nav with MODULE_AREAS gating so disabled feature-modules hide
 //     their items.
 //   - A bottom user block whose popover carries the same sign-out logic the old
 //     top nav used.
-// The `li-rail--glass` modifier scopes the new skin: PortalSideNav.tsx ports
-// these same li-rail-* classes, so the CSS keys off that modifier to leave the
-// client portal's dark rail exactly as it was.
+// The `li-rail--glass` modifier scopes the skin; PortalSideNav.tsx carries it
+// too, and both rails render the SAME head lockup (RailHeadLockup) so they
+// cannot drift apart.
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { PRODUCT_STAGE } from '@/lib/brand'
 import { fetchSession, clearDevSession, type DemoSession } from '@/lib/auth'
+import { useRailShell } from '@/components/RailShellState'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
   LayoutGridIcon,
@@ -136,8 +141,6 @@ const MODULE_AREAS: Record<string, string[]> = {
   'e-sign': ['/attorney/esign'],
 }
 
-const PIN_STORAGE_KEY = 'exsto.li.railPinned'
-
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '·'
@@ -147,11 +150,9 @@ function initials(name: string): string {
 
 export function AttorneyRail(): React.JSX.Element {
   const pathname = usePathname()
+  const { expanded, pinned, onRailEnter, onRailLeave, setHoldOpen, spacerWidth, railWidth } =
+    useRailShell()
   const [session, setSession] = useState<DemoSession | null>(null)
-  const [pinned, setPinned] = useState(false)
-  const [hovered, setHovered] = useState(false)
-  const [canHover, setCanHover] = useState(true)
-  const [isNarrow, setIsNarrow] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [hiddenHrefs, setHiddenHrefs] = useState<Set<string>>(new Set())
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -169,34 +170,6 @@ export function AttorneyRail(): React.JSX.Element {
     })
     return () => {
       cancelled = true
-    }
-  }, [])
-
-  // Restore the pinned state persisted across sessions.
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(PIN_STORAGE_KEY)
-      if (v != null) setPinned(v === '1')
-    } catch {
-      /* private mode / storage blocked — default to unpinned */
-    }
-  }, [])
-
-  // Hover-expand is pointer-media-gated; the spacer stays at icon width on
-  // narrow viewports. Track both with matchMedia.
-  useEffect(() => {
-    const hoverMq = window.matchMedia('(hover: hover)')
-    const narrowMq = window.matchMedia('(max-width: 859px)')
-    const sync = (): void => {
-      setCanHover(hoverMq.matches)
-      setIsNarrow(narrowMq.matches)
-    }
-    sync()
-    hoverMq.addEventListener('change', sync)
-    narrowMq.addEventListener('change', sync)
-    return () => {
-      hoverMq.removeEventListener('change', sync)
-      narrowMq.removeEventListener('change', sync)
     }
   }, [])
 
@@ -221,11 +194,16 @@ export function AttorneyRail(): React.JSX.Element {
   useEffect(() => {
     if (!userMenuOpen) return
     function onDoc(e: MouseEvent): void {
-      if (userWrapRef.current && !userWrapRef.current.contains(e.target as Node))
+      if (userWrapRef.current && !userWrapRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false)
+        setHoldOpen(false)
+      }
     }
     function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') setUserMenuOpen(false)
+      if (e.key === 'Escape') {
+        setUserMenuOpen(false)
+        setHoldOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
@@ -233,34 +211,20 @@ export function AttorneyRail(): React.JSX.Element {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [userMenuOpen])
+  }, [userMenuOpen, setHoldOpen])
 
-  // The popover keeps the rail expanded even after the pointer leaves the aside
-  // (the popover is a fixed overlay outside the aside box).
-  const expanded = pinned || hovered || userMenuOpen
-  const railWidth = expanded ? 256 : 58
-  const spacerWidth = pinned && !isNarrow ? 256 : 58
-
-  function togglePin(): void {
-    setPinned((p) => {
-      const next = !p
-      try {
-        localStorage.setItem(PIN_STORAGE_KEY, next ? '1' : '0')
-      } catch {
-        /* storage blocked — pin state is best-effort */
-      }
-      return next
-    })
-  }
-
+  // The popover is a fixed overlay OUTSIDE the aside, so the rail must be held
+  // open while it is up or the pointer leaving the aside would collapse it.
   function toggleUserMenu(): void {
     if (userMenuOpen) {
       setUserMenuOpen(false)
+      setHoldOpen(false)
       return
     }
     const r = userBtnRef.current?.getBoundingClientRect()
     if (r) setPopPos({ left: Math.max(12, r.left), bottom: window.innerHeight - r.top + 8 })
     setUserMenuOpen(true)
+    setHoldOpen(true)
   }
 
   function handleSignOut(): void {
@@ -288,69 +252,12 @@ export function AttorneyRail(): React.JSX.Element {
       <div className="li-rail-spacer" style={{ width: spacerWidth }} aria-hidden="true" />
       <aside
         className={`li-rail li-rail--glass${expanded ? ' li-rail--expanded' : ''}${
-          hovered && !pinned ? ' li-rail--floating' : ''
+          expanded && !pinned ? ' li-rail--floating' : ''
         }`}
         style={{ width: railWidth }}
-        onMouseEnter={() => {
-          if (canHover) setHovered(true)
-        }}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={onRailEnter}
+        onMouseLeave={onRailLeave}
       >
-        <div className="li-rail-head">
-          <button
-            type="button"
-            className={`li-rail-pin${pinned ? ' is-pinned' : ''}`}
-            onClick={togglePin}
-            aria-pressed={pinned}
-            aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
-            title={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
-          >
-            {/* Collapsed head: the twinkle-stars brand mark (exact paths from
-                the marketing rail, Sidebar.dc.html), replacing the old scales
-                of justice. Expanded, the full wordmark below takes its place —
-                the wordmark asset already ends in the same stars, so the two
-                are swapped rather than shown side by side (a separate button
-                mark would double the lockup). The button keeps the pin toggle
-                either way. */}
-            <svg
-              className="li-rail-mark li-gemstar"
-              width="26"
-              height="23"
-              viewBox="0 0 30 26"
-              fill="none"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient
-                  id="liRailGemStar"
-                  x1="0"
-                  y1="0"
-                  x2="30"
-                  y2="26"
-                  gradientUnits="userSpaceOnUse"
-                >
-                  <stop offset="0" stopColor="#4E82BE" />
-                  <stop offset="0.3" stopColor="#2f5c93" />
-                  <stop offset="0.5" stopColor="#A5854A" />
-                  <stop offset="0.74" stopColor="#D8B166" />
-                  <stop offset="1" stopColor="#F3E3B8" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M19 3 C19.6 9.2 23.8 13.4 30 14 C23.8 14.6 19.6 18.8 19 25 C18.4 18.8 14.2 14.6 8 14 C14.2 13.4 18.4 9.2 19 3 Z"
-                fill="url(#liRailGemStar)"
-              />
-              <path
-                d="M6.5 0.5 C6.8 3.7 9.3 6.2 12.5 6.5 C9.3 6.8 6.8 9.3 6.5 12.5 C6.2 9.3 3.7 6.8 0.5 6.5 C3.7 6.2 6.2 3.7 6.5 0.5 Z"
-                fill="url(#liRailGemStar)"
-                style={{ animationDelay: '.4s' }}
-              />
-            </svg>
-            <img className="li-rail-mark-word" src="/brand/wordmark-navy-bluegold.svg" alt="" />
-          </button>
-          <span className="li-rail-beta li-rail-fade">{PRODUCT_STAGE}</span>
-        </div>
-
         <nav className="li-rail-nav" aria-label="Primary">
           {visibleNav.map((node) => {
             if (!isGroup(node)) {

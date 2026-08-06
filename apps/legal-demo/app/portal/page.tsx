@@ -22,7 +22,9 @@ import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientP
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
-import { brandVars } from '@/lib/brandColor'
+import { brandVars, isHexColor } from '@/lib/brandColor'
+import { RailShellProvider } from '@/components/RailShellState'
+import { RailBrandLockup } from '@/components/RailBrandLockup'
 
 // LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
 // (docs/design/legal-instruments/legal-instruments.dc.html, Client Portal
@@ -327,16 +329,28 @@ export default function ClientPortalPage() {
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
       {/* UIWALK-2: the firm's brand color rides the home summary; the portal
           header (.li-cp-top tail rule) tints from --li-brand-deep. */}
-      <div className="li-cp-shell li-cpnav-shell" style={brandVars(home?.headerColor)}>
-        <PortalSideNav
-          items={navItems}
-          active={view.kind}
-          onSelect={(kind) => setView({ kind })}
-          user={me ? { displayName: me.displayName, email: me.email } : null}
-        />
-        <div className="li-cpnav-col">
+      <div
+        className={`li-cp-shell li-cpnav-shell${
+          isHexColor(home?.headerColor) ? ' li-brandsurface' : ''
+        }`}
+        style={brandVars(home?.headerColor)}
+      >
+        <RailShellProvider storageKey="exsto.li.cpRailPinned">
+          {/* RAIL-FOLLOWUPS-1: the portal header is now a FULL-WIDTH band at the
+            head of the shell (sibling above the rail, not a child of
+            .li-cpnav-col), mirroring the attorney console. The rail — glass
+            since this PR, so transparent when collapsed — starts BENEATH it
+            inside .li-cpnav-body, with no light notch to the band's left. */}
           <header className="li-cpnav-header">
             <div className="li-cp-top">
+              {/* RAIL-FOLLOWUPS-1: the Legal Instruments lockup + rail pin
+                control, at the band's left edge over the rail's icon column.
+                Same shared component the attorney console renders. */}
+              <RailBrandLockup
+                idPrefix="cp"
+                pinLabel={t('portal.nav.pin', undefined, 'Pin sidebar open')}
+                unpinLabel={t('portal.nav.unpin', undefined, 'Unpin sidebar')}
+              />
               <div className="li-cp-top-inner">
                 <button
                   type="button"
@@ -388,75 +402,85 @@ export default function ClientPortalPage() {
             </div>
           </header>
 
-          <div className="li-cpnav-scroll">
-            <main className="li-cp-main">
-              {error && (
-                <div className="alert alert-error" role="alert">
-                  {error}
-                </div>
-              )}
+          <div className="li-cpnav-body">
+            <PortalSideNav
+              items={navItems}
+              active={view.kind}
+              onSelect={(kind) => setView({ kind })}
+              user={me ? { displayName: me.displayName, email: me.email } : null}
+            />
+            <div className="li-cpnav-col">
+              <div className="li-cpnav-scroll">
+                <main className="li-cp-main">
+                  {error && (
+                    <div className="alert alert-error" role="alert">
+                      {error}
+                    </div>
+                  )}
 
-              {!me || !home ? (
-                <div className="loading-block" role="status">
-                  <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
-                </div>
-              ) : (
-                <>
-                  {view.kind === 'home' && (
-                    <HomeView
-                      home={home}
-                      locked={locked}
-                      onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                      onOpenInvoices={() => setView({ kind: 'invoices' })}
-                      onOpenSchedule={() => setView({ kind: 'schedule' })}
-                      onOpenGate={() => setGateOpen(true)}
-                    />
-                  )}
-                  {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
-                  {view.kind === 'invoices' && <InvoicesView />}
-                  {view.kind === 'signatures' && <SignaturesView />}
-                  {view.kind === 'assistant' && assistantEnabled && <AssistantView />}
-                  {view.kind === 'settings' && <SettingsView me={me} />}
-                  {view.kind === 'notifications' && (
-                    <NotificationsView
-                      onBadge={setBadge}
-                      onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                      onOpenInvoices={() => setView({ kind: 'invoices' })}
-                      onOpenSignatures={() => setView({ kind: 'signatures' })}
-                    />
-                  )}
-                  {view.kind === 'schedule' && (
+                  {!me || !home ? (
+                    <div className="loading-block" role="status">
+                      <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+                    </div>
+                  ) : (
                     <>
-                      <BackHome onBack={() => setView({ kind: 'home' })} />
-                      <ScheduleView />
+                      {view.kind === 'home' && (
+                        <HomeView
+                          home={home}
+                          locked={locked}
+                          onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                          onOpenInvoices={() => setView({ kind: 'invoices' })}
+                          onOpenSchedule={() => setView({ kind: 'schedule' })}
+                          onOpenGate={() => setGateOpen(true)}
+                        />
+                      )}
+                      {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
+                      {view.kind === 'invoices' && <InvoicesView />}
+                      {view.kind === 'signatures' && <SignaturesView />}
+                      {view.kind === 'assistant' && assistantEnabled && <AssistantView />}
+                      {view.kind === 'settings' && <SettingsView me={me} />}
+                      {view.kind === 'notifications' && (
+                        <NotificationsView
+                          onBadge={setBadge}
+                          onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                          onOpenInvoices={() => setView({ kind: 'invoices' })}
+                          onOpenSignatures={() => setView({ kind: 'signatures' })}
+                        />
+                      )}
+                      {view.kind === 'schedule' && (
+                        <>
+                          <BackHome onBack={() => setView({ kind: 'home' })} />
+                          <ScheduleView />
+                        </>
+                      )}
+                      {view.kind === 'matter' && (
+                        <MatterView
+                          matterEntityId={view.matterEntityId}
+                          matters={home.matters}
+                          locked={locked}
+                          onBack={() => setView({ kind: 'home' })}
+                          onOpenGate={() => setGateOpen(true)}
+                        />
+                      )}
                     </>
                   )}
-                  {view.kind === 'matter' && (
-                    <MatterView
-                      matterEntityId={view.matterEntityId}
-                      matters={home.matters}
-                      locked={locked}
-                      onBack={() => setView({ kind: 'home' })}
-                      onOpenGate={() => setGateOpen(true)}
-                    />
-                  )}
-                </>
-              )}
-            </main>
+                </main>
+              </div>
+            </div>
           </div>
-        </div>
 
-        {gateOpen && home && (
-          <EngagementGateModal
-            rate={home.engagement.rate}
-            configured={home.engagement.configured}
-            onClose={() => setGateOpen(false)}
-            onAccepted={() => {
-              setGateOpen(false)
-              loadHome()
-            }}
-          />
-        )}
+          {gateOpen && home && (
+            <EngagementGateModal
+              rate={home.engagement.rate}
+              configured={home.engagement.configured}
+              onClose={() => setGateOpen(false)}
+              onAccepted={() => {
+                setGateOpen(false)
+                loadHome()
+              }}
+            />
+          )}
+        </RailShellProvider>
       </div>
     </FirmNameContext.Provider>
   )
