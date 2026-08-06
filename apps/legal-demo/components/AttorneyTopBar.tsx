@@ -8,7 +8,7 @@
 //                 feed and mark-all-read wiring.
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 import { RailBrandLockup } from '@/components/RailBrandLockup'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { parseTimestamp, formatDate } from '@/lib/datetime'
@@ -135,12 +135,7 @@ export function AttorneyTopBar(): React.JSX.Element {
           bar's left edge over the rail's icon column — twinkle mark alone while
           the rail is collapsed, sliding into the full wordmark as it opens. It
           is also the rail's pin control. */}
-      <RailBrandLockup
-        idPrefix="att"
-        pinLabel="Pin sidebar open"
-        unpinLabel="Unpin sidebar"
-        stage={PRODUCT_STAGE}
-      />
+      <RailBrandLockup idPrefix="att" pinLabel="Pin sidebar open" unpinLabel="Unpin sidebar" />
       <div className="li-topbar-firm">
         {logoDataUrl ? (
           <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="li-topbar-logo" />

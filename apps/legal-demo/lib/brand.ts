@@ -10,8 +10,7 @@
 // hardcoded firm literal — an unresolved name falls back to this tagline or
 // generic wording ("the firm"), never a guess at whose name it is.
 export const PRODUCT_TAGLINE = 'Legal Instruments'
-export const PRODUCT_STAGE = 'beta'
-// Share cards / tab titles carry the clean product name — never the stage
-// ("Legal Instruments (beta)" in an iMessage preview reads unfinished). The
-// stage still shows INSIDE the product (the attorney rail's chip).
+// The stage suffix is fully retired ("Legal Instruments (beta)" read
+// unfinished in share cards, and the in-app chip went with it) — PRODUCT_NAME
+// is the clean product name everywhere.
 export const PRODUCT_NAME = PRODUCT_TAGLINE
