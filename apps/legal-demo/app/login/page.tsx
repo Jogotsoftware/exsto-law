@@ -5,12 +5,23 @@
 // firm's landing page, but an attorney standing there still needs a way in, and
 // on legacy/canonical hosts the root page renders this same component so /
 // behaves exactly as it always has.
+//
+// LOGIN-RESTYLE-1 — the surface (not the behaviour) now matches the Legal
+// Instruments marketing sign-in at instruments.legal, so the door into the
+// product looks like the site the attorney arrived from. Styling lives in
+// login.module.css; globals.css is untouched.
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { EB_Garamond } from 'next/font/google'
 import { fetchSession } from '@/lib/auth'
-import { PRODUCT_TAGLINE } from '@/lib/brand'
+import styles from './login.module.css'
+
+// The app's global serif (app/layout.tsx) loads EB Garamond 500/600/700 — the
+// marketing sign-in's "Sign in" is the lighter 400 face. Loading that one weight
+// here keeps it scoped to this route instead of changing global typography.
+const garamondDisplay = EB_Garamond({ subsets: ['latin'], weight: '400', display: 'swap' })
 
 export default function LoginPage() {
   const router = useRouter()
@@ -43,40 +54,38 @@ export default function LoginPage() {
   }
 
   return (
-    <main>
-      <div style={{ maxWidth: 420, margin: '4rem auto 0' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{PRODUCT_TAGLINE}</h1>
-          <p style={{ color: 'var(--muted)' }}>Sign in to your dashboard</p>
+    <main className={styles.page}>
+      <div className={styles.masthead}>
+        <a href="https://instruments.legal" className={styles.wordmarkLink}>
+          <img
+            src="/brand/wordmark-navy-bluegold.svg"
+            alt="Legal Instruments"
+            className={styles.wordmark}
+          />
+        </a>
+      </div>
+      <div className={styles.card}>
+        <div className={styles.hairline} />
+        <div className={styles.brand}>
+          <img src="/brand/li-tile-navy-bluegold.svg" alt="" width={52} className={styles.tile} />
+          <h1 className={`${styles.title} ${garamondDisplay.className}`}>Sign in</h1>
         </div>
-        <div className="login-card">
-          {error && <div className="alert alert-error">{error}</div>}
-          <button className="primary google-signin" onClick={signIn} style={{ width: '100%' }}>
-            <GoogleIcon />
-            Sign in with Google
-          </button>
-          <p
-            style={{
-              color: 'var(--muted)',
-              fontSize: '0.85rem',
-              marginTop: '1rem',
-              textAlign: 'center',
-              marginBottom: 0,
-            }}
-          >
-            Only authorized firm accounts can sign in.
-          </p>
-        </div>
-        <div
-          style={{
-            textAlign: 'center',
-            marginTop: '1.5rem',
-            fontSize: '0.9rem',
-            color: 'var(--muted)',
-          }}
-        >
-          Prospective client? <Link href="/book">Book a consultation →</Link>
-        </div>
+        {error && (
+          <div className={styles.alert} role="alert">
+            {error}
+          </div>
+        )}
+        <button type="button" className={styles.google} onClick={signIn}>
+          <GoogleIcon />
+          Continue with Google
+        </button>
+        <p className={styles.note}>Only authorized firm accounts can sign in.</p>
+      </div>
+      <div className={styles.footer}>
+        Prospective client?{' '}
+        <Link href="/book" className={styles.footerLink}>
+          Book a consultation →
+        </Link>
       </div>
     </main>
   )
@@ -85,26 +94,27 @@ export default function LoginPage() {
 function GoogleIcon() {
   return (
     <svg
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
-      style={{ marginRight: '0.5rem', verticalAlign: '-3px' }}
+      width="17"
+      height="17"
+      viewBox="0 0 48 48"
+      className={styles.googleIcon}
+      aria-hidden="true"
     >
       <path
         fill="#4285F4"
-        d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+        d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2.1 5-4.4 6.5v5.4h7.1c4.2-3.8 6.6-9.5 6.6-15.9z"
       />
       <path
         fill="#34A853"
-        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"
+        d="M24 46c6 0 11-2 14.5-5.4l-7.1-5.4c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.5v5.7C8.1 41.2 15.4 46 24 46z"
       />
       <path
         fill="#FBBC05"
-        d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+        d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.3-2.9.7-4.2v-5.7H4.5C2.9 17.3 2 20.5 2 24s.9 6.7 2.5 9.9l7.2-5.7z"
       />
       <path
         fill="#EA4335"
-        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+        d="M24 10.4c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.9 30 2 24 2 15.4 2 8.1 6.8 4.5 14.1l7.2 5.7C13.4 14.3 18.3 10.4 24 10.4z"
       />
     </svg>
   )

@@ -1,0 +1,152 @@
+/* Attorney sign-in surface — a faithful port of the Legal Instruments
+   marketing sign-in (instruments.legal): cream field, centred wordmark, a
+   white card opened by the navy→gold hairline, EB Garamond "Sign in".
+
+   Scoped as a CSS module on purpose. This route deliberately drops the app
+   chrome (the aurora body wash, the 1240px `main` gutter, the global button
+   and h1 styles), and globals.css is a hot conflict file that every parallel
+   session touches — keeping the overrides local means this page can restyle
+   itself without a single global rule and without racing anyone.
+
+   Selectors that override an element rule plus a pseudo-class (a:hover) are
+   written class+pseudo so they win on specificity, not on file order. */
+
+.page {
+  /* Beats `main { max-width: 1240px; padding: 2rem 1.25rem 5rem }` and its
+     880px media-query variant on specificity (0,1,0 > 0,0,1). */
+  max-width: none;
+  margin: 0;
+  padding: 14px 24px 96px;
+  min-height: 100dvh;
+  background: #fbf8f3;
+  color: #1b2a4a;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wordmarkLink {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wordmark {
+  height: 30px;
+  display: block;
+}
+
+.card {
+  max-width: 420px;
+  margin: 64px auto 0;
+  background: #ffffff;
+  border: 1px solid rgba(27, 42, 74, 0.1);
+  border-radius: 18px;
+  padding: 0 34px 38px;
+  overflow: hidden;
+  box-shadow: 0 40px 90px -46px rgba(38, 62, 108, 0.3);
+}
+
+/* Full-bleed inside the card: the negative side margins cancel the 34px pad. */
+.hairline {
+  height: 3px;
+  margin: 0 -34px;
+  background: linear-gradient(
+    90deg,
+    #2f5c93 0%,
+    #a5854a 34%,
+    #d8b166 55%,
+    #f3e3b8 75%,
+    #a5854a 100%
+  );
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  margin: 34px 0 26px;
+}
+
+.tile {
+  display: block;
+}
+
+.title {
+  /* font-family comes from the page-scoped EB Garamond 400 className. */
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: normal;
+  margin: 0;
+  color: #1b2a4a;
+}
+
+.alert {
+  background: #fbeae6;
+  color: #b4553f;
+  border: 1px solid rgba(180, 85, 63, 0.25);
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  margin: 0 0 14px;
+}
+
+.google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 9px;
+  border: 1px solid rgba(27, 42, 74, 0.16);
+  background: #fbf8f3;
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #1b2a4a;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.google:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: rgba(27, 42, 74, 0.3);
+}
+
+.googleIcon {
+  flex: none;
+}
+
+.note {
+  font-size: 12.5px;
+  color: rgba(27, 42, 74, 0.5);
+  text-align: center;
+  margin: 14px 0 0;
+}
+
+.footer {
+  max-width: 420px;
+  margin: 26px auto 0;
+  text-align: center;
+  font-size: 13.5px;
+  color: rgba(27, 42, 74, 0.62);
+}
+
+.footerLink {
+  color: #8a6a30;
+  font-weight: 600;
+}
+
+.footerLink:hover {
+  color: #16203a;
+  text-decoration: none;
+}
