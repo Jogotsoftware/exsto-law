@@ -42,25 +42,14 @@ export async function GET(): Promise<Response> {
         background: 'radial-gradient(circle at 85% -10%, #EAF3FA 0%, #F6EFE2 55%, #F3EBDC 100%)',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: logoDataUrl ? 460 : 400,
-          height: 400,
-          borderRadius: 96,
-          background: '#FFFFFF',
-          border: '3px solid rgba(75, 156, 211, 0.28)',
-          boxShadow: '0 40px 90px rgba(19, 41, 75, 0.18)',
-        }}
-      >
-        {logoDataUrl ? (
-          <img src={logoDataUrl} alt="" width={320} height={200} style={{ objectFit: 'contain' }} />
-        ) : (
-          <FirmMarkGlyph brand={brand} size={300} />
-        )}
-      </div>
+      {/* COMP-RESTYLE-1 follow-up (founder feedback): no white tile — the card
+          is just the cream field with the firm's mark on it, like the pages
+          themselves. */}
+      {logoDataUrl ? (
+        <img src={logoDataUrl} alt="" width={640} height={320} style={{ objectFit: 'contain' }} />
+      ) : (
+        <FirmMarkGlyph brand={brand} size={340} />
+      )}
     </div>,
     { width: 1200, height: 630 },
   )
