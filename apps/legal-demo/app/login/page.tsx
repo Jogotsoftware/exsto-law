@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation'
 import { Poppins } from 'next/font/google'
 import { fetchSession } from '@/lib/auth'
 import { callClientMcp } from '@/lib/mcpClient'
+import { logoPlateVars } from '@/lib/brandColor'
 import { Wavefield } from '@/components/Wavefield'
 import styles from './login.module.css'
 
@@ -33,7 +34,12 @@ const poppins = Poppins({ subsets: ['latin'], weight: '500', display: 'swap' })
 export default function LoginPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
-  const [firmLogo, setFirmLogo] = useState<{ src: string; alt: string } | null>(null)
+  const [firmLogo, setFirmLogo] = useState<{
+    src: string
+    alt: string
+    tone: 'light' | 'dark' | null
+    headerColor: string | null
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -55,11 +61,22 @@ export default function LoginPage() {
     // The in-card lockup is the FIRM's uploaded logo when this request
     // resolves to a firm (subdomain / ?firm=). No resolvable firm (the
     // canonical host) or no uploaded logo → the product tile fallback.
-    callClientMcp<{ firmName: string | null; logoDataUrl: string | null }>({
+    callClientMcp<{
+      firmName: string | null
+      headerColor: string | null
+      logoDataUrl: string | null
+      logoTone: 'light' | 'dark' | null
+    }>({
       toolName: 'legal.public.firm_branding',
     })
       .then((b) => {
-        if (!cancelled && b.logoDataUrl) setFirmLogo({ src: b.logoDataUrl, alt: b.firmName ?? '' })
+        if (!cancelled && b.logoDataUrl)
+          setFirmLogo({
+            src: b.logoDataUrl,
+            alt: b.firmName ?? '',
+            tone: b.logoTone,
+            headerColor: b.headerColor,
+          })
       })
       .catch(() => {})
     return () => {
@@ -95,7 +112,15 @@ export default function LoginPage() {
           <div className={styles.inner}>
             <div className={styles.lockup}>
               {firmLogo ? (
-                <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
+                // Reversed (light-ink) artwork can't sit bare on the white
+                // card — it takes the FIRM-BRANDING-1 plate.
+                firmLogo.tone === 'light' ? (
+                  <span className={styles.logoPlate} style={logoPlateVars(firmLogo.headerColor)}>
+                    <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
+                  </span>
+                ) : (
+                  <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
+                )
               ) : (
                 <img src="/brand/li-tile-navy-bluegold.svg" alt="" className={styles.tile} />
               )}
