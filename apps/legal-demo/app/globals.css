@@ -6171,11 +6171,15 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--bk-grad);
   box-shadow: var(--bk-shadow-pop);
 }
-/* The firm's uploaded logo (tenant setting) — the comp's 52px wordmark. */
+/* FIRM-BRANDING-1 + COMP-RESTYLE-1: an uploaded firm logo replaces the crest
+   + wordmark on the booking funnel, at the comp's 52px height. The funnel sits
+   on a light field, so no chip is needed. */
 .bk-brand-logo {
+  display: block;
   height: 52px;
   width: auto;
-  display: block;
+  max-width: 300px;
+  object-fit: contain;
 }
 /* Language toggle — the comp's segmented pill. */
 .bk-shell .lang-toggle {
@@ -9615,9 +9619,24 @@ input[type='number'] {
 }
 .li-topbar-logo {
   display: block;
-  height: 40px;
-  max-width: 280px;
+  height: 36px;
+  max-width: 260px;
   object-fit: contain;
+}
+/* FIRM-BRANDING-1 — the two backdrops a firm logo may need, driven by the
+   MEASURED tone of the artwork (firm_logo_tone, migration 0203) rather than by
+   a guess. A reversed (light-ink) logo gets a brand-colored plate on light
+   surfaces; a paper (dark-ink) logo gets a white chip on dark chrome. When the
+   tone is unknown the logo renders bare, exactly as before 0203. */
+.li-logo-chip-light {
+  background: #fff;
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+.li-logo-chip-dark {
+  background: var(--li-logo-plate, #14213d);
+  border-radius: 8px;
+  padding: 5px 11px;
 }
 /* UIWALK-1: the scroll region now wraps the top bar + main, so the bar slides
    away with the page instead of staying pinned. */
@@ -10611,14 +10630,55 @@ input[type='number'] {
   justify-content: center;
   overflow: hidden;
 }
+/* FIRM-BRANDING-1: a real firm logo is a WIDE wordmark, not a 64px app icon —
+   squeezing one into the square crest well made it an illegible smudge. When a
+   logo is present the well grows sideways. It stays NAVY (which is what
+   reversed artwork needs, and what the well always was); a measured dark-ink
+   logo flips it to white via .on-light. */
+.li-set-firm-logo.has-logo {
+  width: auto;
+  min-width: 96px;
+  max-width: 240px;
+  padding: 6px 12px;
+}
+.li-set-firm-logo.has-logo.on-light {
+  background: #fff;
+  border: 1px solid var(--li-border-soft);
+}
 .li-set-firm-logo img {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
+.li-set-firm-logo.has-logo img {
+  width: auto;
+  max-width: 216px;
+}
 .li-set-firm-head-text {
   flex: 1 1 auto;
   min-width: 200px;
+}
+.li-set-firm-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+/* A label styled as a button, wrapping a visually-hidden file input — the
+   native control cannot be styled to match the rest of Settings. */
+.li-set-filebtn {
+  cursor: pointer;
+}
+.li-set-filebtn input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .li-set-firm-name {
   font-family: 'Public Sans', sans-serif;
@@ -11048,14 +11108,81 @@ input[type='number'] {
   padding: 20px;
   display: flex;
   justify-content: center;
+  position: sticky;
+  top: 16px;
+  align-self: flex-start;
+  max-height: calc(100vh - 140px);
 }
-.li-set-preview-frame {
+/* FIRM-BRANDING-1: the invoice preview is CANVAS pages now, not an iframe of
+   the browser's PDF plugin (which painted its own dark toolbar + thumbnail rail
+   inside the panel and shrank the invoice to a postage stamp). */
+.li-set-preview-scroll {
   width: 100%;
-  height: 560px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.li-set-preview-page {
+  display: block;
+  max-width: 100%;
   border: 1px solid var(--li-border);
   border-radius: 6px;
   background: #fff;
   box-shadow: 0 8px 26px rgba(15, 23, 42, 0.12);
+}
+/* Read-only branding summary: this page shows the firm's identity and links
+   back to the one place it is edited (Settings → Firm Details). */
+.li-set-brandref {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--li-border-soft);
+  border-radius: 12px;
+  background: var(--li-bg);
+}
+.li-set-brandref-logo {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.li-set-brandref-logo.has-logo {
+  width: auto;
+  min-width: 72px;
+  max-width: 176px;
+  padding: 5px 10px;
+}
+.li-set-brandref-logo.has-logo.on-light {
+  background: #fff !important;
+  border: 1px solid var(--li-border-soft);
+}
+.li-set-brandref-logo.has-logo img {
+  width: auto;
+  max-width: 156px;
+  max-height: 38px;
+  object-fit: contain;
+}
+.li-set-brandref-text {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+.li-set-brandref-name {
+  font-weight: 600;
+  color: var(--li-fg);
+}
+.li-set-brandref-sub {
+  font-size: 12.5px;
+  color: var(--li-muted-2);
+  margin-top: 2px;
 }
 .li-set-upload-hint {
   display: block;
@@ -20249,6 +20376,14 @@ a.li-uac-done-primary:hover {
 .pd-brandrow .public-draft-firm {
   margin: 0;
 }
+/* FIRM-BRANDING-1: the firm's logo stands in for the crest + firm name on the
+   signing page. Light surface, so no chip. */
+.pd-brand-logo {
+  display: block;
+  height: 36px;
+  max-width: 220px;
+  object-fit: contain;
+}
 
 /* ============================================================
    li-uac-fbstrip — feedback mode restyled to the BUILDER strip
@@ -22149,6 +22284,16 @@ details.li-brief-research summary:hover {
   justify-content: center;
   color: var(--li-rail-gold);
 }
+/* FIRM-BRANDING-1: the firm's uploaded logo stands in for the scales crest in
+   the portal band. Bare on the dark band; a measured dark-ink logo picks up
+   .li-logo-chip-light so it does not disappear. */
+.li-cp-brand-logo {
+  display: block;
+  height: 34px;
+  max-width: 200px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
 .li-cp-brand-text {
   display: flex;
   flex-direction: column;
@@ -23736,6 +23881,15 @@ details.li-brief-research summary:hover {
   align-items: center;
   justify-content: center;
   color: var(--li-gold);
+}
+/* FIRM-BRANDING-1: the firm's logo replaces the crest on the pay page. The page
+   is a light surface, so the artwork needs no chip. */
+.li-cp-pay-logo {
+  display: block;
+  height: 34px;
+  max-width: 190px;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 .li-cp-pay-firm {
   font-size: 13px;
@@ -27746,6 +27900,25 @@ details.li-brief-research summary:hover {
   border: 1px solid rgba(75, 156, 211, 0.28);
   border-color: color-mix(in srgb, var(--fl-brand, #4b9cd3) 28%, transparent);
   flex: none;
+}
+/* FIRM-BRANDING-1: a firm's own uploaded logo replaces the crest here. Real
+   marks are wide wordmarks, so the tile stops being a square. */
+.fl-mark-logo {
+  width: auto;
+  min-width: 64px;
+  max-width: 220px;
+  padding: 6px 12px;
+}
+.fl-mark-logo img {
+  display: block;
+  max-width: 196px;
+  max-height: 40px;
+  object-fit: contain;
+}
+/* Reversed (light-ink) artwork needs the brand plate, not the white tile. */
+.fl-mark-logo-plate {
+  background: var(--li-logo-plate, #14213d);
+  border-color: transparent;
 }
 .fl-name {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);

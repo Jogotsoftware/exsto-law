@@ -19,12 +19,14 @@ import { useI18n } from '@/lib/i18n'
 export function BookingChooser({
   firmName,
   brandColor = null,
-  logoUrl = null,
+  logoDataUrl = null,
+  logoTone = null,
   onContinueAsNewClient,
 }: {
   firmName: string | null
   brandColor?: string | null
-  logoUrl?: string | null
+  logoDataUrl?: string | null
+  logoTone?: 'light' | 'dark' | null
   onContinueAsNewClient: () => void
 }) {
   const { t } = useI18n()
@@ -41,7 +43,12 @@ export function BookingChooser({
         variant="intake"
       />
       <div className="bk-frame">
-        <BookTopbar firmName={firmName} brandColor={brandColor} logoUrl={logoUrl} />
+        <BookTopbar
+          firmName={firmName}
+          brandColor={brandColor}
+          logoDataUrl={logoDataUrl}
+          logoTone={logoTone}
+        />
         <section className="bk-card">
           <div className="bk-stage">
             <div className="bk-stage-head">

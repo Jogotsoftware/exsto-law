@@ -324,7 +324,9 @@ export default function BookPage() {
     firmName: string | null
     attorneyName: string | null
     headerColor: string | null
+    // FIRM-BRANDING-1 — the firm's logo, so the funnel wears the firm's mark.
     logoDataUrl: string | null
+    logoTone: 'light' | 'dark' | null
   } | null>(null)
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
@@ -447,6 +449,7 @@ export default function BookPage() {
       attorneyName: string | null
       headerColor: string | null
       logoDataUrl: string | null
+      logoTone: 'light' | 'dark' | null
     }>({
       toolName: 'legal.public.firm_branding',
     })
@@ -1085,7 +1088,8 @@ export default function BookPage() {
           <BookTopbar
             firmName={firmBranding?.firmName ?? null}
             brandColor={firmBranding?.headerColor ?? null}
-            logoUrl={firmBranding?.logoDataUrl ?? null}
+            logoDataUrl={firmBranding?.logoDataUrl ?? null}
+            logoTone={firmBranding?.logoTone ?? null}
           />
           <section className="bk-card bk-confirm" key="done">
             <div className="bk-success">
@@ -1187,7 +1191,8 @@ export default function BookPage() {
           <BookTopbar
             firmName={firmBranding?.firmName ?? null}
             brandColor={firmBranding?.headerColor ?? null}
-            logoUrl={firmBranding?.logoDataUrl ?? null}
+            logoDataUrl={firmBranding?.logoDataUrl ?? null}
+            logoTone={firmBranding?.logoTone ?? null}
           />
           <section className="bk-card">
             <div className="bk-loading">
@@ -1212,7 +1217,8 @@ export default function BookPage() {
       <BookingChooser
         firmName={firmBranding?.firmName ?? null}
         brandColor={firmBranding?.headerColor ?? null}
-        logoUrl={firmBranding?.logoDataUrl ?? null}
+        logoDataUrl={firmBranding?.logoDataUrl ?? null}
+        logoTone={firmBranding?.logoTone ?? null}
         onContinueAsNewClient={() => setChooserDismissed(true)}
       />
     )
@@ -1268,7 +1274,8 @@ export default function BookPage() {
         <BookTopbar
           firmName={firmBranding?.firmName ?? null}
           brandColor={firmBranding?.headerColor ?? null}
-          logoUrl={firmBranding?.logoDataUrl ?? null}
+          logoDataUrl={firmBranding?.logoDataUrl ?? null}
+          logoTone={firmBranding?.logoTone ?? null}
         />
         <BookProgress
           step={step}

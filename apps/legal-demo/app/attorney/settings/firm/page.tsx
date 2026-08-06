@@ -2,10 +2,16 @@
 
 // Settings → Firm details (WP-G, + WP A1). Split out of the old settings
 // monolith — same legal.settings.get / legal.settings.firm_profile.set tools,
-// restyled to the comp's logo + kv-grid card. The logo itself isn't owned here:
-// it's read from the invoice template config (the one place it's uploaded) so
-// this card can surface it without duplicating the uploader — "Replace logo"
-// links to Settings → Invoice template.
+// restyled to the comp's logo + kv-grid card.
+//
+// FIRM-BRANDING-1 — this page now OWNS the firm's visual identity. The logo used
+// to live on the invoice template config and "Replace logo" sent the attorney to
+// Settings → Invoice template to change it, which is backwards: the logo is a
+// firm fact the invoice consumes. It is uploaded here (firm_logo on the
+// firm_profile singleton, migration 0202, saved through the same
+// legal.settings.firm_profile.set action as every other field on this card),
+// next to the brand color, and everything else — console header, client portal,
+// booking funnel, public landing page, signing pages, invoice PDF — reads it.
 //
 // WP A1 adds: lead attorney name (now editable — it used to come from the
 // approving attorney's account only), home jurisdiction (the fallback rung
@@ -20,8 +26,9 @@
 // comma-parsed text buffer — save() already sent a plain string[] here, so
 // swapping the control is a drop-in change.
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { refreshFirmBranding, setFirmBrandingLocal, useFirmBranding } from '@/lib/firmBranding'
+import { measureLogoTone } from '@/lib/brandColor'
 import { TagInput } from '@/components/TagInput'
 import { ColorWheelField } from '@/components/ColorWheelField'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
@@ -44,9 +51,21 @@ interface TenantSettings {
   updatedAt: string | null
 }
 
+// The uploader's client-side ceiling. The action layer enforces its own cap
+// (handlers/firmProfile.ts) — this one exists so a too-large file is refused
+// before it is base64'd and posted, with a message that names the limit.
+const MAX_LOGO_BYTES = 500_000
+
 export default function FirmDetailsPage(): React.ReactElement {
   const [settings, setSettings] = useState<TenantSettings | null>(null)
-  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
+  // The SAVED logo (shared store — also what the header bar is rendering).
+  const branding = useFirmBranding()
+  const savedLogo = branding.logoDataUrl
+  // The logo as edited on this card; `undefined` = untouched this session.
+  const [logoDraft, setLogoDraft] = useState<string | null | undefined>(undefined)
+  const [logoToneDraft, setLogoToneDraft] = useState<'light' | 'dark' | null>(null)
+  const logoDataUrl = logoDraft === undefined ? savedLogo : logoDraft
+  const logoTone = logoDraft === undefined ? branding.logoTone : logoToneDraft
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -65,14 +84,38 @@ export default function FirmDetailsPage(): React.ReactElement {
 
   useEffect(() => {
     refreshSettings()
-    // Read-only: the firm logo lives on the invoice template config, the one
-    // place it's uploaded (Settings → Invoice template).
-    callAttorneyMcp<{ template: { logoDataUrl: string | null } }>({
-      toolName: 'legal.firm.get_invoice_template',
-    })
-      .then((r) => setLogoDataUrl(r.template.logoDataUrl))
-      .catch(() => setLogoDataUrl(null))
   }, [refreshSettings])
+
+  // Read the chosen file as a data URL. Rejected sizes/types never reach state,
+  // so Save can't post something the action layer will bounce.
+  async function onLogoFile(file: File | null): Promise<void> {
+    if (!file) return
+    if (file.size > MAX_LOGO_BYTES) {
+      setError(`That logo is ${Math.round(file.size / 1000)} KB — use an image under 500 KB.`)
+      return
+    }
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+      setError('Use a PNG, JPG, GIF or WEBP image.')
+      return
+    }
+    const dataUrl = await new Promise<string | null>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(file)
+    })
+    if (!dataUrl) {
+      setError('That file could not be read.')
+      return
+    }
+    setError(null)
+    setLogoDraft(dataUrl)
+    // Measure the artwork once, here, so every surface (including the
+    // server-rendered invoice PDF) knows whether it needs a dark or a light
+    // backdrop instead of guessing. See measureLogoTone.
+    setLogoToneDraft(await measureLogoTone(dataUrl))
+    setSaved(false)
+  }
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]): void {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
@@ -104,9 +147,18 @@ export default function FirmDetailsPage(): React.ReactElement {
           headerColor: settings.headerColor ?? '',
           tagline: settings.tagline ?? '',
           about: settings.about ?? '',
+          // Untouched this session ⇒ omit, so a save of the text fields never
+          // rewrites the logo; '' clears it.
+          ...(logoDraft !== undefined
+            ? { logoDataUrl: logoDraft ?? '', logoTone: logoToneDraft ?? '' }
+            : {}),
         },
       })
       await refreshSettings()
+      // Repaint the console header/rail (and every other branding consumer)
+      // from the authoritative value — no reload needed.
+      await refreshFirmBranding()
+      setLogoDraft(undefined)
       setEditing(false)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -127,7 +179,11 @@ export default function FirmDetailsPage(): React.ReactElement {
       ) : (
         <div className="li-set-card">
           <div className="li-set-firm-head">
-            <span className="li-set-firm-logo">
+            <span
+              className={`li-set-firm-logo${logoDataUrl ? ' has-logo' : ''}${
+                logoDataUrl && logoTone === 'dark' ? ' on-light' : ''
+              }`}
+            >
               {logoDataUrl ? (
                 <img src={logoDataUrl} alt="" />
               ) : (
@@ -154,13 +210,63 @@ export default function FirmDetailsPage(): React.ReactElement {
             <div className="li-set-firm-head-text">
               <div className="li-set-firm-name">{settings.firmName ?? 'Your firm'}</div>
               <div className="li-set-firm-sub">
-                Firm logo — shown on your invoices and the console header
+                Firm logo — shown on your console header, your client portal, your booking page and
+                your invoices
               </div>
             </div>
-            <Link href="/attorney/settings/invoice-template" className="li-set-btn">
-              Replace logo
-            </Link>
+            <div className="li-set-firm-head-actions">
+              {/* A label wrapping a visually-hidden file input: the native
+                  control is unstyleable and looked out of place next to every
+                  other button on this page. */}
+              <label className="li-set-btn li-set-filebtn">
+                {logoDataUrl ? 'Replace logo' : 'Upload logo'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  onChange={(e) => {
+                    onLogoFile(e.target.files?.[0] ?? null)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {logoDataUrl && (
+                <button
+                  type="button"
+                  className="li-set-btn li-set-btn-sm"
+                  onClick={() => {
+                    setLogoDraft(null)
+                    setSaved(false)
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
           </div>
+          {logoDraft !== undefined && (
+            <SettingsAlert tone="info">
+              {logoDraft
+                ? 'New logo selected — press Save to apply it everywhere.'
+                : 'Logo will be removed — press Save to apply.'}
+            </SettingsAlert>
+          )}
+          {logoDraft !== undefined && !editing && (
+            <div className="li-set-actions-row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                className="li-set-btn"
+                onClick={() => {
+                  setLogoDraft(undefined)
+                  setError(null)
+                }}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button className="li-set-btn li-set-btn-primary" onClick={save} disabled={busy}>
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
 
           {saved && <SettingsAlert tone="success">Saved.</SettingsAlert>}
 
@@ -239,7 +345,12 @@ export default function FirmDetailsPage(): React.ReactElement {
                   <span>Brand color</span>
                   <ColorWheelField
                     value={settings.headerColor}
-                    onChange={(hex) => updateField('headerColor', hex)}
+                    onChange={(hex) => {
+                      updateField('headerColor', hex)
+                      // Paint the console header as the wheel moves; Save makes
+                      // it authoritative (refreshFirmBranding), Cancel re-reads.
+                      setFirmBrandingLocal({ headerColor: hex })
+                    }}
                     defaultHex="#1b2a4a"
                     label="Brand color"
                   />
@@ -299,7 +410,10 @@ export default function FirmDetailsPage(): React.ReactElement {
                   onClick={() => {
                     setEditing(false)
                     setError(null)
+                    setLogoDraft(undefined)
                     refreshSettings()
+                    // Undo the optimistic header tint from the color wheel.
+                    void refreshFirmBranding()
                   }}
                   disabled={busy}
                 >

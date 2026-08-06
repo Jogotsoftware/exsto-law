@@ -27,6 +27,7 @@ const EMPTY_SETTINGS: TenantSettings = {
   assistantInstructions: null,
   portalAssistantInstructions: null,
   headerColor: null,
+  logoTone: null,
   tagline: null,
   about: null,
   defaultHourlyRateUsd: null,
@@ -131,9 +132,11 @@ describe('toPublicFirmSite — public-safe closed shape', () => {
       'contact',
       'firmName',
       'headerColor',
-      // COMP-RESTYLE-1 — the firm's uploaded logo (invoice-template logo), a
-      // display asset the firm itself publishes on its public pages.
+      // FIRM-BRANDING-1 — the firm's logo + its measured tone are public
+      // BRANDING (the landing page renders them), so they belong in the closed
+      // shape; nothing else about the firm profile joins them.
       'logoDataUrl',
+      'logoTone',
       'services',
       'slug',
       'tagline',

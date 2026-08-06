@@ -13,9 +13,9 @@
 // rendering under the wrong identity — same posture as the /book front door.
 import type { ActionContext } from '@exsto/substrate'
 import { resolvePublicFirm, resolvePublicIntakeActor } from './publicBooking.js'
+import { getFirmLogo } from './firmBranding.js'
 import { getTenantSettings, type TenantSettings } from './tenantSettings.js'
 import { listServices, type ServiceDefinition } from './services.js'
-import { getInvoiceTemplate } from './invoiceTemplate.js'
 
 // One service tile on the public landing page: display copy only — never the
 // intake schema, cost config, or lifecycle internals.
@@ -33,11 +33,11 @@ export interface PublicFirmSite {
   attorneyName: string | null
   // Server-validated #rrggbb (handlers/firmProfile.ts) — a display color only.
   headerColor: string | null
-  // COMP-RESTYLE-1 — the firm's uploaded logo (the invoice-template logo, the
-  // one place firm art is uploaded — 0196's posture). A data: URL or null; the
-  // landing/funnel/sign-in render it at fixed heights when set and fall back
-  // to the generated mark + firm name when not.
+  // FIRM-BRANDING-1 — the firm's logo as an image data URL (server-validated to
+  // a raster image type), or null for the crest fallback. A display asset only.
   logoDataUrl: string | null
+  // 'light' | 'dark' for that logo's artwork; null = unknown (rendered bare).
+  logoTone: 'light' | 'dark' | null
   // Only the contact fields the firm has SET render publicly; the landing page
   // hides the block entirely when all three are null.
   contact: {
@@ -71,6 +71,9 @@ export function toPublicFirmSite(args: {
   resolvedFirmName: string
   settings: TenantSettings
   services: ServiceDefinition[]
+  // FIRM-BRANDING-1 — resolved separately from `settings` on purpose: the logo
+  // is a ~100 KB data URL and does not ride in TenantSettings (see
+  // api/firmBranding.ts). Optional so existing callers/tests stay valid.
   logoDataUrl?: string | null
 }): PublicFirmSite {
   const { slug, resolvedFirmName, settings, services } = args
@@ -82,6 +85,7 @@ export function toPublicFirmSite(args: {
     attorneyName: settings.attorneyName,
     headerColor: settings.headerColor,
     logoDataUrl: args.logoDataUrl ?? null,
+    logoTone: settings.logoTone,
     contact: {
       phone: settings.firmPhone,
       email: settings.firmEmail,
@@ -101,16 +105,16 @@ export async function getPublicFirmSite(slug: string): Promise<PublicFirmSite | 
     tenantId: firm.tenantId,
     actorId: await resolvePublicIntakeActor(firm.tenantId),
   }
-  const [settings, services, invoiceTemplate] = await Promise.all([
+  const [settings, services, logoDataUrl] = await Promise.all([
     getTenantSettings(ctx),
     listServices(ctx),
-    getInvoiceTemplate(ctx),
+    getFirmLogo(ctx),
   ])
   return toPublicFirmSite({
     slug,
     resolvedFirmName: firm.firmName,
     settings,
     services,
-    logoDataUrl: invoiceTemplate.logoDataUrl,
+    logoDataUrl,
   })
 }

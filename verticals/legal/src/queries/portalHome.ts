@@ -6,6 +6,7 @@ import { getEngagementConfig, getEngagementStatus } from '../api/engagement.js'
 import { getEngagementExecutedCopyRef } from '../api/engagementExecutedCopy.js'
 import { getLatestAttributeValue } from '../handlers/common.js'
 import { getFirmProfile } from '../api/tenantSettings.js'
+import { getFirmLogo } from '../api/firmBranding.js'
 import { readPortalAssistantEnabled } from '../handlers/engagement.js'
 import { listClientDocuments } from '../api/esign.js'
 import { loadClientContactEmail, resolvePortalUserType } from '../api/clientIdentity.js'
@@ -63,6 +64,11 @@ export interface PortalHomeSummary {
   // UIWALK-2 (PR-3) — the firm's brand color (#rrggbb, server-validated) so the
   // portal chrome can tint to the firm. Client-safe: a display color only.
   headerColor: string | null
+  // FIRM-BRANDING-1 — the firm's logo (image data URL) so the portal header
+  // wears the firm's mark instead of the generic scales crest. Client-safe: a
+  // display asset only, the same one the booking funnel and invoices show.
+  logoDataUrl: string | null
+  logoTone: 'light' | 'dark' | null
 }
 
 // Upcoming, non-cancelled consultations across the client's matters — the same
@@ -182,6 +188,7 @@ export async function getPortalHomeSummary(
     engagementStatus,
     config,
     firmProfile,
+    firmLogoDataUrl,
   ] = await Promise.all([
     withActionContext(ctx, (client) =>
       getLatestAttributeValue<string>(client, ctx.tenantId, clientContactId, 'full_name'),
@@ -196,6 +203,7 @@ export async function getPortalHomeSummary(
     getEngagementStatus(ctx, clientContactId),
     getEngagementConfig(ctx),
     getFirmProfile(ctx),
+    getFirmLogo(ctx),
   ])
 
   const signatures: HomeAttentionSignature[] = esignDocs
@@ -260,5 +268,7 @@ export async function getPortalHomeSummary(
     },
     assistantEnabled,
     headerColor: firmProfile.headerColor,
+    logoDataUrl: firmLogoDataUrl,
+    logoTone: firmProfile.logoTone,
   }
 }

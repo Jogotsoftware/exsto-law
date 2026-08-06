@@ -28,6 +28,7 @@ import {
 import { findClientContactByEmailInTenant } from './clientIdentity.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import { getTenantSettings } from './tenantSettings.js'
+import { getFirmLogo } from './firmBranding.js'
 import {
   DEFAULT_ESIGN_PROVIDER,
   EsignNotConfiguredError,
@@ -1373,6 +1374,12 @@ export interface SignableDocument {
   // signing doors (token link + authed portal), since both call buildSignable.
   // Null when the firm hasn't set one.
   firmName: string | null
+  // FIRM-BRANDING-1 — the firm's logo (image data URL) and brand color, so the
+  // signing page a client lands on wears the FIRM's identity rather than the
+  // product's generic crest/navy. Display-only, and null when unset.
+  firmLogoDataUrl: string | null
+  firmLogoTone: 'light' | 'dark' | null
+  brandColor: string | null
   // ESIGN-UNIFY-1 (ES-1, §9.2) — true for a needs_to_view recipient: the
   // surface should render read-only (no adopt/sign controls, no consent
   // capture). `canSign` is already forced false below for this case, so a
@@ -1538,10 +1545,21 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
   })
 
   let firmName: string | null = null
+  let firmLogoDataUrl: string | null = null
+  let firmLogoTone: 'light' | 'dark' | null = null
+  let brandColor: string | null = null
   try {
-    firmName = (await getTenantSettings(ctx)).firmName
+    const settings = await getTenantSettings(ctx)
+    firmName = settings.firmName
+    brandColor = settings.headerColor
+    firmLogoTone = settings.logoTone
+    firmLogoDataUrl = await getFirmLogo(ctx)
   } catch {
-    firmName = null // degrade to the caller's generic fallback, never guess a name
+    // degrade to the caller's generic fallback, never guess an identity
+    firmName = null
+    firmLogoDataUrl = null
+    firmLogoTone = null
+    brandColor = null
   }
 
   // TASK-QUEUE-3 — reuse listEnvelopes' existing matter resolution (same
@@ -1557,7 +1575,15 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
     // degrade gracefully — the signing surface just won't show a Matter pill
   }
 
-  return { ...doc, firmName, matterEntityId, matterNumber }
+  return {
+    ...doc,
+    firmName,
+    firmLogoDataUrl,
+    firmLogoTone,
+    brandColor,
+    matterEntityId,
+    matterNumber,
+  }
 }
 
 // ── Token (link) surface ──────────────────────────────────────────────────────

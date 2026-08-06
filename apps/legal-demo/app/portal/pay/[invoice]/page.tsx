@@ -17,6 +17,8 @@ import { ScaleIcon } from '@/components/icons'
 import { ManualPaymentOptions } from './ManualPaymentOptions'
 import { formatDate } from '@/lib/datetime'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
+import { brandVars, logoPlateVars } from '@/lib/brandColor'
+import { logoChipClass } from '@/lib/firmBranding'
 
 // The payment-intent shape returned by legal.client.invoice_payment_intent.
 type IntentReady = {
@@ -44,6 +46,11 @@ interface ClientInvoiceDetail {
   dueDate: string | null
   lines: ClientInvoiceLine[]
   firmName: string | null
+  // FIRM-BRANDING-1 — the firm's mark + brand color, so the page a client pays
+  // on carries the same identity as the invoice PDF it is paying.
+  firmLogoDataUrl: string | null
+  firmLogoTone: 'light' | 'dark' | null
+  brandColor: string | null
 }
 
 function money(amount: string, currency: string): string {
@@ -190,12 +197,22 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   }
 
   return (
-    <main className="li-cp-pay">
+    <main className="li-cp-pay" style={brandVars(data?.brandColor)}>
       <BackButton fallback="/portal" forceFallback />
       <div className="li-cp-pay-head">
-        <span className="li-cp-pay-crest" aria-hidden>
-          <ScaleIcon size={20} />
-        </span>
+        {data?.firmLogoDataUrl ? (
+          <img
+            src={data.firmLogoDataUrl}
+            alt=""
+            className={`li-cp-pay-logo${logoChipClass(data.firmLogoTone, 'light')}`}
+            style={logoPlateVars(data.brandColor)}
+            aria-hidden
+          />
+        ) : (
+          <span className="li-cp-pay-crest" aria-hidden>
+            <ScaleIcon size={20} />
+          </span>
+        )}
         <div>
           <div className="li-cp-pay-firm">{data?.firmName ?? PRODUCT_TAGLINE}</div>
           <h1 className="li-cp-pay-h1">Invoice {invoiceNumber}</h1>

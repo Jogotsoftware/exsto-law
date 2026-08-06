@@ -4,7 +4,7 @@ import Link from 'next/link'
 import type { PublicFirmSite } from '@exsto/legal'
 import { LanguageToggle } from '@/components/LanguageToggle'
 import { useI18n } from '@/lib/i18n'
-import { darkenHex, isHexColor, mixHex } from '@/lib/brandColor'
+import { darkenHex, isHexColor, logoPlateVars, mixHex } from '@/lib/brandColor'
 import { Wavefield } from '@/components/Wavefield'
 import { FirmMarkGlyph } from '@/components/FirmMarkGlyph'
 import {
@@ -39,10 +39,35 @@ import {
 const DEFAULT_BRAND = '#4B9CD3'
 
 // ---- Firm mark -------------------------------------------------------------
-// The comp's scales crest (FirmMarkGlyph), brand-filled on a white tile.
-// Serves as the plug-and-play logo until firms can upload their own art: the
-// mark takes the tenant's color automatically.
-function FirmMark({ brand }: { brand: string }): React.JSX.Element {
+// The comp's scales crest (FirmMarkGlyph), brand-filled on a white tile — the
+// plug-and-play mark for a firm that has uploaded no art of its own.
+// FIRM-BRANDING-1: once a firm uploads a logo (Settings → Firm Details) it
+// takes the crest's place here, the same as on every other firm surface.
+function FirmMark({
+  brand,
+  brandColor,
+  logoDataUrl,
+  logoTone,
+}: {
+  brand: string
+  // The firm's OWN stored color (null when unset) — the plate should not take
+  // the landing page's Carolina-blue default, only a real firm color.
+  brandColor: string | null
+  logoDataUrl: string | null
+  logoTone: 'light' | 'dark' | null
+}): React.JSX.Element {
+  if (logoDataUrl) {
+    // The tile is white; reversed (light-ink) artwork needs the brand plate.
+    return (
+      <span
+        className={`fl-mark fl-mark-logo${logoTone === 'light' ? ' fl-mark-logo-plate' : ''}`}
+        aria-hidden
+        style={logoPlateVars(brandColor)}
+      >
+        <img src={logoDataUrl} alt="" />
+      </span>
+    )
+  }
   return (
     <span className="fl-mark" aria-hidden>
       <FirmMarkGlyph brand={brand} size={40} />
@@ -123,18 +148,23 @@ export function FirmLandingPage({ site }: { site: PublicFirmSite }): React.JSX.E
 
         <section className="fl-card">
           <div className="fl-card-head">
-            {/* The firm's uploaded logo (tenant setting) replaces the generated
-                mark + name lockup when set — the comp's 52px wordmark image. */}
-            {site.logoDataUrl ? (
+            {/* COMP-RESTYLE-1 — a dark/unknown-tone uploaded logo renders as
+                the comp's bare 52px wordmark, replacing the crest + name.
+                Reversed (light-ink) artwork can't sit bare on the cream shell,
+                so it keeps the FIRM-BRANDING-1 plated tile + name lockup. */}
+            {site.logoDataUrl && site.logoTone !== 'light' ? (
               <div className="fl-brand-row">
                 <img src={site.logoDataUrl} alt="" className="fl-logo" />
-                {/* The logo image carries the visual name; keep the page's h1
-                    for structure/AT without double-rendering it. */}
                 <h1 className="sr-only">{site.firmName}</h1>
               </div>
             ) : (
               <div className="fl-brand-row">
-                <FirmMark brand={brand} />
+                <FirmMark
+                  brand={brand}
+                  brandColor={site.headerColor}
+                  logoDataUrl={site.logoDataUrl}
+                  logoTone={site.logoTone}
+                />
                 <h1 className="fl-name">{site.firmName}</h1>
               </div>
             )}

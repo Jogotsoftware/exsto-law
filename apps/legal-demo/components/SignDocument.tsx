@@ -20,6 +20,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
+import { logoChipClass } from '@/lib/firmBranding'
+import { logoPlateVars } from '@/lib/brandColor'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { DocumentCanvas, DocumentSheet } from '@/components/DocumentSheet'
@@ -97,6 +99,12 @@ export interface SignableDoc {
   // any other existing caller keeps compiling; the component falls back to
   // the product tagline when absent.
   firmName?: string | null
+  // FIRM-BRANDING-1 — the firm's logo, so the page where a client actually
+  // signs shows the FIRM's mark rather than the product crest. Optional for the
+  // same compile-compatibility reason.
+  firmLogoDataUrl?: string | null
+  firmLogoTone?: 'light' | 'dark' | null
+  brandColor?: string | null
 }
 
 // The signer's own boxes all render in tone 1 (their color); the §4 multi-
@@ -335,10 +343,22 @@ export function SignDocument({
       <div className="public-draft-head">
         <div>
           <div className="pd-brandrow">
-            <span className="cp-crest" aria-hidden>
-              <ScaleIcon size={18} />
-            </span>
-            <div className="public-draft-firm">{doc.firmName ?? PRODUCT_TAGLINE}</div>
+            {doc.firmLogoDataUrl ? (
+              <img
+                src={doc.firmLogoDataUrl}
+                alt=""
+                className={`pd-brand-logo${logoChipClass(doc.firmLogoTone, 'light')}`}
+                style={logoPlateVars(doc.brandColor)}
+                aria-hidden
+              />
+            ) : (
+              <>
+                <span className="cp-crest" aria-hidden>
+                  <ScaleIcon size={18} />
+                </span>
+                <div className="public-draft-firm">{doc.firmName ?? PRODUCT_TAGLINE}</div>
+              </>
+            )}
           </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{doc.documentTitle}</h1>
         </div>
