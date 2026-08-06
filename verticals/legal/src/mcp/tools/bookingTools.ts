@@ -1,5 +1,6 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
+  getFirmLogo,
   getService,
   getTenantSettings,
   listServices,
@@ -28,15 +29,30 @@ const listServicesTool: Tool<Record<string, never>, { services: ServiceDefinitio
 // address/phone/email); honest nulls when a firm hasn't set them.
 const firmBrandingTool: Tool<
   Record<string, never>,
-  { firmName: string | null; attorneyName: string | null; headerColor: string | null }
+  {
+    firmName: string | null
+    attorneyName: string | null
+    headerColor: string | null
+    logoDataUrl: string | null
+    logoTone: 'light' | 'dark' | null
+  }
 > = {
   name: 'legal.public.firm_branding',
   description:
-    "The resolved firm's public identity for the booking page: firm name, attorney display name, and brand color. Client-safe (display fields only).",
+    "The resolved firm's public identity for the booking page: firm name, attorney display name, brand color, and logo. Client-safe (display fields only).",
   mode: 'read',
   handler: async (ctx: ActionContext) => {
-    const s = await getTenantSettings(ctx)
-    return { firmName: s.firmName, attorneyName: s.attorneyName, headerColor: s.headerColor }
+    // FIRM-BRANDING-1 — the logo comes from getFirmLogo (firm profile, legacy
+    // invoice-template logo as the fallback rung), the same resolution the
+    // attorney console uses, so the funnel and the console can never disagree.
+    const [s, logoDataUrl] = await Promise.all([getTenantSettings(ctx), getFirmLogo(ctx)])
+    return {
+      firmName: s.firmName,
+      attorneyName: s.attorneyName,
+      headerColor: s.headerColor,
+      logoDataUrl,
+      logoTone: s.logoTone,
+    }
   },
 }
 

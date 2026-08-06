@@ -13,6 +13,7 @@
 // rendering under the wrong identity — same posture as the /book front door.
 import type { ActionContext } from '@exsto/substrate'
 import { resolvePublicFirm, resolvePublicIntakeActor } from './publicBooking.js'
+import { getFirmLogo } from './firmBranding.js'
 import { getTenantSettings, type TenantSettings } from './tenantSettings.js'
 import { listServices, type ServiceDefinition } from './services.js'
 
@@ -32,6 +33,11 @@ export interface PublicFirmSite {
   attorneyName: string | null
   // Server-validated #rrggbb (handlers/firmProfile.ts) — a display color only.
   headerColor: string | null
+  // FIRM-BRANDING-1 — the firm's logo as an image data URL (server-validated to
+  // a raster image type), or null for the crest fallback. A display asset only.
+  logoDataUrl: string | null
+  // 'light' | 'dark' for that logo's artwork; null = unknown (rendered bare).
+  logoTone: 'light' | 'dark' | null
   // Only the contact fields the firm has SET render publicly; the landing page
   // hides the block entirely when all three are null.
   contact: {
@@ -65,6 +71,10 @@ export function toPublicFirmSite(args: {
   resolvedFirmName: string
   settings: TenantSettings
   services: ServiceDefinition[]
+  // FIRM-BRANDING-1 — resolved separately from `settings` on purpose: the logo
+  // is a ~100 KB data URL and does not ride in TenantSettings (see
+  // api/firmBranding.ts). Optional so existing callers/tests stay valid.
+  logoDataUrl?: string | null
 }): PublicFirmSite {
   const { slug, resolvedFirmName, settings, services } = args
   return {
@@ -74,6 +84,8 @@ export function toPublicFirmSite(args: {
     about: settings.about,
     attorneyName: settings.attorneyName,
     headerColor: settings.headerColor,
+    logoDataUrl: args.logoDataUrl ?? null,
+    logoTone: settings.logoTone,
     contact: {
       phone: settings.firmPhone,
       email: settings.firmEmail,
@@ -93,6 +105,16 @@ export async function getPublicFirmSite(slug: string): Promise<PublicFirmSite | 
     tenantId: firm.tenantId,
     actorId: await resolvePublicIntakeActor(firm.tenantId),
   }
-  const [settings, services] = await Promise.all([getTenantSettings(ctx), listServices(ctx)])
-  return toPublicFirmSite({ slug, resolvedFirmName: firm.firmName, settings, services })
+  const [settings, services, logoDataUrl] = await Promise.all([
+    getTenantSettings(ctx),
+    listServices(ctx),
+    getFirmLogo(ctx),
+  ])
+  return toPublicFirmSite({
+    slug,
+    resolvedFirmName: firm.firmName,
+    settings,
+    services,
+    logoDataUrl,
+  })
 }

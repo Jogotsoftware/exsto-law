@@ -23,6 +23,7 @@ import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 import { brandVars, isHexColor } from '@/lib/brandColor'
+import { logoChipClass } from '@/lib/firmBranding'
 import { RailShellProvider } from '@/components/RailShellState'
 import { RailBrandLockup } from '@/components/RailBrandLockup'
 
@@ -198,6 +199,10 @@ interface HomeSummary {
   }
   assistantEnabled: boolean
   headerColor: string | null
+  // FIRM-BRANDING-1 — the firm's logo, shown in the portal band in place of the
+  // generic scales crest so the client sees THEIR firm.
+  logoDataUrl: string | null
+  logoTone: 'light' | 'dark' | null
 }
 
 interface NotificationItem {
@@ -358,9 +363,20 @@ export default function ClientPortalPage() {
                   onClick={() => setView({ kind: 'home' })}
                   aria-label={t('portal.nav.home', undefined, 'Home')}
                 >
-                  <span className="li-cp-brand-crest" aria-hidden>
-                    <ScaleIcon size={24} />
-                  </span>
+                  {/* FIRM-BRANDING-1: the firm's own mark when they have
+                      uploaded one, the product crest otherwise. */}
+                  {home?.logoDataUrl ? (
+                    <img
+                      src={home.logoDataUrl}
+                      alt=""
+                      className={`li-cp-brand-logo${logoChipClass(home.logoTone, 'dark')}`}
+                      aria-hidden
+                    />
+                  ) : (
+                    <span className="li-cp-brand-crest" aria-hidden>
+                      <ScaleIcon size={24} />
+                    </span>
+                  )}
                   <span className="li-cp-brand-text">
                     <span className="li-cp-brand-name">{me?.firmName ?? ' '}</span>
                     <span className="li-cp-brand-sub">

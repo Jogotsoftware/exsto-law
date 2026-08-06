@@ -23,6 +23,12 @@ export interface InvoiceTemplateConfig {
   firmPhone: string
   // A small logo as a data URL (data:image/png;base64,…) or null for none.
   logoDataUrl: string | null
+  // FIRM-BRANDING-1 — 'light' when the logo is reversed artwork (white/light
+  // ink drawn for a dark website header). Roughly half of firm logos are, and
+  // one of those printed straight onto a white invoice is INVISIBLE. When the
+  // tone says light, the logo prints inside a filled letterhead block in the
+  // firm's accent color instead. 'dark'/null print bare on the page.
+  logoTone: 'light' | 'dark' | null
   accentColor: string
   columns: InvoiceTemplateColumns
   headerNote: string
@@ -30,10 +36,16 @@ export interface InvoiceTemplateConfig {
 }
 
 export const DEFAULT_INVOICE_TEMPLATE: InvoiceTemplateConfig = {
-  firmName: 'Pacheco Law',
+  // FIRM-BRANDING-1 — no firm-name default. This used to read 'Pacheco Law',
+  // which would print the demo firm's name on a SECOND firm's invoices the
+  // moment their profile had a gap (the FIRM_DEFAULTS hazard, #282-285). The
+  // name now comes from Settings → Firm Details; unknown renders as nothing.
+  firmName: '',
   firmAddress: '',
   firmPhone: '',
   logoDataUrl: null,
+  logoTone: null,
+  // The product navy, used only when the firm has set no brand color.
   accentColor: '#1a3a6b',
   columns: { matter: true, quantity: true, rate: true },
   headerNote: '',
@@ -51,6 +63,7 @@ export function resolveInvoiceTemplate(
     firmAddress: cfg?.firmAddress ?? d.firmAddress,
     firmPhone: cfg?.firmPhone ?? d.firmPhone,
     logoDataUrl: cfg?.logoDataUrl ?? d.logoDataUrl,
+    logoTone: cfg?.logoTone === 'light' || cfg?.logoTone === 'dark' ? cfg.logoTone : d.logoTone,
     accentColor: cfg?.accentColor?.trim() || d.accentColor,
     columns: { ...d.columns, ...(cfg?.columns ?? {}) },
     headerNote: cfg?.headerNote ?? d.headerNote,
@@ -83,12 +96,55 @@ function kindLabel(kind: string): string {
   return kind.replace(/_/g, ' ')
 }
 
-function buildStyles(accent: string) {
+// FIRM-BRANDING-1 — the fill behind reversed (light-ink) artwork on the invoice.
+// A firm's brand color can itself be pale, and white artwork on pale blue is as
+// unreadable on paper as on screen — so a light color is darkened until it can
+// carry light ink; an already-dark brand color is used as-is. Mirrors
+// apps/legal-demo/lib/brandColor.plateHex so screen and paper agree.
+function luminance(hex: string): number {
+  const ch = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
+  return 0.299 * ch(1) + 0.587 * ch(3) + 0.114 * ch(5)
+}
+
+function darken(hex: string, amount: number): string {
+  const ch = (i: number): string =>
+    Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - amount))
+      .toString(16)
+      .padStart(2, '0')
+  return `#${ch(1)}${ch(3)}${ch(5)}`
+}
+
+export function logoPlateColor(accent: string): string {
+  if (!/^#[0-9a-f]{6}$/i.test(accent)) return '#14213d'
+  let out = accent
+  for (let i = 0; i < 6 && luminance(out) > 0.32; i++) out = darken(out, 0.25)
+  return out
+}
+
+function buildStyles(rawAccent: string) {
+  // FIRM-BRANDING-1 — every accent use below either carries WHITE text (the
+  // table header) or IS text on white paper (the INVOICE title, the totals).
+  // A pale brand color made both unreadable — the pilot firm's legacy invoice
+  // accent (#8ac6f4) printed a white-on-baby-blue table header. Darkening a
+  // light accent to a legible ink keeps the firm's hue and makes the document
+  // readable; an already-dark brand color passes through untouched.
+  const accent = logoPlateColor(rawAccent)
   return StyleSheet.create({
     page: { padding: 40, fontSize: 10, color: '#1f2937', fontFamily: 'Helvetica' },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     firmBlock: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    logo: { width: 48, height: 48, objectFit: 'contain' },
+    // FIRM-BRANDING-1 — a 48x48 square squashed every real firm logo (they are
+    // wide wordmarks, not app icons: Pacheco's is 1616x432, i.e. ~12 pt tall in
+    // a 48 pt box — an illegible smudge). A wide box with objectFit:'contain'
+    // letterboxes tall marks and lets wordmarks read at their natural ratio.
+    logo: { width: 150, height: 46, objectFit: 'contain' },
+    // Letterhead block for reversed (light-ink) artwork — see logoTone.
+    logoPlate: {
+      backgroundColor: accent,
+      borderRadius: 6,
+      paddingVertical: 7,
+      paddingHorizontal: 12,
+    },
     firmName: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: accent },
     firmMeta: { fontSize: 9, color: '#6b7280', marginTop: 2 },
     invoiceTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', color: accent, textAlign: 'right' },
@@ -193,12 +249,26 @@ export async function renderInvoicePdf(
           View,
           { key: 'firm', style: s.firmBlock },
           [
-            t.logoDataUrl ? h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl }) : null,
+            t.logoDataUrl
+              ? t.logoTone === 'light'
+                ? h(
+                    View,
+                    { key: 'logo', style: s.logoPlate },
+                    h(Image, { style: s.logo, src: t.logoDataUrl }),
+                  )
+                : h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl })
+              : null,
             h(
               View,
               { key: 'fb' },
               [
-                h(Text, { key: 'n', style: s.firmName }, t.firmName),
+                // FIRM-BRANDING-1 — the logo IS the wordmark when one is set
+                // (the same rule the console top bar follows), so the name line
+                // stands down rather than printing the firm's name twice. With
+                // no logo and no name set, nothing prints — never a placeholder.
+                !t.logoDataUrl && t.firmName
+                  ? h(Text, { key: 'n', style: s.firmName }, t.firmName)
+                  : null,
                 t.firmAddress ? h(Text, { key: 'a', style: s.firmMeta }, t.firmAddress) : null,
                 t.firmPhone ? h(Text, { key: 'p', style: s.firmMeta }, t.firmPhone) : null,
               ].filter(Boolean),

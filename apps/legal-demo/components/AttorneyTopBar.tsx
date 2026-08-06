@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import { RailBrandLockup } from '@/components/RailBrandLockup'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { logoChipClass, useFirmBranding } from '@/lib/firmBranding'
 import { parseTimestamp, formatDate } from '@/lib/datetime'
 import { SearchBar } from '@/components/SearchBar'
 import { BellIcon } from '@/components/icons'
@@ -47,43 +48,18 @@ export function AttorneyTopBar(): React.JSX.Element {
   const [unread, setUnread] = useState(0)
   const [notifOpen, setNotifOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
-  // FB-C — the resolved TENANT's firm name (legal.settings.get), never the
-  // hardcoded FIRM_NAME literal: this bar renders for every firm's attorneys,
-  // not just Pacheco's. Falls back to the product tagline while loading / if
-  // a firm has not set a name yet — never a hardcoded firm literal.
-  // UIWALK-1: when one is uploaded, the bar shows the firm logo (the same logo
-  // the invoice template owns) in place of the wordmark. The firm's brand
-  // color moved up to AttorneyShell (UIWALK-2) — CSS vars, not inline style.
-  const [firmName, setFirmName] = useState<string | null>(null)
-  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    // UIWALK-2: the brand color no longer lives here — AttorneyShell sets
-    // --li-brand on .li-shell and the .li-topbar tail rule consumes it.
-    callAttorneyMcp<{ settings: { firmName: string | null } }>({
-      toolName: 'legal.settings.get',
-    })
-      .then((r) => {
-        if (cancelled) return
-        setFirmName(r.settings.firmName)
-      })
-      .catch(() => {
-        /* leave the fallback tagline showing */
-      })
-    callAttorneyMcp<{ template: { logoDataUrl: string | null } }>({
-      toolName: 'legal.firm.get_invoice_template',
-    })
-      .then((r) => {
-        if (!cancelled) setLogoDataUrl(r.template.logoDataUrl)
-      })
-      .catch(() => {
-        /* no logo — the wordmark shows */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // FB-C — the resolved TENANT's firm name, never the hardcoded FIRM_NAME
+  // literal: this bar renders for every firm's attorneys, not just Pacheco's.
+  // Falls back to the product tagline while loading / if a firm has not set a
+  // name yet — never a hardcoded firm literal.
+  // UIWALK-1: when one is uploaded, the bar shows the firm logo in place of
+  // the wordmark. The firm's brand color moved up to AttorneyShell (UIWALK-2)
+  // — CSS vars, not inline style.
+  // FIRM-BRANDING-1: name + logo come from the shared branding store (one read
+  // of legal.firm.get_branding for the whole shell, refreshed in place when
+  // Settings → Firm Details saves), not from the invoice-template config the
+  // logo used to be buried in.
+  const { firmName, logoDataUrl, logoTone } = useFirmBranding()
 
   // Load the attorney's in-app notifications (resolved beta feedback).
   useEffect(() => {
@@ -138,7 +114,11 @@ export function AttorneyTopBar(): React.JSX.Element {
       <RailBrandLockup idPrefix="att" pinLabel="Pin sidebar open" unpinLabel="Unpin sidebar" />
       <div className="li-topbar-firm">
         {logoDataUrl ? (
-          <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="li-topbar-logo" />
+          <img
+            src={logoDataUrl}
+            alt={firmName ?? 'Firm logo'}
+            className={`li-topbar-logo${logoChipClass(logoTone, 'dark')}`}
+          />
         ) : (
           (firmName ?? PRODUCT_TAGLINE)
         )}

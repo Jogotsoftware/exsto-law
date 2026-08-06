@@ -102,6 +102,12 @@ interface FirmProfileSetPayload {
   portal_assistant_instructions?: unknown
   // UIWALK-1 (migration 0196) — the firm's top-bar color as '#rrggbb'; '' clears.
   firm_header_color?: string | null
+  // FIRM-BRANDING-1 (migration 0202) — the firm's logo as an image data URL;
+  // '' clears (chrome falls back to the crest / wordmark).
+  firm_logo?: string | null
+  // FIRM-BRANDING-1 (migration 0203) — 'light' | 'dark', the tone of the ink in
+  // that logo, measured by the uploader; '' clears (unknown → render bare).
+  firm_logo_tone?: string | null
   // FIRM-LANDING-2 (migration 0200) — the public landing page's hero tagline
   // and about paragraph. Plain text, trimmed, '' clears; length-capped below
   // (these render verbatim on the firm's public page — a paste-a-document
@@ -121,6 +127,8 @@ const PROFILE_FIELDS = [
   'assistant_instructions',
   'portal_assistant_instructions',
   'firm_header_color',
+  'firm_logo',
+  'firm_logo_tone',
   'firm_tagline',
   'firm_about',
 ] as const
@@ -142,6 +150,19 @@ const INSTRUCTIONS_MAX_ITEMS = 20
 // REJECTED, not silently truncated (see normalizeFirmProfileFieldValue).
 const TAGLINE_CHAR_CAP = 160
 const ABOUT_CHAR_CAP = 4000
+
+// FIRM-BRANDING-1 — the firm logo is stored inline as an image data URL (the
+// same shape the invoice template has always stored), so it needs no blob
+// store and every surface that reads the profile can render it directly. Two
+// guards, both REJECT rather than truncate:
+//   * only a raster image data URL — an arbitrary string here would be
+//     interpolated into `src` on every public page (svg+xml is excluded on
+//     purpose: an SVG is executable markup, not a picture);
+//   * a size cap, because this value rides in the settings payload of every
+//     branded surface. 700 KB of base64 ≈ a 500 KB image, the cap the uploader
+//     has always enforced client-side.
+const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/
+const LOGO_CHAR_CAP = 700_000
 
 function normalizeInstructionsPills(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -207,6 +228,27 @@ export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown)
     }
     return text.toLowerCase()
   }
+  if (kind === 'firm_logo' && text) {
+    if (text.length > LOGO_CHAR_CAP) {
+      throw new Error(
+        `firm_logo is too large (${text.length} characters); use an image under 500 KB. Leave empty to clear.`,
+      )
+    }
+    if (!LOGO_DATA_URL_RE.test(text)) {
+      throw new Error(
+        'firm_logo must be a PNG/JPG/GIF/WEBP image data URL (data:image/png;base64,…); leave empty to clear.',
+      )
+    }
+    return text
+  }
+  if (kind === 'firm_logo_tone' && text) {
+    if (text !== 'light' && text !== 'dark') {
+      throw new Error(
+        `firm_logo_tone must be 'light' or 'dark' (got "${text}"); leave empty to clear.`,
+      )
+    }
+    return text
+  }
   if (kind === 'firm_jurisdiction' && text) {
     const code = normalizeJurisdiction(text)
     if (!code) {
@@ -224,7 +266,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color, firm_tagline, firm_about.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions, firm_header_color, firm_logo, firm_logo_tone, firm_tagline, firm_about.',
     )
   }
 

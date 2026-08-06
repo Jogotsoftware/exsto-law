@@ -1,9 +1,20 @@
 // Invoice template config + PDF rendering (Phase 3). Read/write the firm's invoice
-// branding, and render any invoice (or a sample, for the Settings live preview) to
-// a real PDF via the one renderer in billing/invoicePdf.ts.
+// LAYOUT/CONTENT settings, and render any invoice (or a sample, for the Settings
+// live preview) to a real PDF via the one renderer in billing/invoicePdf.ts.
+//
+// FIRM-BRANDING-1 — the invoice no longer OWNS firm identity. Firm name, address,
+// phone, logo and brand color are firm facts (Settings → Firm Details, on the
+// firm_profile singleton); this template owns only what is genuinely
+// invoice-specific: which columns print, the header note, and the payment
+// instructions. getInvoiceTemplate() OVERLAYS the firm's branding over whatever
+// is stored, so the preview, the emailed PDF and the client's download all render
+// the same identity the console header shows. Anything a firm saved into this
+// config before the change survives as the fallback rung (see resolveBranding
+// below) — nothing disappears, and nothing has to be backfilled.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { getInvoice } from '../queries/billing.js'
 import { getClientInvoiceByNumber } from '../queries/clientBilling.js'
+import { getTenantSettings, readFirmLogo } from './tenantSettings.js'
 import {
   renderInvoicePdf,
   resolveInvoiceTemplate,
@@ -18,10 +29,15 @@ export interface InvoicePdf {
   base64: string
 }
 
-// The firm's saved invoice template, resolved over defaults (so the UI always has
-// a complete config to edit and the renderer never sees an undefined field).
-export async function getInvoiceTemplate(ctx: ActionContext): Promise<InvoiceTemplateConfig> {
-  const stored = await withActionContext(ctx, async (client) => {
+// The RAW stored template config (or null when the firm has never saved one).
+// Two callers need the unoverlaid value: setInvoiceTemplate, which must merge an
+// edit over what is actually stored rather than over resolved firm branding
+// (otherwise saving the layout would freeze today's firm name/logo into the
+// template forever), and api/firmBranding.ts, for the legacy-logo fallback.
+export async function readStoredInvoiceTemplate(
+  ctx: ActionContext,
+): Promise<Partial<InvoiceTemplateConfig> | null> {
+  return withActionContext(ctx, async (client) => {
     const res = await client.query<{ value: Partial<InvoiceTemplateConfig> | null }>(
       `SELECT a.value
          FROM attribute a
@@ -38,22 +54,94 @@ export async function getInvoiceTemplate(ctx: ActionContext): Promise<InvoiceTem
     )
     return res.rows[0]?.value ?? null
   })
-  return resolveInvoiceTemplate(stored)
+}
+
+// Firm identity wins over anything stored on the template; the stored value is
+// the legacy rung for firms that set one before FIRM-BRANDING-1. A field that is
+// unset everywhere falls through to resolveInvoiceTemplate's defaults.
+function resolveBranding(
+  stored: Partial<InvoiceTemplateConfig> | null,
+  firm: {
+    firmName: string | null
+    firmAddress: string | null
+    firmPhone: string | null
+    headerColor: string | null
+    logoDataUrl: string | null
+    logoTone: 'light' | 'dark' | null
+  },
+): Partial<InvoiceTemplateConfig> {
+  const pick = (own: string | null, legacy: string | null | undefined): string | undefined => {
+    if (own && own.trim()) return own
+    return legacy ?? undefined
+  }
+  return {
+    ...(stored ?? {}),
+    firmName: pick(firm.firmName, stored?.firmName),
+    firmAddress: pick(firm.firmAddress, stored?.firmAddress),
+    firmPhone: pick(firm.firmPhone, stored?.firmPhone),
+    accentColor: pick(firm.headerColor, stored?.accentColor),
+    logoDataUrl: firm.logoDataUrl ?? stored?.logoDataUrl ?? null,
+    logoTone: firm.logoTone,
+  }
+}
+
+// The firm's EFFECTIVE invoice template: stored layout/content + firm branding,
+// resolved over defaults (so the UI always has a complete config to show and the
+// renderer never sees an undefined field).
+export async function getInvoiceTemplate(ctx: ActionContext): Promise<InvoiceTemplateConfig> {
+  const [stored, settings, ownLogo] = await Promise.all([
+    readStoredInvoiceTemplate(ctx),
+    getTenantSettings(ctx),
+    readFirmLogo(ctx),
+  ])
+  // `undefined` = the firm has never set a firm-level logo, so the legacy
+  // invoice logo may stand in; `null` = it was explicitly cleared, so it must not.
+  const logoDataUrl = ownLogo === undefined ? (stored?.logoDataUrl ?? null) : ownLogo
+  return resolveInvoiceTemplate(
+    resolveBranding(stored, {
+      firmName: settings.firmName,
+      firmAddress: settings.firmAddress,
+      firmPhone: settings.firmPhone,
+      headerColor: settings.headerColor,
+      logoDataUrl,
+      logoTone: settings.logoTone,
+    }),
+  )
 }
 
 // Save the firm's invoice template (through the core; append-only).
+// FIRM-BRANDING-1 — the branding keys are NOT writable here any more: the editor
+// no longer renders them, and a stray value in the payload (an old client, the
+// AI, a curl) must not silently re-create the duplicate source of truth this
+// change removed. They are dropped, and whatever was stored before is preserved
+// so the legacy fallback keeps working.
+const FIRM_OWNED_TEMPLATE_KEYS = [
+  'firmName',
+  'firmAddress',
+  'firmPhone',
+  'logoDataUrl',
+  'logoTone',
+  'accentColor',
+] as const
+
 export async function setInvoiceTemplate(
   ctx: ActionContext,
   config: Partial<InvoiceTemplateConfig>,
 ): Promise<InvoiceTemplateConfig> {
-  // Resolve over defaults so the stored value is always complete + well-formed.
-  const resolved = resolveInvoiceTemplate(config)
+  const stored = await readStoredInvoiceTemplate(ctx)
+  const incoming: Partial<InvoiceTemplateConfig> = { ...config }
+  for (const key of FIRM_OWNED_TEMPLATE_KEYS) delete incoming[key]
+  // Resolve over defaults so the stored value is always complete + well-formed,
+  // with the firm-owned keys carried across from what was already stored.
+  const resolved = resolveInvoiceTemplate({ ...(stored ?? {}), ...incoming })
   await submitAction(ctx, {
     actionKindName: 'legal.firm.set_invoice_template',
     intentKind: 'adjustment',
     payload: { config: resolved },
   })
-  return resolved
+  // Report back what the invoice will actually render (branding overlaid), not
+  // just what was stored — the editor shows the effective template.
+  return getInvoiceTemplate(ctx)
 }
 
 // Render one invoice to a PDF (base64) using the firm's saved template. Returns
@@ -176,10 +264,18 @@ const SAMPLE_INVOICE = {
 
 // Render the sample invoice with a (draft) template config — powers the editor's
 // live preview without saving.
+// FIRM-BRANDING-1 — the draft supplies the LAYOUT/CONTENT the attorney is
+// editing; the branding is always the firm's live identity (the editor has no
+// controls for it any more), so an unsaved column toggle previews against the
+// real logo/color instead of the renderer's defaults.
 export async function renderInvoiceTemplatePreviewBase64(
+  ctx: ActionContext,
   config: Partial<InvoiceTemplateConfig>,
 ): Promise<InvoicePdf> {
-  const buf = await renderInvoicePdf(SAMPLE_INVOICE, config)
+  const effective = await getInvoiceTemplate(ctx)
+  const draft: Partial<InvoiceTemplateConfig> = { ...config }
+  for (const key of FIRM_OWNED_TEMPLATE_KEYS) delete draft[key]
+  const buf = await renderInvoicePdf(SAMPLE_INVOICE, { ...effective, ...draft })
   return {
     filename: 'invoice-preview.pdf',
     contentType: 'application/pdf',
