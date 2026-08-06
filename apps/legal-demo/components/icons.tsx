@@ -354,6 +354,15 @@ export const LockIcon = (p: IconProps) => (
   </Svg>
 )
 
+// FIRM-LANDING-3 — the landing page's "Attorney sign in" pill.
+export const LogInIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+    <polyline points="10 17 15 12 10 7" />
+    <line x1="15" x2="3" y1="12" y2="12" />
+  </Svg>
+)
+
 export const CheckCircleIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M21.8 10A10 10 0 1 1 17 3.34" />

@@ -437,6 +437,15 @@ const en: Record<string, string> = {
   'confirm.account_existed':
     'This booking is linked to your existing portal account — sign in with your usual password.',
   'confirm.portal': 'Open your client portal',
+
+  // FIRM-LANDING-3 — the firm front door at {slug}.instruments.legal
+  'landing.attorney': 'Attorney sign in',
+  'landing.services_title': 'Legal Services',
+  'landing.services_body': 'View our list of fixed fee offerings or book a consultation.',
+  'landing.portal_title': 'Client portal',
+  'landing.portal_body': 'Sign in to view your matter, documents, and messages.',
+  'landing.about_title': 'About the firm',
+  'landing.contact_title': 'Contact',
 }
 
 const es: Record<string, string> = {
@@ -886,6 +895,15 @@ const es: Record<string, string> = {
   'confirm.account_existed':
     'Esta reserva quedó vinculada a tu cuenta del portal existente — inicia sesión con tu contraseña habitual.',
   'confirm.portal': 'Abre tu portal de cliente',
+
+  // FIRM-LANDING-3 — puerta de entrada del bufete
+  'landing.attorney': 'Acceso de abogado',
+  'landing.services_title': 'Servicios legales',
+  'landing.services_body': 'Vea nuestra lista de servicios con tarifa fija o reserve una consulta.',
+  'landing.portal_title': 'Portal del cliente',
+  'landing.portal_body': 'Inicie sesión para ver su caso, documentos y mensajes.',
+  'landing.about_title': 'Sobre el bufete',
+  'landing.contact_title': 'Contacto',
 }
 
 const dict: Record<Lang, Record<string, string>> = { en, es }
