@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 import { PortalFeedbackWidget } from '@/components/PortalFeedbackWidget'
 
+// FIRM-LANDING-3: a shared /portal/* link previews as "Client portal", not the
+// product default.
+export const metadata = { title: 'Client portal' }
+
 // Wraps every /portal/* page so the client-portal feedback widget is available
 // across the portal. The widget self-gates on the session, so it stays hidden on
 // the unauthenticated /portal/login and /portal/set-password pages.

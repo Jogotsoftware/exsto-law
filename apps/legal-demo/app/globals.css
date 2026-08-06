@@ -9395,28 +9395,6 @@ input[type='number'] {
   color: #e7ecf5;
   white-space: nowrap;
 }
-.li-rail-beta {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  background: linear-gradient(90deg, #4285f4, #2fa36b, #9b72cb, #ea4335, #4285f4);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: li-beta-shimmer 2.6s linear infinite;
-}
-@keyframes li-beta-shimmer {
-  0% {
-    background-position: 120% 0;
-  }
-  100% {
-    background-position: -120% 0;
-  }
-}
-
 .li-rail-nav {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -27457,17 +27435,19 @@ details.li-brief-research summary:hover {
 
    The geometry is derived, not eyeballed. See components/RailBrandLockup.tsx —
    the constants below are its arithmetic:
-     wordmark height 26px  ->  s = 26/64 = 0.40625, width 360s = 146.25px
+     wordmark height 30px  ->  s = 30/64 = 0.46875, width 360s = 168.75px
+                               (26px until the stage chip was removed — the
+                               freed run of bar goes to the wordmark)
      stars group           ->  translate(302 10) scale(0.9) in the asset
-     mark home box         ->  left 302s = 122.6875, top 10s = 4.0625,
-                               w 31.5(0.9)s = 11.5172, h 27.5(0.9)s = 10.0547
+     mark home box         ->  left 302s = 141.5625, top 10s = 4.6875,
+                               w 31.5(0.9)s = 13.2891, h 27.5(0.9)s = 11.6016
      collapsed             ->  26px wide over the icon column. The lockup starts
                                at x = 15, the rail's 20px nav icons are centered
                                at x = 32, so the mark's left must be x = 4 within
                                the lockup, giving
-                               scale 26/11.5172 = 2.2575,
-                               dx 4 - 122.6875 = -118.6875,
-                               dy (26 - 10.0547(2.2575))/2 - 4.0625 = -2.412
+                               scale 26/13.2891 = 1.9565,
+                               dx 4 - 141.5625 = -137.5625,
+                               dy (26 - 11.6016(1.9565))/2 - 4.6875 = -3.037
    Change the height and every number here changes with it.
 
    One colourway: the bar is navy or the firm's brand color, and both bars have
@@ -27497,7 +27477,7 @@ details.li-brief-research summary:hover {
     background-color 0.2s ease;
 }
 .li-brandlock.is-open .li-brandlock-btn {
-  width: 146.25px;
+  width: 168.75px;
 }
 .li-brandlock-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
@@ -27510,7 +27490,7 @@ details.li-brief-research summary:hover {
 .li-brandlock-inner {
   position: relative;
   display: block;
-  width: 146.25px;
+  width: 168.75px;
   flex: 0 0 auto;
   pointer-events: none;
 }
@@ -27518,8 +27498,8 @@ details.li-brief-research summary:hover {
   position: absolute;
   left: 0;
   top: 0;
-  width: 146.25px;
-  height: 26px;
+  width: 168.75px;
+  height: 30px;
   opacity: 0;
   transition: opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -27528,34 +27508,16 @@ details.li-brief-research summary:hover {
 }
 .li-brandlock-mark {
   position: absolute;
-  left: 122.6875px;
-  top: 4.0625px;
-  width: 11.5172px;
-  height: 10.0547px;
+  left: 141.5625px;
+  top: 4.6875px;
+  width: 13.2891px;
+  height: 11.6016px;
   transform-origin: 0 0;
-  transform: translate(-118.6875px, -2.412px) scale(2.2575);
+  transform: translate(-137.5625px, -3.037px) scale(1.9565);
   transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .li-brandlock.is-open .li-brandlock-mark {
   transform: none;
-}
-/* Stage chip, riding the open end of the lockup. */
-.li-brandlock-chip {
-  flex: 0 0 auto;
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-weight: 700;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.82);
-  opacity: 0;
-  transition: opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-.li-brandlock.is-open .li-brandlock-chip {
-  opacity: 1;
 }
 /* The bar's own left padding yields to the lockup, which carries its own. */
 .li-topbar {

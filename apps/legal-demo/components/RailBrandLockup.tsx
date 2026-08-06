@@ -34,7 +34,7 @@
 import { useRailShell } from '@/components/RailShellState'
 
 // Wordmark render height, px. See the geometry note above before changing it.
-const LOCKUP_H = 26
+const LOCKUP_H = 30
 
 // The stars, in the wordmark's own local coordinates (the `<g>`'s space), so
 // the mark is pixel-identical to the one the asset carries.
@@ -62,14 +62,11 @@ export function RailBrandLockup({
   idPrefix,
   pinLabel,
   unpinLabel,
-  stage,
 }: {
   /** Keeps the SVG gradient ids unique per mount — colliding ids are a nasty bug class. */
   idPrefix: string
   pinLabel: string
   unpinLabel: string
-  /** Optional chip beside the wordmark (the product stage). */
-  stage?: string
 }): React.JSX.Element {
   const { expanded, pinned, togglePin, onRailEnter, onRailLeave } = useRailShell()
   const big = `${idPrefix}-gem-1`
@@ -126,7 +123,6 @@ export function RailBrandLockup({
           </svg>
         </span>
       </button>
-      {stage && <span className="li-brandlock-chip">{stage}</span>}
     </div>
   )
 }
