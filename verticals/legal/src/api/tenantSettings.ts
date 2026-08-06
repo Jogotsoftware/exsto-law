@@ -34,6 +34,15 @@ export interface TenantSettings {
   // light one. Tiny; unlike the logo itself it DOES ride in TenantSettings, so
   // every consumer that already reads settings gets it with no extra query.
   logoTone: 'light' | 'dark' | null
+  // BRANDING-SECTION-1 (migration 0204) — the firm's SECOND brand color. Every
+  // companion tone (console rail, landing deep/icon inks, funnel deep) was
+  // derived by darkening headerColor; when this is set it wins instead. No
+  // default: unset keeps the derivation, so no existing firm's chrome moves.
+  secondaryColor: string | null
+  // BRANDING-SECTION-1 (migration 0204) — measured tone of the HEADER logo
+  // (the console-only second upload). Advisory only, like logoTone: nothing
+  // paints from it. The logo itself is read separately (readFirmLogoSecondary).
+  logoSecondaryTone: 'light' | 'dark' | null
   // FIRM-LANDING-2 (migration 0200) — the public landing page's hero tagline
   // and about paragraph. No defaults: unset renders the generic hero line /
   // hides the about section (honest unset, same posture as the rest).
@@ -56,6 +65,8 @@ const EMPTY: TenantSettings = {
   portalAssistantInstructions: null,
   headerColor: null,
   logoTone: null,
+  secondaryColor: null,
+  logoSecondaryTone: null,
   tagline: null,
   about: null,
   defaultHourlyRateUsd: null,
@@ -98,6 +109,8 @@ export interface FirmProfileFields {
   portalAssistantInstructions: string[] | null
   headerColor: string | null
   logoTone: 'light' | 'dark' | null
+  secondaryColor: string | null
+  logoSecondaryTone: 'light' | 'dark' | null
   tagline: string | null
   about: string | null
 }
@@ -114,6 +127,8 @@ const PROFILE_ATTR_KINDS = [
   'portal_assistant_instructions',
   'firm_header_color',
   'firm_logo_tone',
+  'firm_secondary_color',
+  'firm_logo_secondary_tone',
   'firm_tagline',
   'firm_about',
 ] as const
@@ -138,6 +153,8 @@ interface FirmProfileAttrReads {
   portalAssistantInstructions: string[] | null | undefined
   headerColor: string | null | undefined
   logoTone: 'light' | 'dark' | null | undefined
+  secondaryColor: string | null | undefined
+  logoSecondaryTone: 'light' | 'dark' | null | undefined
   tagline: string | null | undefined
   about: string | null | undefined
 }
@@ -236,19 +253,25 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       portalAssistantInstructions: listOrTextVal('portal_assistant_instructions'),
       headerColor: val('firm_header_color'),
       logoTone: toneVal('firm_logo_tone'),
+      secondaryColor: val('firm_secondary_color'),
+      logoSecondaryTone: toneVal('firm_logo_secondary_tone'),
       tagline: val('firm_tagline'),
       about: val('firm_about'),
     }
   })
 }
 
-// FIRM-BRANDING-1 — the firm logo (migration 0202), read on its OWN so the
-// ~100 KB data URL never rides in legal.settings.get. Tri-state collapses to
-// value-or-null here: a cleared row and a never-set row both mean "no firm
-// logo", and the caller (getFirmBranding) decides whether the legacy
-// invoice-template logo may stand in — which it must NOT once the attorney has
-// explicitly cleared one. Returns `undefined` only when no row exists at all.
-export async function readFirmLogo(ctx: ActionContext): Promise<string | null | undefined> {
+// FIRM-BRANDING-1 — a firm logo attribute (migration 0202; BRANDING-SECTION-1
+// adds the header variant, 0204), read on its OWN so the ~100 KB data URL never
+// rides in legal.settings.get. Tri-state collapses to value-or-null here: a
+// cleared row and a never-set row both mean "no logo", and the caller
+// (getFirmBranding) decides whether a fallback may stand in — which it must NOT
+// once the attorney has explicitly cleared one. Returns `undefined` only when no
+// row exists at all.
+async function readFirmLogoAttr(
+  ctx: ActionContext,
+  kindName: 'firm_logo' | 'firm_logo_secondary',
+): Promise<string | null | undefined> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{ value: string | null }>(
       `WITH fp AS (
@@ -263,16 +286,31 @@ export async function readFirmLogo(ctx: ActionContext): Promise<string | null | 
          FROM attribute a
          JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
         WHERE a.tenant_id = $1 AND a.entity_id = (SELECT id FROM fp)
-          AND akd.kind_name = 'firm_logo'
+          AND akd.kind_name = $2
           AND (a.valid_to IS NULL OR a.valid_to > now())
         ORDER BY a.valid_from DESC
         LIMIT 1`,
-      [ctx.tenantId],
+      [ctx.tenantId, kindName],
     )
     if (res.rows.length === 0) return undefined // never set → legacy fallback allowed
     const v = res.rows[0]?.value
     return typeof v === 'string' && v.trim() ? v : null // '' row = explicit clear
   })
+}
+
+/** The firm-wide logo (migration 0202). See readFirmLogoAttr for the tri-state. */
+export async function readFirmLogo(ctx: ActionContext): Promise<string | null | undefined> {
+  return readFirmLogoAttr(ctx, 'firm_logo')
+}
+
+/**
+ * BRANDING-SECTION-1 — the HEADER logo (migration 0204): a second upload used
+ * only on the attorney console top bar. No legacy rung of its own; unset simply
+ * means the bar falls back to the firm logo, so the tri-state collapses to
+ * value-or-null for every caller.
+ */
+export async function readFirmLogoSecondary(ctx: ActionContext): Promise<string | null> {
+  return (await readFirmLogoAttr(ctx, 'firm_logo_secondary')) ?? null
 }
 
 // Substrate profile value wins; an EXPLICIT CLEAR stays cleared (resolves null,
@@ -302,6 +340,9 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
     ),
     headerColor: field(profile.headerColor, base.headerColor),
     logoTone: profile.logoTone === undefined ? base.logoTone : profile.logoTone,
+    secondaryColor: field(profile.secondaryColor, base.secondaryColor),
+    logoSecondaryTone:
+      profile.logoSecondaryTone === undefined ? base.logoSecondaryTone : profile.logoSecondaryTone,
     tagline: field(profile.tagline, base.tagline),
     about: field(profile.about, base.about),
   }
@@ -359,6 +400,8 @@ export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFie
     portalAssistantInstructions: s.portalAssistantInstructions,
     headerColor: s.headerColor,
     logoTone: s.logoTone,
+    secondaryColor: s.secondaryColor,
+    logoSecondaryTone: s.logoSecondaryTone,
     tagline: s.tagline,
     about: s.about,
   }
@@ -392,6 +435,14 @@ export interface SetFirmProfileInput {
   logoDataUrl?: string | null
   // FIRM-BRANDING-1 — 'light' | 'dark' for that logo's artwork; empty clears.
   logoTone?: string | null
+  // BRANDING-SECTION-1 (migration 0204) — hex secondary brand color; empty
+  // clears (companion tones go back to being derived from headerColor).
+  secondaryColor?: string | null
+  // BRANDING-SECTION-1 (migration 0204) — the HEADER logo (console top bar
+  // only) as an image data URL, and its measured tone; empty clears either.
+  // Same size reasoning as logoDataUrl: not part of TenantSettings.
+  logoSecondaryDataUrl?: string | null
+  logoSecondaryTone?: string | null
   // FIRM-LANDING-2 — public landing page hero tagline + about paragraph.
   // Empty clears (generic hero line / hidden about section).
   tagline?: string | null
@@ -427,6 +478,13 @@ export async function setFirmProfile(
       ...(input.headerColor !== undefined ? { firm_header_color: input.headerColor } : {}),
       ...(input.logoDataUrl !== undefined ? { firm_logo: input.logoDataUrl } : {}),
       ...(input.logoTone !== undefined ? { firm_logo_tone: input.logoTone } : {}),
+      ...(input.secondaryColor !== undefined ? { firm_secondary_color: input.secondaryColor } : {}),
+      ...(input.logoSecondaryDataUrl !== undefined
+        ? { firm_logo_secondary: input.logoSecondaryDataUrl }
+        : {}),
+      ...(input.logoSecondaryTone !== undefined
+        ? { firm_logo_secondary_tone: input.logoSecondaryTone }
+        : {}),
       ...(input.tagline !== undefined ? { firm_tagline: input.tagline } : {}),
       ...(input.about !== undefined ? { firm_about: input.about } : {}),
     },
@@ -468,6 +526,8 @@ async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
       portalAssistantInstructions: null,
       headerColor: null,
       logoTone: null,
+      secondaryColor: null,
+      logoSecondaryTone: null,
       tagline: null,
       about: null,
       defaultHourlyRateUsd:

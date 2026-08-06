@@ -19,14 +19,14 @@ import { useI18n } from '@/lib/i18n'
 export function BookingChooser({
   firmName,
   brandColor = null,
+  secondaryColor = null,
   logoDataUrl = null,
-  logoTone = null,
   onContinueAsNewClient,
 }: {
   firmName: string | null
   brandColor?: string | null
+  secondaryColor?: string | null
   logoDataUrl?: string | null
-  logoTone?: 'light' | 'dark' | null
   onContinueAsNewClient: () => void
 }) {
   const { t } = useI18n()
@@ -34,7 +34,7 @@ export function BookingChooser({
   const [showSignIn, setShowSignIn] = useState(false)
 
   return (
-    <main className="bk-shell" style={bookBrandVars(brandColor)}>
+    <main className="bk-shell" style={bookBrandVars(brandColor, secondaryColor)}>
       <Wavefield
         brand="#7BAFD4"
         brandDeep="#5A97C4"
@@ -43,12 +43,7 @@ export function BookingChooser({
         variant="intake"
       />
       <div className="bk-frame">
-        <BookTopbar
-          firmName={firmName}
-          brandColor={brandColor}
-          logoDataUrl={logoDataUrl}
-          logoTone={logoTone}
-        />
+        <BookTopbar firmName={firmName} brandColor={brandColor} logoDataUrl={logoDataUrl} />
         <section className="bk-card">
           <div className="bk-stage">
             <div className="bk-stage-head">

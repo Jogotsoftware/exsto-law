@@ -585,3 +585,21 @@ plan this stale finding sits under).
   fixing it means first deciding whether it replaces the live notification templates
   (`api/notificationTemplates.ts`) and then threading per-tenant branding through the
   notification variables bag — a real wave, not a one-line addition.
+- **2026-08-06 (BRANDING-SECTION-1, #TBD):** firm branding became its own visible section of
+  Settings → Firm Details, with a SECOND brand color (`firm_secondary_color`) and a SECOND
+  logo slot for the console header bar (`firm_logo_secondary` + `firm_logo_secondary_tone`),
+  migration 0204. The automatic plate/box the product painted behind reversed logo artwork
+  was removed everywhere (console bar, portal band, pay page, booking funnel, landing page,
+  login card, invoice PDF) — uploaded marks now render bare. New fields on
+  `legal.settings.firm_profile.set` (`secondaryColor`, `logoSecondaryDataUrl`,
+  `logoSecondaryTone`); `legal.firm.get_branding` and `legal.public.firm_branding` both carry
+  `secondaryColor`; `PublicFirmSite` gained it too (closed-shape test extended deliberately —
+  the HEADER logo is console chrome and stays OUT of the public shape). **Missing:** still no
+  firm-profile ClientTool in the attorney chat (third entry in a row opening this gap — see the
+  2026-08-05 FIRM-LANDING-2 and 2026-08-06 FIRM-BRANDING-1 bullets), so "change my brand
+  color" / "set my secondary color" remain not chat-doable —
+  `verticals/legal/src/api/assistantChat.ts:710`. This has now been asked for by three separate
+  shipped features and should be folded into the gap map proper as a real work item rather than
+  logged a fourth time. Deliberate non-gaps: logo uploads are files, not something a chat turn
+  can produce, and branding is never a merge token (documents stay visually neutral —
+  `apps/legal-demo/tests/documentNeutrality.test.ts`).

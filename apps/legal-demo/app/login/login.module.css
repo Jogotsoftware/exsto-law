@@ -105,17 +105,6 @@
   object-fit: contain;
   display: block;
 }
-/* Plate behind reversed (light-ink) firm artwork — FIRM-BRANDING-1. */
-.logoPlate {
-  display: flex;
-  align-items: center;
-  padding: 8px 14px;
-  border-radius: 12px;
-  background: var(--li-logo-plate, #14213d);
-}
-.logoPlate .firmLogo {
-  height: 40px;
-}
 
 .title {
   font-size: 30px;

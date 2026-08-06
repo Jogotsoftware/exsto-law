@@ -16,7 +16,7 @@
 // '') resolves to null and does NOT resurrect the old invoice logo — otherwise
 // "remove logo" could never take. No history is rewritten either way.
 import type { ActionContext } from '@exsto/substrate'
-import { getTenantSettings, readFirmLogo } from './tenantSettings.js'
+import { getTenantSettings, readFirmLogo, readFirmLogoSecondary } from './tenantSettings.js'
 import { readStoredInvoiceTemplate } from './invoiceTemplate.js'
 
 export interface FirmBranding {
@@ -24,12 +24,22 @@ export interface FirmBranding {
   // Server-validated #rrggbb (handlers/firmProfile.ts) — null means the
   // product's standard navy chrome.
   headerColor: string | null
+  // BRANDING-SECTION-1 (migration 0204) — the firm's SECOND brand color. Where
+  // a surface needs a companion tone it used to darken headerColor; this wins
+  // when set. Null keeps the derivation, so existing firms are unchanged.
+  secondaryColor: string | null
   // An image data URL, or null for "no logo" (crest / wordmark fallback).
   logoDataUrl: string | null
-  // 'light' = reversed artwork (needs a dark backdrop on light surfaces);
-  // 'dark' = made for paper (needs a light chip on dark chrome); null = unknown,
-  // which every surface renders bare.
+  // Measured tone of that artwork. ADVISORY ONLY as of BRANDING-SECTION-1 —
+  // nothing paints a plate or box from it any more; the Settings uploader uses
+  // it to warn that a light-ink mark will be hard to see on light pages.
   logoTone: 'light' | 'dark' | null
+  // BRANDING-SECTION-1 (migration 0204) — the optional HEADER logo: a second
+  // upload rendered only on the attorney console top bar, for firms whose main
+  // mark is the wrong variant for a narrow dark strip. Null = the bar shows
+  // logoDataUrl. Deliberately NOT public (see api/publicSite.ts).
+  headerLogoDataUrl: string | null
+  headerLogoTone: 'light' | 'dark' | null
 }
 
 // The firm's logo, resolved: the firm-level value first, the legacy invoice
@@ -43,13 +53,20 @@ export async function getFirmLogo(ctx: ActionContext): Promise<string | null> {
 }
 
 // Everything the chrome of one firm's surfaces needs, in one read. Client-safe
-// by construction: name + display color + logo, nothing else.
+// by construction: name + display colors + logos, nothing else.
 export async function getFirmBranding(ctx: ActionContext): Promise<FirmBranding> {
-  const [settings, logoDataUrl] = await Promise.all([getTenantSettings(ctx), getFirmLogo(ctx)])
+  const [settings, logoDataUrl, headerLogoDataUrl] = await Promise.all([
+    getTenantSettings(ctx),
+    getFirmLogo(ctx),
+    readFirmLogoSecondary(ctx),
+  ])
   return {
     firmName: settings.firmName,
     headerColor: settings.headerColor,
+    secondaryColor: settings.secondaryColor,
     logoDataUrl,
     logoTone: settings.logoTone,
+    headerLogoDataUrl,
+    headerLogoTone: settings.logoSecondaryTone,
   }
 }

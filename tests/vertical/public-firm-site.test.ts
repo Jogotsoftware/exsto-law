@@ -28,6 +28,8 @@ const EMPTY_SETTINGS: TenantSettings = {
   portalAssistantInstructions: null,
   headerColor: null,
   logoTone: null,
+  secondaryColor: null,
+  logoSecondaryTone: null,
   tagline: null,
   about: null,
   defaultHourlyRateUsd: null,
@@ -137,6 +139,11 @@ describe('toPublicFirmSite — public-safe closed shape', () => {
       // shape; nothing else about the firm profile joins them.
       'logoDataUrl',
       'logoTone',
+      // BRANDING-SECTION-1 — the firm's SECOND brand color is public BRANDING
+      // (the landing page's deep/icon inks take it), so it joins the closed
+      // shape. The HEADER logo (firm_logo_secondary) deliberately does NOT:
+      // it is attorney-console chrome, never public identity.
+      'secondaryColor',
       'services',
       'slug',
       'tagline',

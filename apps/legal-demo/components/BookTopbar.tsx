@@ -2,8 +2,7 @@
 
 import { ScaleIcon } from '@/components/icons'
 import { LanguageToggle } from '@/components/LanguageToggle'
-import { isHexColor, logoPlateVars } from '@/lib/brandColor'
-import { logoChipClass } from '@/lib/firmBranding'
+import { isHexColor } from '@/lib/brandColor'
 
 // Shared brand header for every .bk-shell surface (the wizard, the standalone
 // front door, and the chooser) — one crest + firm-name treatment so the funnel
@@ -16,7 +15,6 @@ export function BookTopbar({
   firmName,
   brandColor = null,
   logoDataUrl = null,
-  logoTone = null,
   showLanguageToggle = true,
 }: {
   firmName: string | null
@@ -24,8 +22,6 @@ export function BookTopbar({
   brandColor?: string | null
   // The firm's logo as an image data URL (server-validated); null = crest.
   logoDataUrl?: string | null
-  // Measured tone of that artwork; decides whether it needs a dark plate here.
-  logoTone?: 'light' | 'dark' | null
   // The standalone /book/[slug] front door has no i18n plumbing yet — a
   // working toggle there would flip a UI control that translates nothing.
   showLanguageToggle?: boolean
@@ -34,12 +30,7 @@ export function BookTopbar({
     <header className="bk-topbar">
       <div className="bk-brand">
         {logoDataUrl ? (
-          <img
-            src={logoDataUrl}
-            alt={firmName ?? 'Firm logo'}
-            className={`bk-brand-logo${logoChipClass(logoTone, 'light')}`}
-            style={logoPlateVars(brandColor)}
-          />
+          <img src={logoDataUrl} alt={firmName ?? 'Firm logo'} className="bk-brand-logo" />
         ) : (
           <>
             <span
