@@ -11,7 +11,8 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { brandVars } from '@/lib/brandColor'
+import { brandVars, isHexColor } from '@/lib/brandColor'
+import { RailShellProvider } from '@/components/RailShellState'
 
 export function AttorneyShell({ children }: { children: ReactNode }): React.ReactElement {
   const [brand, setBrand] = useState<string | null>(null)
@@ -33,8 +34,18 @@ export function AttorneyShell({ children }: { children: ReactNode }): React.Reac
   }, [])
 
   return (
-    <div className="li-shell" style={brandVars(brand)}>
-      {children}
+    // RAIL-FOLLOWUPS-1: `li-brandsurface` tells the CSS that a firm brand
+    // color IS set, so surfaces that tint from it (now including the
+    // expanded rail) can also flip their contrast palette — a var fallback
+    // can pick the surface color but cannot branch the text color with it.
+    <div
+      className={`li-shell${isHexColor(brand) ? ' li-brandsurface' : ''}`}
+      style={brandVars(brand)}
+    >
+      {/* RAIL-FOLLOWUPS-1: the top bar owns the brand lockup and the pin
+          button while the rail owns the hover target, so both read the rail's
+          open state from one provider here. */}
+      <RailShellProvider storageKey="exsto.li.railPinned">{children}</RailShellProvider>
     </div>
   )
 }
