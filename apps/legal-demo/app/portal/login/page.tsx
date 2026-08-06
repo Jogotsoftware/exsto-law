@@ -9,6 +9,7 @@ import type { EmailOtpType } from '@supabase/supabase-js'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 import { callClientMcp } from '@/lib/mcpClient'
+import { Wavefield } from '@/components/Wavefield'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 import { PasswordField } from '@/components/PasswordField'
 import { validatePassword, passwordStrength, PASSWORD_STRENGTH_LABEL } from '@/lib/passwordPolicy'
@@ -416,7 +417,13 @@ function Shell({
       {/* A1.1 — the funnel's aurora treatment, so a returning client landing
           here from the chooser (or a bookmarked link) doesn't hit a visually
           disconnected surface. Zero auth-flow changes below this line. */}
-      <div className="bk-aurora" aria-hidden />
+      <Wavefield
+        brand="#7BAFD4"
+        brandDeep="#5A97C4"
+        className="bk-waves"
+        idSuffix="bk-plogin"
+        variant="intake"
+      />
       <div className="li-cp-auth-card">
         <div className="li-cp-auth-brand">
           <span className="li-cp-auth-crest" aria-hidden>

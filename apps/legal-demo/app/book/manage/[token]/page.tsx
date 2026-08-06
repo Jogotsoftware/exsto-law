@@ -13,6 +13,7 @@ import { callClientMcp } from '@/lib/mcpClient'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { CheckIcon, ClockIcon, ChevronLeftIcon, ScaleIcon, LockIcon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
+import { Wavefield } from '@/components/Wavefield'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 interface ManageableBooking {
@@ -165,7 +166,13 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
 
   return (
     <main className="bk-shell">
-      <div className="bk-aurora" aria-hidden />
+      <Wavefield
+        brand="#7BAFD4"
+        brandDeep="#5A97C4"
+        className="bk-waves"
+        idSuffix="bk-manage"
+        variant="intake"
+      />
       <div className="bk-frame">
         <header className="bk-topbar">
           <div className="bk-brand">

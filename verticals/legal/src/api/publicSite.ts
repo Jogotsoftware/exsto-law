@@ -15,6 +15,7 @@ import type { ActionContext } from '@exsto/substrate'
 import { resolvePublicFirm, resolvePublicIntakeActor } from './publicBooking.js'
 import { getTenantSettings, type TenantSettings } from './tenantSettings.js'
 import { listServices, type ServiceDefinition } from './services.js'
+import { getInvoiceTemplate } from './invoiceTemplate.js'
 
 // One service tile on the public landing page: display copy only — never the
 // intake schema, cost config, or lifecycle internals.
@@ -32,6 +33,11 @@ export interface PublicFirmSite {
   attorneyName: string | null
   // Server-validated #rrggbb (handlers/firmProfile.ts) — a display color only.
   headerColor: string | null
+  // COMP-RESTYLE-1 — the firm's uploaded logo (the invoice-template logo, the
+  // one place firm art is uploaded — 0196's posture). A data: URL or null; the
+  // landing/funnel/sign-in render it at fixed heights when set and fall back
+  // to the generated mark + firm name when not.
+  logoDataUrl: string | null
   // Only the contact fields the firm has SET render publicly; the landing page
   // hides the block entirely when all three are null.
   contact: {
@@ -65,6 +71,7 @@ export function toPublicFirmSite(args: {
   resolvedFirmName: string
   settings: TenantSettings
   services: ServiceDefinition[]
+  logoDataUrl?: string | null
 }): PublicFirmSite {
   const { slug, resolvedFirmName, settings, services } = args
   return {
@@ -74,6 +81,7 @@ export function toPublicFirmSite(args: {
     about: settings.about,
     attorneyName: settings.attorneyName,
     headerColor: settings.headerColor,
+    logoDataUrl: args.logoDataUrl ?? null,
     contact: {
       phone: settings.firmPhone,
       email: settings.firmEmail,
@@ -93,6 +101,16 @@ export async function getPublicFirmSite(slug: string): Promise<PublicFirmSite | 
     tenantId: firm.tenantId,
     actorId: await resolvePublicIntakeActor(firm.tenantId),
   }
-  const [settings, services] = await Promise.all([getTenantSettings(ctx), listServices(ctx)])
-  return toPublicFirmSite({ slug, resolvedFirmName: firm.firmName, settings, services })
+  const [settings, services, invoiceTemplate] = await Promise.all([
+    getTenantSettings(ctx),
+    listServices(ctx),
+    getInvoiceTemplate(ctx),
+  ])
+  return toPublicFirmSite({
+    slug,
+    resolvedFirmName: firm.firmName,
+    settings,
+    services,
+    logoDataUrl: invoiceTemplate.logoDataUrl,
+  })
 }

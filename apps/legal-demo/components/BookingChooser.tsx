@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { BookTopbar } from '@/components/BookTopbar'
+import { bookBrandVars } from '@/lib/brandColor'
+import { Wavefield } from '@/components/Wavefield'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
 import { ArrowRightIcon, LockIcon, UserIcon } from '@/components/icons'
 import { useI18n } from '@/lib/i18n'
@@ -17,10 +19,12 @@ import { useI18n } from '@/lib/i18n'
 export function BookingChooser({
   firmName,
   brandColor = null,
+  logoUrl = null,
   onContinueAsNewClient,
 }: {
   firmName: string | null
   brandColor?: string | null
+  logoUrl?: string | null
   onContinueAsNewClient: () => void
 }) {
   const { t } = useI18n()
@@ -28,10 +32,16 @@ export function BookingChooser({
   const [showSignIn, setShowSignIn] = useState(false)
 
   return (
-    <main className="bk-shell">
-      <div className="bk-aurora" aria-hidden />
+    <main className="bk-shell" style={bookBrandVars(brandColor)}>
+      <Wavefield
+        brand="#7BAFD4"
+        brandDeep="#5A97C4"
+        className="bk-waves"
+        idSuffix="bk-chooser"
+        variant="intake"
+      />
       <div className="bk-frame">
-        <BookTopbar firmName={firmName} brandColor={brandColor} />
+        <BookTopbar firmName={firmName} brandColor={brandColor} logoUrl={logoUrl} />
         <section className="bk-card">
           <div className="bk-stage">
             <div className="bk-stage-head">

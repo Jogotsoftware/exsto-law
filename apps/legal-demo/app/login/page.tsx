@@ -1,39 +1,39 @@
 'use client'
 
-// HOST-TENANCY-1 — the attorney Google sign-in, moved verbatim from app/page.tsx
-// so it has a host-independent address: on a firm subdomain the root is the
-// firm's landing page, but an attorney standing there still needs a way in, and
-// on legacy/canonical hosts the root page renders this same component so /
-// behaves exactly as it always has.
+// HOST-TENANCY-1 — the attorney Google sign-in, host-independent: on a firm
+// subdomain the root is the firm's landing page, but an attorney standing
+// there still needs a way in, and on legacy/canonical hosts the root page
+// renders this same component so / behaves exactly as it always has.
 //
-// LOGIN-RESTYLE-1 — the surface (not the behaviour) now matches the Legal
-// Instruments marketing sign-in at instruments.legal, so the door into the
-// product looks like the site the attorney arrived from. Styling lives in
-// login.module.css; globals.css is untouched.
+// COMP-RESTYLE-1 — rebuilt to the approved "Pacheco Sign In" comp: the quiet
+// gold wavefield on a cream radial, the Legal Instruments wordmark as page
+// chrome, and one 420px white card on a blue glow holding the FIRM's logo
+// (tenant setting, resolved via legal.public.firm_branding when this host
+// belongs to a firm — the product tile when not), "Welcome back, Counselor."
+// in Poppins, the single Google button, and the authorized-accounts note.
+// Styling lives in login.module.css; globals.css is untouched.
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { EB_Garamond } from 'next/font/google'
+import { Poppins } from 'next/font/google'
 import { fetchSession } from '@/lib/auth'
+import { callClientMcp } from '@/lib/mcpClient'
 import { Wavefield } from '@/components/Wavefield'
 import styles from './login.module.css'
 
-// FIRM-LANDING-3 follow-up: the sign-in sits in the same comp shell as the
-// firm landing (cream radial + wavefield + halo) so the door matches the
-// front door. The waves use the landing's default blue — this is the PRODUCT's
-// sign-in (it exists on every host), so it never tints to a firm's color.
+// The comp's pl-blue pair — the glow/wave blues are fixed product accents on
+// this PRODUCT page (it exists on every host), so they never tint per-firm.
 const WAVE_BRAND = '#4B9CD3'
-const WAVE_BRAND_DEEP = '#35719A'
+const WAVE_BRAND_DEEP = '#2E6DA4'
 
-// The app's global serif (app/layout.tsx) loads EB Garamond 500/600/700 — the
-// marketing sign-in's "Sign in" is the lighter 400 face. Loading that one weight
-// here keeps it scoped to this route instead of changing global typography.
-const garamondDisplay = EB_Garamond({ subsets: ['latin'], weight: '400', display: 'swap' })
+// The comp's headline face — one weight, scoped to this route so global
+// typography (Public Sans / EB Garamond) is untouched.
+const poppins = Poppins({ subsets: ['latin'], weight: '500', display: 'swap' })
 
 export default function LoginPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
+  const [firmLogo, setFirmLogo] = useState<{ src: string; alt: string } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -52,6 +52,16 @@ export default function LoginPage() {
         else if (err) setError(decodeURIComponent(err))
       }
     })
+    // The in-card lockup is the FIRM's uploaded logo when this request
+    // resolves to a firm (subdomain / ?firm=). No resolvable firm (the
+    // canonical host) or no uploaded logo → the product tile fallback.
+    callClientMcp<{ firmName: string | null; logoDataUrl: string | null }>({
+      toolName: 'legal.public.firm_branding',
+    })
+      .then((b) => {
+        if (!cancelled && b.logoDataUrl) setFirmLogo({ src: b.logoDataUrl, alt: b.firmName ?? '' })
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -68,8 +78,8 @@ export default function LoginPage() {
         brandDeep={WAVE_BRAND_DEEP}
         className={styles.waves}
         idSuffix="login"
+        variant="signin"
       />
-      <div className={styles.halo} aria-hidden />
       <div className={styles.masthead}>
         <a href="https://instruments.legal" className={styles.wordmarkLink}>
           <img
@@ -79,57 +89,60 @@ export default function LoginPage() {
           />
         </a>
       </div>
-      <div className={styles.card}>
-        <div className={styles.hairline} />
-        <div className={styles.brand}>
-          <img src="/brand/li-tile-navy-bluegold.svg" alt="" width={52} className={styles.tile} />
-          <h1 className={`${styles.title} ${garamondDisplay.className}`}>Sign in</h1>
-        </div>
-        {error && (
-          <div className={styles.alert} role="alert">
-            {error}
+      <div className={styles.cardWrap}>
+        <div className={styles.glow} aria-hidden />
+        <div className={styles.card}>
+          <div className={styles.inner}>
+            <div className={styles.lockup}>
+              {firmLogo ? (
+                <img src={firmLogo.src} alt={firmLogo.alt} className={styles.firmLogo} />
+              ) : (
+                <img src="/brand/li-tile-navy-bluegold.svg" alt="" className={styles.tile} />
+              )}
+            </div>
+            <h1 className={`${styles.title} ${poppins.className}`}>Welcome back, Counselor.</h1>
+            {error && (
+              <div className={styles.alert} role="alert">
+                {error}
+              </div>
+            )}
+            <button type="button" className={styles.google} onClick={signIn}>
+              <GoogleIcon />
+              Continue with Google
+            </button>
+            <p className={styles.note}>Only authorized firm accounts can sign in.</p>
           </div>
-        )}
-        <button type="button" className={styles.google} onClick={signIn}>
-          <GoogleIcon />
-          Continue with Google
-        </button>
-        <p className={styles.note}>Only authorized firm accounts can sign in.</p>
-      </div>
-      <div className={styles.footer}>
-        Prospective client?{' '}
-        <Link href="/book" className={styles.footerLink}>
-          Book a consultation →
-        </Link>
+        </div>
       </div>
     </main>
   )
 }
 
+// The comp's 21px Google "G".
 function GoogleIcon() {
   return (
     <svg
-      width="17"
-      height="17"
+      width="21"
+      height="21"
       viewBox="0 0 48 48"
       className={styles.googleIcon}
       aria-hidden="true"
     >
       <path
-        fill="#4285F4"
-        d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2.1 5-4.4 6.5v5.4h7.1c4.2-3.8 6.6-9.5 6.6-15.9z"
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
       />
       <path
-        fill="#34A853"
-        d="M24 46c6 0 11-2 14.5-5.4l-7.1-5.4c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.5v5.7C8.1 41.2 15.4 46 24 46z"
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
       />
       <path
         fill="#FBBC05"
-        d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.3-2.9.7-4.2v-5.7H4.5C2.9 17.3 2 20.5 2 24s.9 6.7 2.5 9.9l7.2-5.7z"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
       />
       <path
-        fill="#EA4335"
-        d="M24 10.4c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.9 30 2 24 2 15.4 2 8.1 6.8 4.5 14.1l7.2 5.7C13.4 14.3 18.3 10.4 24 10.4z"
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
       />
     </svg>
   )

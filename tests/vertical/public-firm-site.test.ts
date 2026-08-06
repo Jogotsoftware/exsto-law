@@ -131,6 +131,9 @@ describe('toPublicFirmSite — public-safe closed shape', () => {
       'contact',
       'firmName',
       'headerColor',
+      // COMP-RESTYLE-1 — the firm's uploaded logo (invoice-template logo), a
+      // display asset the firm itself publishes on its public pages.
+      'logoDataUrl',
       'services',
       'slug',
       'tagline',

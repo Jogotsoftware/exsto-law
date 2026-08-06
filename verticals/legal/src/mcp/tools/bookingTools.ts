@@ -1,5 +1,6 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
+  getInvoiceTemplate,
   getService,
   getTenantSettings,
   listServices,
@@ -28,15 +29,30 @@ const listServicesTool: Tool<Record<string, never>, { services: ServiceDefinitio
 // address/phone/email); honest nulls when a firm hasn't set them.
 const firmBrandingTool: Tool<
   Record<string, never>,
-  { firmName: string | null; attorneyName: string | null; headerColor: string | null }
+  {
+    firmName: string | null
+    attorneyName: string | null
+    headerColor: string | null
+    logoDataUrl: string | null
+  }
 > = {
   name: 'legal.public.firm_branding',
   description:
-    "The resolved firm's public identity for the booking page: firm name, attorney display name, and brand color. Client-safe (display fields only).",
+    "The resolved firm's public identity for the booking page: firm name, attorney display name, brand color, and logo. Client-safe (display fields only).",
   mode: 'read',
   handler: async (ctx: ActionContext) => {
-    const s = await getTenantSettings(ctx)
-    return { firmName: s.firmName, attorneyName: s.attorneyName, headerColor: s.headerColor }
+    // COMP-RESTYLE-1 — the funnel/sign-in header shows the firm's uploaded
+    // logo (the invoice-template logo, the one upload point) when set.
+    const [s, invoiceTemplate] = await Promise.all([
+      getTenantSettings(ctx),
+      getInvoiceTemplate(ctx),
+    ])
+    return {
+      firmName: s.firmName,
+      attorneyName: s.attorneyName,
+      headerColor: s.headerColor,
+      logoDataUrl: invoiceTemplate.logoDataUrl,
+    }
   },
 }
 
