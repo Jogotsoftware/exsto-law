@@ -1,7 +1,10 @@
 'use client'
 
 // Legal Instruments left rail (attorney-console redesign — binding comp in
-// docs/design/legal-instruments). A dark, collapsible rail:
+// docs/design/legal-instruments). RAIL-WEBSITE-STYLE-1 re-skins it to the
+// marketing site's rail (legal-instruments/Sidebar.dc.html): no surface at all
+// when collapsed (a bare icon column floating over the page), a cream glass
+// panel with navy labels when expanded. The mechanics below are unchanged:
 //   - 58px collapsed / 256px expanded (tightened per founder walk), pinned state persisted in localStorage.
 //   - An absolutely-positioned overlay sitting over a flow "spacer" so a
 //     hover-expand floats over content instead of shoving it.
@@ -9,10 +12,13 @@
 //     their items.
 //   - A bottom user block whose popover carries the same sign-out logic the old
 //     top nav used.
+// The `li-rail--glass` modifier scopes the new skin: PortalSideNav.tsx ports
+// these same li-rail-* classes, so the CSS keys off that modifier to leave the
+// client portal's dark rail exactly as it was.
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
+import { PRODUCT_STAGE } from '@/lib/brand'
 import { fetchSession, clearDevSession, type DemoSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
@@ -281,7 +287,7 @@ export function AttorneyRail(): React.JSX.Element {
     <>
       <div className="li-rail-spacer" style={{ width: spacerWidth }} aria-hidden="true" />
       <aside
-        className={`li-rail${expanded ? ' li-rail--expanded' : ''}${
+        className={`li-rail li-rail--glass${expanded ? ' li-rail--expanded' : ''}${
           hovered && !pinned ? ' li-rail--floating' : ''
         }`}
         style={{ width: railWidth }}
@@ -296,32 +302,53 @@ export function AttorneyRail(): React.JSX.Element {
             className={`li-rail-pin${pinned ? ' is-pinned' : ''}`}
             onClick={togglePin}
             aria-pressed={pinned}
+            aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
             title={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
           >
-            {/* Scales of justice — exact paths from the comp header button. */}
+            {/* Collapsed head: the twinkle-stars brand mark (exact paths from
+                the marketing rail, Sidebar.dc.html), replacing the old scales
+                of justice. Expanded, the full wordmark below takes its place —
+                the wordmark asset already ends in the same stars, so the two
+                are swapped rather than shown side by side (a separate button
+                mark would double the lockup). The button keeps the pin toggle
+                either way. */}
             <svg
+              className="li-rail-mark li-gemstar"
               width="26"
-              height="26"
-              viewBox="0 0 24 24"
+              height="23"
+              viewBox="0 0 30 26"
               fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
               aria-hidden="true"
             >
-              <path d="M12 3v18" />
-              <path d="M7 21h10" />
-              <path d="M4 7h16" />
-              <path d="M7 4.5 4 12a3 3 0 0 0 6 0L7 4.5Z" />
-              <path d="M17 4.5 14 12a3 3 0 0 0 6 0l-3-7.5Z" />
-              <circle cx="12" cy="3" r="1.3" fill="currentColor" />
+              <defs>
+                <linearGradient
+                  id="liRailGemStar"
+                  x1="0"
+                  y1="0"
+                  x2="30"
+                  y2="26"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop offset="0" stopColor="#4E82BE" />
+                  <stop offset="0.3" stopColor="#2f5c93" />
+                  <stop offset="0.5" stopColor="#A5854A" />
+                  <stop offset="0.74" stopColor="#D8B166" />
+                  <stop offset="1" stopColor="#F3E3B8" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M19 3 C19.6 9.2 23.8 13.4 30 14 C23.8 14.6 19.6 18.8 19 25 C18.4 18.8 14.2 14.6 8 14 C14.2 13.4 18.4 9.2 19 3 Z"
+                fill="url(#liRailGemStar)"
+              />
+              <path
+                d="M6.5 0.5 C6.8 3.7 9.3 6.2 12.5 6.5 C9.3 6.8 6.8 9.3 6.5 12.5 C6.2 9.3 3.7 6.8 0.5 6.5 C3.7 6.2 6.2 3.7 6.5 0.5 Z"
+                fill="url(#liRailGemStar)"
+                style={{ animationDelay: '.4s' }}
+              />
             </svg>
+            <img className="li-rail-mark-word" src="/brand/wordmark-navy-bluegold.svg" alt="" />
           </button>
-          <div className="li-rail-wordmark li-rail-fade">
-            <span className="li-rail-product">{PRODUCT_TAGLINE}</span>
-            <span className="li-rail-beta">{PRODUCT_STAGE}</span>
-          </div>
+          <span className="li-rail-beta li-rail-fade">{PRODUCT_STAGE}</span>
         </div>
 
         <nav className="li-rail-nav" aria-label="Primary">
