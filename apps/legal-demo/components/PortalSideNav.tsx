@@ -16,7 +16,16 @@
 //   - its own pin storage key, so attorney/portal pin states don't collide.
 // New CSS lives in the append-only li-cpnav-* family (globals.css tail); the
 // shared li-rail-* rules are reused untouched.
-import { useEffect, useState } from 'react'
+//
+// RAIL-FOLLOWUPS-1: the port now extends to the SKIN and the STATE as well.
+// The rail carries `li-rail--glass` (no surface at all when collapsed — bare
+// icons over the page, gold active icon; a tinted panel when expanded, the firm
+// brand color when set and the platform page color otherwise) and reads its
+// open/pin state from RailShellState, the same context the attorney console
+// uses. The head lockup and the pin button are gone from here: they live in the
+// portal's header band now (RailBrandLockup), exactly as on the attorney side.
+import { useState } from 'react'
+import { useRailShell } from '@/components/RailShellState'
 import { useI18n } from '@/lib/i18n'
 import type { PortalNavKind } from '@/lib/portalNav'
 
@@ -39,8 +48,6 @@ function initials(name: string): string {
   ).toUpperCase()
 }
 
-const PIN_STORAGE_KEY = 'exsto.li.cpRailPinned'
-
 export function PortalSideNav({
   items,
   active,
@@ -53,109 +60,20 @@ export function PortalSideNav({
   user?: PortalNavUser | null
 }): React.JSX.Element {
   const { t } = useI18n()
+  const { expanded, pinned, onRailEnter, onRailLeave, spacerWidth, railWidth } = useRailShell()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const [pinned, setPinned] = useState(false)
-  const [hovered, setHovered] = useState(false)
-  const [canHover, setCanHover] = useState(true)
-  const [isNarrow, setIsNarrow] = useState(false)
-
-  // Restore the pinned state persisted across sessions (same mechanic as the
-  // attorney rail, separate key).
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(PIN_STORAGE_KEY)
-      if (v != null) setPinned(v === '1')
-    } catch {
-      /* private mode / storage blocked — default to unpinned */
-    }
-  }, [])
-
-  // Hover-expand is pointer-media-gated; the spacer stays at icon width on
-  // narrow viewports. Track both with matchMedia (ported from AttorneyRail).
-  useEffect(() => {
-    const hoverMq = window.matchMedia('(hover: hover)')
-    const narrowMq = window.matchMedia('(max-width: 859px)')
-    const sync = (): void => {
-      setCanHover(hoverMq.matches)
-      setIsNarrow(narrowMq.matches)
-    }
-    sync()
-    hoverMq.addEventListener('change', sync)
-    narrowMq.addEventListener('change', sync)
-    return () => {
-      hoverMq.removeEventListener('change', sync)
-      narrowMq.removeEventListener('change', sync)
-    }
-  }, [])
-
-  const expanded = pinned || hovered
-  const railWidth = expanded ? 256 : 58
-  const spacerWidth = pinned && !isNarrow ? 256 : 58
-
-  function togglePin(): void {
-    setPinned((p) => {
-      const next = !p
-      try {
-        localStorage.setItem(PIN_STORAGE_KEY, next ? '1' : '0')
-      } catch {
-        /* storage blocked — pin state is best-effort */
-      }
-      return next
-    })
-  }
 
   return (
     <>
       <div className="li-rail-spacer" style={{ width: spacerWidth }} aria-hidden="true" />
       <aside
-        className={`li-rail${expanded ? ' li-rail--expanded' : ''}${
-          hovered && !pinned ? ' li-rail--floating' : ''
+        className={`li-rail li-rail--glass${expanded ? ' li-rail--expanded' : ''}${
+          expanded && !pinned ? ' li-rail--floating' : ''
         }`}
         style={{ width: railWidth }}
-        onMouseEnter={() => {
-          if (canHover) setHovered(true)
-        }}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={onRailEnter}
+        onMouseLeave={onRailLeave}
       >
-        <div className="li-rail-head">
-          <button
-            type="button"
-            className={`li-rail-pin${pinned ? ' is-pinned' : ''}`}
-            onClick={togglePin}
-            aria-pressed={pinned}
-            title={
-              pinned
-                ? t('portal.nav.unpin', undefined, 'Unpin sidebar')
-                : t('portal.nav.pin', undefined, 'Pin sidebar open')
-            }
-          >
-            {/* Scales of justice — same paths as the attorney rail head. */}
-            <svg
-              width="26"
-              height="26"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 3v18" />
-              <path d="M7 21h10" />
-              <path d="M4 7h16" />
-              <path d="M7 4.5 4 12a3 3 0 0 0 6 0L7 4.5Z" />
-              <path d="M17 4.5 14 12a3 3 0 0 0 6 0l-3-7.5Z" />
-              <circle cx="12" cy="3" r="1.3" fill="currentColor" />
-            </svg>
-          </button>
-          <div className="li-rail-wordmark li-rail-fade">
-            <span className="li-rail-product">
-              {t('portal.brand_sub', undefined, 'Client Portal')}
-            </span>
-          </div>
-        </div>
-
         <nav className="li-rail-nav" aria-label="Portal sections">
           {items.map((item) => {
             const isActive = active === item.kind
