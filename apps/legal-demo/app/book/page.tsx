@@ -6,10 +6,12 @@ import { X } from 'lucide-react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import { callClientMcp } from '@/lib/mcpClient'
+import { bookBrandVars } from '@/lib/brandColor'
 import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { BookTopbar } from '@/components/BookTopbar'
+import { Wavefield } from '@/components/Wavefield'
 import { BookingChooser } from '@/components/BookingChooser'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
@@ -1074,8 +1076,14 @@ export default function BookPage() {
     const [scheduledMiddle, scheduledAfter] = (restAfterAttorney ?? '').split('__WHEN__')
     const [emailBefore, emailAfter] = emailTemplate.split('__EMAIL__')
     return (
-      <main className="bk-shell">
-        <div className="bk-aurora" aria-hidden />
+      <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+        <Wavefield
+          brand="#7BAFD4"
+          brandDeep="#5A97C4"
+          className="bk-waves"
+          idSuffix="bk-book"
+          variant="intake"
+        />
         <div className="bk-frame">
           <BookTopbar
             firmName={firmBranding?.firmName ?? null}
@@ -1171,8 +1179,14 @@ export default function BookPage() {
   // flashes in on top of an already-rendered service grid.
   if (portalMe === undefined) {
     return (
-      <main className="bk-shell">
-        <div className="bk-aurora" aria-hidden />
+      <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+        <Wavefield
+          brand="#7BAFD4"
+          brandDeep="#5A97C4"
+          className="bk-waves"
+          idSuffix="bk-book"
+          variant="intake"
+        />
         <div className="bk-frame">
           <BookTopbar
             firmName={firmBranding?.firmName ?? null}
@@ -1248,8 +1262,14 @@ export default function BookPage() {
               : t('slot.subtitle')
 
   return (
-    <main className="bk-shell">
-      <div className="bk-aurora" aria-hidden />
+    <main className="bk-shell" style={bookBrandVars(firmBranding?.headerColor)}>
+      <Wavefield
+        brand="#7BAFD4"
+        brandDeep="#5A97C4"
+        className="bk-waves"
+        idSuffix="bk-book"
+        variant="intake"
+      />
       <div className="bk-frame">
         <BookTopbar
           firmName={firmBranding?.firmName ?? null}
@@ -2069,7 +2089,7 @@ export default function BookPage() {
         </section>
 
         <p className="bk-secure">
-          <LockIcon size={14} />
+          <LockIcon size={15} />
           {t('book.secure')}
         </p>
       </div>

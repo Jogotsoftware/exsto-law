@@ -4,7 +4,7 @@ import Link from 'next/link'
 import type { PublicFirmSite } from '@exsto/legal'
 import { LanguageToggle } from '@/components/LanguageToggle'
 import { useI18n } from '@/lib/i18n'
-import { darkenHex, isHexColor, logoPlateVars } from '@/lib/brandColor'
+import { darkenHex, isHexColor, logoPlateVars, mixHex } from '@/lib/brandColor'
 import { Wavefield } from '@/components/Wavefield'
 import { FirmMarkGlyph } from '@/components/FirmMarkGlyph'
 import {
@@ -76,6 +76,7 @@ function FirmMark({
 }
 
 // ---- Nav cards -------------------------------------------------------------
+// The comp's tile: one header row (icon · title · arrow-in-circle), body below.
 function NavCard({
   href,
   icon,
@@ -89,14 +90,14 @@ function NavCard({
 }): React.JSX.Element {
   return (
     <Link href={href} className="fl-tile">
-      <span className="fl-tile-icon">{icon}</span>
-      <span className="fl-tile-text">
-        <span className="fl-tile-titlerow">
-          <span className="fl-tile-title">{title}</span>
-          <ArrowRightIcon size={21} />
+      <span className="fl-tile-head">
+        <span className="fl-tile-icon">{icon}</span>
+        <span className="fl-tile-title">{title}</span>
+        <span className="fl-tile-arrow">
+          <ArrowRightIcon size={17} strokeWidth={2.2} />
         </span>
-        <span className="fl-tile-body">{body}</span>
       </span>
+      <span className="fl-tile-body">{body}</span>
     </Link>
   )
 }
@@ -109,14 +110,30 @@ const CONTACT_ROW_STYLE = {
 
 export function FirmLandingPage({ site }: { site: PublicFirmSite }): React.JSX.Element {
   const { t } = useI18n()
-  const brand = isHexColor(site.headerColor) ? site.headerColor : DEFAULT_BRAND
+  // Tenant theming (COMP-RESTYLE-1): --fl-brand is only set when the firm has
+  // stored a brand color. Unset, every .fl-* rule's fallback IS the comp's
+  // exact hex — so an unstyled firm renders the approved comp pixel-for-pixel,
+  // and a themed firm derives its whole blue family from the one stored color.
+  const hasBrand = isHexColor(site.headerColor)
+  const brand = hasBrand ? (site.headerColor as string) : DEFAULT_BRAND
   const brandDeep = darkenHex(brand, 0.28)
   const { contact } = site
   const hasContact = Boolean(contact.phone || contact.email || contact.address)
   return (
     <main
       className="fl-shell"
-      style={{ ['--fl-brand' as string]: brand, ['--fl-brand-deep' as string]: brandDeep }}
+      style={
+        hasBrand
+          ? {
+              ['--fl-brand' as string]: brand,
+              ['--fl-brand-deep' as string]: brandDeep,
+              // Icon/arrow ink: a slightly deepened brand (the comp's #5A97C4
+              // relationship to its #4B9CD3 base).
+              ['--fl-brand-icon' as string]: darkenHex(brand, 0.1),
+              ['--fl-bg-tint' as string]: mixHex(brand, '#fdfbf5', 0.13),
+            }
+          : undefined
+      }
     >
       <Wavefield brand={brand} brandDeep={brandDeep} className="fl-waves" idSuffix="landing" />
       <div className="fl-halo" aria-hidden />
@@ -131,15 +148,26 @@ export function FirmLandingPage({ site }: { site: PublicFirmSite }): React.JSX.E
 
         <section className="fl-card">
           <div className="fl-card-head">
-            <div className="fl-brand-row">
-              <FirmMark
-                brand={brand}
-                brandColor={site.headerColor}
-                logoDataUrl={site.logoDataUrl}
-                logoTone={site.logoTone}
-              />
-              <h1 className="fl-name">{site.firmName}</h1>
-            </div>
+            {/* COMP-RESTYLE-1 — a dark/unknown-tone uploaded logo renders as
+                the comp's bare 52px wordmark, replacing the crest + name.
+                Reversed (light-ink) artwork can't sit bare on the cream shell,
+                so it keeps the FIRM-BRANDING-1 plated tile + name lockup. */}
+            {site.logoDataUrl && site.logoTone !== 'light' ? (
+              <div className="fl-brand-row">
+                <img src={site.logoDataUrl} alt="" className="fl-logo" />
+                <h1 className="sr-only">{site.firmName}</h1>
+              </div>
+            ) : (
+              <div className="fl-brand-row">
+                <FirmMark
+                  brand={brand}
+                  brandColor={site.headerColor}
+                  logoDataUrl={site.logoDataUrl}
+                  logoTone={site.logoTone}
+                />
+                <h1 className="fl-name">{site.firmName}</h1>
+              </div>
+            )}
             <LanguageToggle />
           </div>
 

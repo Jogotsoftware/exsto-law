@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
+import { Wavefield } from '@/components/Wavefield'
 
 const ERROR_COPY: Record<string, string> = {
   signin_expired: 'That sign-in link expired — please sign in again.',
@@ -28,7 +29,13 @@ export default function NeutralSignInPage() {
 
   return (
     <div className="bk-shell">
-      <div className="bk-aurora" aria-hidden />
+      <Wavefield
+        brand="#7BAFD4"
+        brandDeep="#5A97C4"
+        className="bk-waves"
+        idSuffix="bk-signin"
+        variant="intake"
+      />
       <main className="bk-stage" style={{ maxWidth: 460, margin: '0 auto' }}>
         <div className="bk-card" style={{ padding: 'var(--space-6)' }}>
           <h1 className="bk-h1" style={{ fontSize: '1.6rem' }}>

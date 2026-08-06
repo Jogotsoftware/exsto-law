@@ -6064,43 +6064,37 @@ button.danger.outline:hover:not(:disabled) {
    ========================================================================== */
 
 .bk-shell {
-  /* The booking flow consumes the app-wide navy+gold token system (Phase 0).
-     These --bk-* aliases source from the global tokens, each with a standalone
-     fallback — so /book renders correctly on its own AND inherits the
-     foundation (navy/gold palette, Inter/EB Garamond via next/font, and any
-     later dark mode) the moment that foundation merges. Same var names as
-     before, re-sourced — no rule below needs to change. */
-  --bk-navy: var(--navy, #1e3a8a);
-  --bk-navy-700: var(--navy-700, #14306b);
-  --bk-blue: var(--navy-500, #2d4da0);
-  --bk-ink: var(--fg, #0f172a);
-  --bk-slate: var(--muted, #475569);
-  --bk-slate-400: #64748b; /* darkened from #94a3b8 (was 2.6:1) to slate-500 for AA text contrast */
-  --bk-line: var(--border, #e2e8f0);
-  --bk-line-soft: var(--surface-2, #eef2f7);
-  --bk-paper: var(--surface, #ffffff);
-  --bk-gold: var(--gold, #b45309);
-  --bk-gold-700: var(--gold-700, #92400e);
+  /* COMP-RESTYLE-1 — the approved "Pacheco Intake" comp's palette: cream shell,
+     white card, light-blue controls, warm slate text. The blue family sources
+     from --bk-brand/--bk-brand-deep, which the page sets ONLY when the firm
+     has stored a brand color (legal.public.firm_branding headerColor) — unset,
+     every fallback below IS the comp's exact hex, so an unstyled firm renders
+     the comp pixel-for-pixel and a themed firm re-tints the whole funnel from
+     its one stored color. */
+  --bk-navy: var(--bk-brand, #7bafd4);
+  --bk-navy-700: var(--bk-brand-deep, #5a97c4);
+  --bk-blue: var(--bk-brand, #7bafd4);
+  --bk-ink: #13294b;
+  --bk-slate: #5c6b84;
+  --bk-slate-400: #9aa6bc;
+  --bk-line: rgba(19, 41, 75, 0.16);
+  --bk-line-soft: rgba(19, 41, 75, 0.08);
+  --bk-paper: #ffffff;
+  --bk-gold: var(--gold, #a6812f);
+  --bk-gold-700: var(--gold-700, #8a6b26);
   --bk-gold-soft: var(--gold-100, #fdf2e3);
   --bk-danger: var(--danger, #dc2626);
   --bk-danger-soft: var(--danger-soft, #fee2e2);
   --bk-ok: var(--ok, #15803d);
-  /* Navy-family gradient — gold stays the sparing accent, never a gradient. */
-  --bk-grad: linear-gradient(
-    135deg,
-    var(--navy-700, #14306b) 0%,
-    var(--navy, #1e3a8a) 55%,
-    var(--navy-500, #2d4da0) 100%
-  );
-  --bk-shadow-card:
-    var(--shadow-lg, 0 18px 50px -20px rgba(15, 23, 42, 0.18)),
-    0 2px 8px -2px rgba(15, 23, 42, 0.06);
-  --bk-shadow-pop: 0 10px 24px -8px rgba(30, 58, 138, 0.45);
-  /* Radius scale aligned to the foundation: inputs/buttons 8, cards 12, big 16. */
-  --bk-r-xl: 16px;
-  --bk-r-lg: 12px;
-  --bk-r-md: 10px;
-  --bk-r-sm: 8px;
+  /* The comp's Continue-button gradient. */
+  --bk-grad: linear-gradient(105deg, var(--bk-navy) 0%, var(--bk-navy-700) 100%);
+  --bk-shadow-card: 0 30px 70px -34px rgba(19, 41, 75, 0.32), 0 2px 10px rgba(19, 41, 75, 0.06);
+  --bk-shadow-pop: 0 16px 34px -14px rgba(46, 109, 164, 0.5);
+  /* Radius scale from the comp: inputs 12, service cards 15, the card 24. */
+  --bk-r-xl: 24px;
+  --bk-r-lg: 15px;
+  --bk-r-md: 12px;
+  --bk-r-sm: 10px;
   --bk-serif: var(--font-serif, 'EB Garamond', Georgia, 'Times New Roman', serif);
   --bk-sans: var(
     --font-sans,
@@ -6122,42 +6116,20 @@ button.danger.outline:hover:not(:disabled) {
   position: relative;
   overflow-x: clip;
   font-family: var(--bk-sans);
-  color: var(--bk-ink);
-  background: var(--bg, #f4f7fb);
+  color: #24324b;
+  background: linear-gradient(155deg, #fbf6ec 0%, #f6efe1 55%, #f3ebdb 100%);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Animated aurora canvas — subtle, performant, behind everything. */
-.bk-aurora {
+/* The comp's decorative gold wavefield (intake variant — tenant-neutral),
+   behind everything. */
+.bk-waves {
   position: absolute;
   inset: 0;
   z-index: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  overflow: hidden;
-}
-.bk-aurora::before,
-.bk-aurora::after {
-  content: '';
-  position: absolute;
-  width: 46vw;
-  height: 46vw;
-  max-width: 620px;
-  max-height: 620px;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.5;
-}
-.bk-aurora::before {
-  top: -14%;
-  left: -10%;
-  background: radial-gradient(circle at 30% 30%, rgba(37, 99, 235, 0.5), transparent 65%);
-  animation: bkFloatA 18s var(--bk-ease) infinite alternate;
-}
-.bk-aurora::after {
-  top: 18%;
-  right: -14%;
-  background: radial-gradient(circle at 70% 30%, rgba(180, 83, 9, 0.28), transparent 65%);
-  animation: bkFloatB 22s var(--bk-ease) infinite alternate;
 }
 
 .bk-frame {
@@ -6199,40 +6171,43 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--bk-grad);
   box-shadow: var(--bk-shadow-pop);
 }
-/* FIRM-BRANDING-1: an uploaded firm logo replaces the crest + wordmark on the
-   booking funnel. The funnel sits on a light field, so no chip is needed. */
+/* FIRM-BRANDING-1 + COMP-RESTYLE-1: an uploaded firm logo replaces the crest
+   + wordmark on the booking funnel, at the comp's 52px height. The funnel sits
+   on a light field, so no chip is needed. */
 .bk-brand-logo {
   display: block;
-  height: 40px;
-  max-width: 240px;
+  height: 52px;
+  width: auto;
+  max-width: 300px;
   object-fit: contain;
 }
+/* Language toggle — the comp's segmented pill. */
 .bk-shell .lang-toggle {
   display: inline-flex;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid var(--bk-line);
+  background: #e8eef4;
+  border: 0;
   border-radius: 999px;
-  padding: 3px;
-  backdrop-filter: blur(8px);
+  padding: 5px;
+  gap: 4px;
+  box-shadow: inset 0 1px 3px rgba(46, 109, 164, 0.14);
 }
 .bk-shell .lang-toggle-btn {
   border: 0;
   background: transparent;
-  color: var(--bk-slate);
+  color: #7c8ca6;
+  font-family: inherit;
   font-weight: 700;
-  font-size: 0.78rem;
-  padding: 0.32rem 0.7rem;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  padding: 8px 17px;
   border-radius: 999px;
   cursor: pointer;
-  transition:
-    background 0.2s var(--bk-ease),
-    color 0.2s var(--bk-ease),
-    box-shadow 0.2s var(--bk-ease);
+  transition: all 0.18s ease;
 }
 .bk-shell .lang-toggle-btn.active {
-  background: var(--bk-grad);
+  background: var(--bk-navy);
   color: #fff;
-  box-shadow: var(--bk-shadow-pop);
+  box-shadow: 0 2px 6px rgba(46, 109, 164, 0.3);
 }
 
 /* ---- Progress ---- */
@@ -6283,9 +6258,8 @@ button.danger.outline:hover:not(:disabled) {
 
 /* ---- Card + stage ---- */
 .bk-card {
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  position: relative;
+  background: #ffffff;
   box-shadow: var(--bk-shadow-card);
   border-radius: var(--bk-r-xl);
   padding: 1.5rem 1.25rem;
@@ -6316,18 +6290,18 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.3rem;
 }
 .bk-h1 {
-  font-family: var(--bk-serif);
-  font-size: clamp(1.55rem, 5vw, 1.95rem);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.12;
+  font-family: var(--bk-sans);
+  font-size: clamp(1.6rem, 5vw, 2.125rem);
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  line-height: 1.15;
   margin: 0;
   color: var(--bk-ink);
 }
 .bk-sub {
   margin: 0;
   color: var(--bk-slate);
-  font-size: 0.97rem;
+  font-size: clamp(1rem, 2.5vw, 1.125rem);
   line-height: 1.5;
 }
 
@@ -6370,7 +6344,7 @@ button.danger.outline:hover:not(:disabled) {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 2.5px solid rgba(30, 58, 138, 0.2);
+  border: 2.5px solid rgba(123, 175, 212, 0.35);
   border-top-color: var(--bk-navy);
   animation: bkSpin 0.7s linear infinite;
   flex: none;
@@ -6391,28 +6365,33 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-service-card {
   display: flex;
-  align-items: center;
-  gap: 0.9rem;
+  align-items: flex-start;
+  gap: 18px;
   text-align: left;
   width: 100%;
-  padding: 1rem;
+  padding: 24px 24px 26px;
   border-radius: var(--bk-r-lg);
-  border: 1.5px solid var(--bk-line);
+  border: 1.5px solid rgba(19, 41, 75, 0.14);
   background: #fff;
   cursor: pointer;
   transition:
-    border-color 0.2s var(--bk-ease),
-    box-shadow 0.2s var(--bk-ease),
-    transform 0.2s var(--bk-ease);
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease,
+    transform 0.16s ease;
 }
 .bk-service-card:hover {
-  border-color: #c7d2fe;
-  box-shadow: 0 8px 22px -12px rgba(30, 58, 138, 0.4);
+  border-color: rgba(123, 175, 212, 0.7);
+  border-color: color-mix(in srgb, var(--bk-navy) 70%, transparent);
+  box-shadow: 0 8px 22px -12px rgba(19, 41, 75, 0.3);
   transform: translateY(-2px);
 }
 .bk-service-card.selected {
-  border-color: var(--bk-navy);
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+  border: 2px solid var(--bk-navy);
+  /* Keep the 1.5px box metrics so selection never shifts the grid. */
+  padding: 23.5px 23.5px 25.5px;
+  background: #f5f8fe;
+  box-shadow: 0 12px 28px -16px rgba(19, 41, 75, 0.4);
 }
 .bk-service-icon {
   flex: none;
@@ -6420,16 +6399,10 @@ button.danger.outline:hover:not(:disabled) {
   place-items: center;
   width: 46px;
   height: 46px;
-  border-radius: 12px;
+  border-radius: 11px;
   color: var(--bk-navy);
-  background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-  transition:
-    color 0.2s var(--bk-ease),
-    background 0.2s var(--bk-ease);
-}
-.bk-service-card.selected .bk-service-icon {
-  color: #fff;
-  background: var(--bk-grad);
+  background: #e2eff8;
+  background: color-mix(in srgb, var(--bk-navy) 16%, #fdfdff);
 }
 .bk-service-text {
   display: flex;
@@ -6440,32 +6413,18 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-service-title {
   font-weight: 700;
-  font-size: 1.02rem;
+  font-size: 1.125rem;
+  line-height: 1.25;
   color: var(--bk-ink);
 }
 .bk-service-desc {
-  font-size: 0.86rem;
+  font-size: 0.9375rem;
   color: var(--bk-slate);
-  line-height: 1.4;
+  line-height: 1.45;
+  margin-top: 2px;
 }
 .bk-service-tick {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  color: #fff;
-  background: var(--bk-navy);
-  opacity: 0;
-  transform: scale(0.5);
-  transition:
-    opacity 0.2s var(--bk-ease),
-    transform 0.2s var(--bk-ease);
-}
-.bk-service-card.selected .bk-service-tick {
-  opacity: 1;
-  transform: scale(1);
+  display: none;
 }
 /* Two-path chooser (A1.1) — the cards are pure navigation, never "selected",
    so the trailing arrow is always-on rather than tick-on-select. */
@@ -6502,7 +6461,7 @@ button.danger.outline:hover:not(:disabled) {
 .bk-fields {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem;
+  gap: 1.375rem 1.75rem;
 }
 .bk-sections {
   display: flex;
@@ -6523,12 +6482,12 @@ button.danger.outline:hover:not(:disabled) {
 .bk-field {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5625rem;
   min-width: 0;
 }
 .bk-label,
 .bk-stage label:not(.bk-checkbox) > span {
-  font-size: 0.82rem;
+  font-size: 0.9375rem;
   font-weight: 700;
   color: var(--bk-ink);
   display: inline-flex;
@@ -6560,7 +6519,7 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-input-icon {
   position: absolute;
-  left: 0.9rem;
+  left: 0.9375rem;
   top: 50%;
   transform: translateY(-50%);
   color: var(--bk-slate-400);
@@ -6576,12 +6535,12 @@ button.danger.outline:hover:not(:disabled) {
 .bk-stage textarea {
   width: 100%;
   font-family: var(--bk-sans);
-  font-size: 0.97rem;
+  font-size: 1rem;
   color: var(--bk-ink);
-  background: #fff;
-  border: 1.5px solid var(--bk-line);
+  background: #fcfcfe;
+  border: 1.4px solid var(--bk-line);
   border-radius: var(--bk-r-md);
-  padding: 0.78rem 0.9rem;
+  padding: 0.9375rem;
   transition:
     border-color 0.2s var(--bk-ease),
     box-shadow 0.2s var(--bk-ease);
@@ -6604,8 +6563,10 @@ button.danger.outline:hover:not(:disabled) {
 .bk-stage select:focus,
 .bk-stage textarea:focus {
   outline: none;
-  border-color: var(--bk-navy);
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.13);
+  border-color: var(--bk-navy-700);
+  box-shadow: 0 0 0 3px rgba(123, 175, 212, 0.25);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bk-navy) 25%, transparent);
+  background: #fff;
 }
 .bk-stage input::placeholder,
 .bk-stage textarea::placeholder {
@@ -6644,17 +6605,17 @@ button.danger.outline:hover:not(:disabled) {
 
 /* Phone input (react-phone-number-input) */
 .bk-phone-wrap {
-  border: 1.5px solid var(--bk-line);
+  border: 1.4px solid var(--bk-line);
   border-radius: var(--bk-r-md);
-  background: #fff;
-  padding: 0 0.6rem;
+  background: #fcfcfe;
+  padding: 0 0.8125rem;
   transition:
     border-color 0.2s var(--bk-ease),
     box-shadow 0.2s var(--bk-ease);
 }
 .bk-phone-wrap:focus-within {
   border-color: var(--bk-navy);
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.13);
+  box-shadow: 0 0 0 3px rgba(123, 175, 212, 0.25);
 }
 .bk-phone-wrap .PhoneInput {
   display: flex;
@@ -6776,14 +6737,14 @@ button.danger.outline:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
+  gap: 0.6875rem;
   font-family: var(--bk-sans);
   font-weight: 700;
-  font-size: 0.97rem;
+  font-size: 1.0625rem;
   line-height: 1;
-  padding: 0.92rem 1.3rem;
-  border-radius: var(--bk-r-md);
-  border: 1.5px solid transparent;
+  padding: 1.0625rem 1.625rem;
+  border-radius: 13px;
+  border: 1.4px solid transparent;
   cursor: pointer;
   transition:
     transform 0.18s var(--bk-ease),
@@ -6794,12 +6755,15 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.35);
+  box-shadow: 0 0 0 3px rgba(90, 151, 196, 0.5);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bk-navy-700) 50%, transparent);
 }
 .bk-btn-primary {
   position: relative;
   overflow: hidden;
   color: #fff;
+  font-size: 1.125rem;
+  padding: 1.125rem 1.625rem;
   background: var(--bk-grad);
   box-shadow: var(--bk-shadow-pop);
 }
@@ -6816,7 +6780,7 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 14px 30px -10px rgba(30, 58, 138, 0.6);
+  box-shadow: 0 18px 38px -12px rgba(46, 109, 164, 0.55);
 }
 .bk-btn-primary:hover:not(:disabled)::after {
   left: 130%;
@@ -6825,13 +6789,13 @@ button.danger.outline:hover:not(:disabled) {
   transform: translateY(0);
 }
 .bk-btn-ghost {
-  color: var(--bk-slate);
+  color: var(--bk-navy);
   background: #fff;
-  border-color: var(--bk-line);
+  border-color: rgba(19, 41, 75, 0.2);
 }
 .bk-btn-ghost:hover {
-  border-color: var(--bk-slate-400);
-  color: var(--bk-ink);
+  border-color: rgba(19, 41, 75, 0.35);
+  color: var(--bk-navy-700);
 }
 /* Choice pills — yes/no, true/false, and multi-select (checkbox) answers.
    One control set, used on the public intake and reused in the attorney builder
@@ -6931,9 +6895,9 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-actions {
   display: flex;
-  gap: 0.7rem;
+  gap: 0.875rem;
   align-items: center;
-  margin-top: 0.4rem;
+  margin-top: 1.25rem;
 }
 
 /* ---- Selected time chip ---- */
@@ -6982,9 +6946,9 @@ button.danger.outline:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  color: var(--bk-slate-400);
-  font-size: 0.8rem;
+  gap: 0.5625rem;
+  color: #7a879c;
+  font-size: 0.9375rem;
   margin: 0;
 }
 
@@ -7351,24 +7315,13 @@ button.danger.outline:hover:not(:disabled) {
     transform: translateX(-2px);
   }
 }
-@keyframes bkFloatA {
-  to {
-    transform: translate(8%, 12%) scale(1.12);
-  }
-}
-@keyframes bkFloatB {
-  to {
-    transform: translate(-10%, 8%) scale(1.15);
-  }
-}
-
 /* ---- Responsive ---- */
 @media (min-width: 600px) {
   .bk-frame {
     padding: 1.4rem 1.25rem 3.5rem;
   }
   .bk-card {
-    padding: 2rem 1.9rem;
+    padding: 2.25rem 2.5rem 2.25rem;
   }
   .bk-fields {
     grid-template-columns: 1fr 1fr;
@@ -7383,8 +7336,11 @@ button.danger.outline:hover:not(:disabled) {
 
 @media (min-width: 768px) {
   .bk-frame {
-    max-width: 800px;
+    max-width: 1160px;
     gap: 1.4rem;
+  }
+  .bk-card {
+    padding: 2.75rem 3rem 2.5rem;
   }
   .bk-service-grid {
     grid-template-columns: 1fr 1fr;
@@ -7406,17 +7362,17 @@ button.danger.outline:hover:not(:disabled) {
   }
   .bk-progress-rail-track {
     position: absolute;
-    top: 17px;
+    top: 21px;
     left: 7%;
     right: 7%;
-    height: 3px;
-    border-radius: 999px;
+    height: 2px;
+    border-radius: 1px;
     background: var(--bk-line);
   }
   .bk-progress-rail-fill {
     height: 100%;
-    border-radius: 999px;
-    background: var(--bk-grad);
+    border-radius: 1px;
+    background: var(--bk-navy);
     transition: width 0.55s var(--bk-ease);
   }
   .bk-progress-node {
@@ -7430,14 +7386,14 @@ button.danger.outline:hover:not(:disabled) {
   .bk-progress-dot {
     display: grid;
     place-items: center;
-    width: 34px;
-    height: 34px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: #fff;
-    border: 2px solid var(--bk-line);
+    border: 1.5px solid rgba(19, 41, 75, 0.18);
     color: var(--bk-slate-400);
-    font-weight: 800;
-    font-size: 0.9rem;
+    font-weight: 700;
+    font-size: 1rem;
     transition:
       border-color 0.3s var(--bk-ease),
       color 0.3s var(--bk-ease),
@@ -7445,18 +7401,19 @@ button.danger.outline:hover:not(:disabled) {
       box-shadow 0.3s var(--bk-ease);
   }
   .bk-progress-node.current .bk-progress-dot {
-    border-color: var(--bk-navy);
-    color: var(--bk-navy);
-    box-shadow: 0 0 0 4px rgba(30, 58, 138, 0.12);
+    border-color: transparent;
+    background: var(--bk-navy);
+    color: #fff;
+    box-shadow: 0 0 0 5px rgba(19, 41, 75, 0.12);
   }
   .bk-progress-node.done .bk-progress-dot {
     border-color: transparent;
-    background: var(--bk-grad);
+    background: var(--bk-navy);
     color: #fff;
   }
   .bk-progress-label {
-    font-size: 0.82rem;
-    font-weight: 700;
+    font-size: 0.875rem;
+    font-weight: 600;
     color: var(--bk-slate-400);
     transition: color 0.3s var(--bk-ease);
   }
@@ -7468,8 +7425,8 @@ button.danger.outline:hover:not(:disabled) {
 
 @media (min-width: 1024px) {
   .bk-frame {
-    max-width: 860px;
-    padding-top: 2rem;
+    max-width: 1160px;
+    padding-top: 1.875rem;
   }
 }
 
@@ -27837,10 +27794,9 @@ details.li-brief-research summary:hover {
   padding: 30px 32px 72px;
   font-family: var(--font-sans, 'Public Sans', system-ui, sans-serif);
   color: var(--fl-body);
-  background: radial-gradient(120% 90% at 85% -10%, #eaf3fa 0%, #f6efe2 55%, #f3ebdc 100%);
   background: radial-gradient(
     120% 90% at 85% -10%,
-    color-mix(in srgb, var(--fl-brand, #4b9cd3) 13%, #fdfbf5) 0%,
+    var(--fl-bg-tint, #eaf3fa) 0%,
     #f6efe2 55%,
     #f3ebdc 100%
   );
@@ -28007,7 +27963,7 @@ details.li-brief-research summary:hover {
   box-shadow: 0 2px 6px rgba(19, 41, 75, 0.22);
 }
 
-/* ---- Nav tiles ---- */
+/* ---- Nav tiles (COMP-RESTYLE-1: header row icon · title · arrow-circle) ---- */
 .fl-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -28017,62 +27973,68 @@ details.li-brief-research summary:hover {
 .fl-tile {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   color: inherit;
   text-decoration: none;
-  background: linear-gradient(160deg, #fbfdfe 0%, #f1f6fb 100%);
-  border: 1px solid rgba(75, 156, 211, 0.18);
-  border-color: color-mix(in srgb, var(--fl-brand, #4b9cd3) 18%, transparent);
+  background: #ffffff;
+  border: 1px solid rgba(19, 41, 75, 0.1);
   border-radius: 18px;
-  padding: 30px 30px 32px;
+  padding: 26px 26px 28px;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
 }
 .fl-tile:hover {
-  border-color: rgba(75, 156, 211, 0.5);
-  border-color: color-mix(in srgb, var(--fl-brand, #4b9cd3) 50%, transparent);
-  box-shadow: 0 18px 38px -18px rgba(19, 41, 75, 0.45);
+  border-color: rgba(75, 156, 211, 0.55);
+  border-color: color-mix(in srgb, var(--fl-brand, #4b9cd3) 55%, transparent);
+  box-shadow: 0 20px 40px -20px rgba(19, 41, 75, 0.4);
   transform: translateY(-3px);
 }
 .fl-tile:focus-visible {
   outline: 2px solid var(--fl-brand, #4b9cd3);
   outline-offset: 2px;
 }
+.fl-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
 .fl-tile-icon {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 13px;
-  background: #e2eff8;
-  background: color-mix(in srgb, var(--fl-brand, #4b9cd3) 15%, #fbfdfe);
-  color: var(--fl-ink);
-  flex: none;
-}
-.fl-tile-titlerow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--fl-ink);
-}
-.fl-tile-titlerow svg {
+  color: var(--fl-brand-icon, #5a97c4);
   flex: none;
 }
 .fl-tile-title {
-  font-size: 22px;
+  flex: 1;
+  font-size: 21px;
   font-weight: 700;
-  color: var(--fl-body);
+  color: var(--fl-ink);
+}
+.fl-tile-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(75, 156, 211, 0.4);
+  border-color: color-mix(in srgb, var(--fl-brand, #4b9cd3) 40%, transparent);
+  color: var(--fl-brand-icon, #5a97c4);
 }
 .fl-tile-body {
   display: block;
-  font-size: 16px;
+  font-size: 15px;
   color: var(--fl-muted);
-  margin-top: 12px;
   line-height: 1.5;
+}
+/* The firm's uploaded logo (tenant setting) — the comp's 52px wordmark. */
+.fl-logo {
+  height: 52px;
+  width: auto;
+  display: block;
 }
 
 /* ---- Optional attorney-authored sections (tagline lives above) ---- */
