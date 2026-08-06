@@ -27308,6 +27308,9 @@ details.li-brief-research summary:hover {
 .li-topbar {
   background: var(--li-brand, var(--li-topbar-bg));
 }
+/* Rail tint. RAIL-WEBSITE-STYLE-1 made this INERT for the ATTORNEY rail — it
+   carries .li-rail--glass, whose tail block below has no colored surface to
+   tint. Kept for the client portal's rail (PortalSideNav, same classes). */
 .li-rail {
   background: var(--li-brand-deep, var(--li-rail-bg));
 }
@@ -27337,6 +27340,196 @@ details.li-brief-research summary:hover {
   flex: 0 0 auto;
   border-radius: 7px;
   border: 1px solid var(--li-border);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RAIL-WEBSITE-STYLE-1 — the attorney rail wears the marketing site's rail
+   (legal-instruments/Sidebar.dc.html). Two states, no new mechanics:
+     collapsed → NO surface at all (transparent, no border, no shadow): a bare
+       icon column floating over the page;
+     expanded  → the site's cream glass panel with navy labels, a gold shimmer
+       accent bar on the active row.
+   Everything is scoped to .li-rail--glass, which ONLY AttorneyRail.tsx sets.
+   PortalSideNav.tsx PORTS the same li-rail-. chrome classes (see the li-cpnav
+   block above), so an unscoped restyle would silently repaint the client
+   portal's dark rail too.
+   Appended at the tail (append-only discipline) so these win on source order
+   over both the base .li-rail block and the UIWALK-2 firm-brand tint rule —
+   which means --li-brand-deep is now INERT for the attorney rail by design:
+   it has no colored surface left to tint. The top bar (--li-brand) and the
+   portal chrome still tint exactly as before.
+   (Never write a star immediately followed by a slash inside this comment —
+   it terminates the comment early and breaks the CSS minifier.)
+   ══════════════════════════════════════════════════════════════════════════ */
+.li-rail--glass {
+  /* Site palette: navy-on-cream, flipped from the old light-on-navy. */
+  --li-glass-fg: rgba(27, 42, 74, 0.68);
+  --li-glass-fg-strong: #16203a;
+  --li-glass-hover: rgba(27, 42, 74, 0.07);
+  --li-glass-active: rgba(201, 162, 95, 0.2);
+  --li-glass-line: rgba(27, 42, 74, 0.12);
+  --li-glass-gold: #8a6a30;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--li-glass-fg);
+  transition:
+    width 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
+    background 0.35s ease,
+    box-shadow 0.35s ease;
+}
+/* Expanded (hover or pinned): the site's glass panel. The app rail runs the
+   full viewport height, so the radius stays on the right edge only. */
+.li-rail--glass.li-rail--expanded {
+  background: linear-gradient(100deg, rgba(251, 248, 243, 0.97) 0%, rgba(248, 244, 236, 0.93) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 22px 54px -24px rgba(38, 62, 108, 0.26);
+  border-radius: 0 16px 16px 0;
+}
+
+/* Head — the brand lockup. Collapsed: the twinkle mark alone. Expanded: the
+   full wordmark (which carries the same stars at its tail). Both live in the
+   pin button, so the pin/unpin control is unchanged. */
+.li-rail--glass .li-rail-head {
+  border-bottom: none;
+}
+.li-rail--glass.li-rail--expanded .li-rail-head {
+  border-bottom: 1px solid var(--li-glass-line);
+}
+.li-rail--glass .li-rail-pin {
+  color: var(--li-glass-fg);
+  border-radius: 9px;
+}
+.li-rail--glass .li-rail-pin:hover {
+  background: var(--li-glass-hover);
+}
+.li-rail--glass .li-rail-pin.is-pinned {
+  background: var(--li-glass-active);
+}
+.li-rail--glass .li-rail-mark {
+  display: block;
+}
+.li-rail--glass .li-rail-mark-word {
+  display: none;
+  height: 24px;
+  width: auto;
+  flex: 0 0 auto;
+}
+.li-rail--glass.li-rail--expanded .li-rail-pin {
+  width: auto;
+  min-width: 34px;
+  padding: 0 6px;
+}
+.li-rail--glass.li-rail--expanded .li-rail-mark {
+  display: none;
+}
+.li-rail--glass.li-rail--expanded .li-rail-mark-word {
+  display: block;
+}
+/* Stage chip, restyled to read on cream. */
+.li-rail--glass .li-rail-beta {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(27, 42, 74, 0.08);
+  color: var(--li-glass-fg);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  background-clip: border-box;
+  -webkit-background-clip: border-box;
+  animation: none;
+}
+
+/* Nav rows. */
+.li-rail--glass .li-rail-item,
+.li-rail--glass .li-rail-subitem {
+  color: var(--li-glass-fg);
+}
+/* text-decoration: the rail's leaves are anchors, so the global a:hover
+   underline (0,1,1) out-specified .li-rail-item's `text-decoration: none`
+   (0,1,0). Invisible on the old navy, obvious on cream. */
+.li-rail--glass .li-rail-item:hover,
+.li-rail--glass .li-rail-subitem:hover {
+  background: var(--li-glass-hover);
+  text-decoration: none;
+}
+.li-rail--glass .li-rail-item.is-active,
+.li-rail--glass .li-rail-subitem.is-active {
+  color: var(--li-glass-fg-strong);
+  background: var(--li-glass-active);
+}
+/* Active accent: the site's animated gold shimmer bar + gold icon. The icon
+   shimmer runs #8a6a30 → #c9a25f rather than the site's #c9a25f → #f0dca6:
+   the console's page background is #f4f6fb, and the site's lighter peak drops
+   the icon to roughly 1.3:1 against it. This range holds ~4.4:1 at its darkest
+   and still reads as gold at its brightest. The BAR keeps the site's exact
+   gradient (its light stop is bracketed by dark ones, so it never washes out). */
+@keyframes li-rail-bar-shim {
+  0% {
+    background-position: 0 0;
+  }
+  50% {
+    background-position: 0 100%;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+@keyframes li-rail-icon-shim {
+  0%,
+  100% {
+    color: #8a6a30;
+  }
+  50% {
+    color: #c9a25f;
+  }
+}
+.li-rail--glass .li-rail-item.is-active .li-rail-bar {
+  background: linear-gradient(180deg, #8a6a30, #c9a25f, #f0dca6, #c9a25f, #8a6a30);
+  background-size: 100% 300%;
+  animation: li-rail-bar-shim 9s ease-in-out infinite;
+}
+.li-rail--glass .li-rail-item.is-active .li-rail-ico,
+.li-rail--glass .li-rail-subitem.is-active .li-rail-subico {
+  color: var(--li-glass-gold);
+  animation: li-rail-icon-shim 9s ease-in-out infinite;
+}
+/* Collapsed: the active row is the gold icon ALONE — no bar, no fill (the
+   site's .li-rail:not(:hover) rules). */
+.li-rail--glass:not(.li-rail--expanded) .li-rail-item,
+.li-rail--glass:not(.li-rail--expanded) .li-rail-item.is-active,
+.li-rail--glass:not(.li-rail--expanded) .li-rail-pin.is-pinned,
+.li-rail--glass:not(.li-rail--expanded) .li-rail-user-btn {
+  background: transparent;
+}
+.li-rail--glass:not(.li-rail--expanded) .li-rail-bar {
+  display: none;
+}
+.li-rail--glass .li-rail-nav::-webkit-scrollbar-thumb {
+  background: rgba(27, 42, 74, 0.18);
+  background-clip: content-box;
+}
+
+/* User block. */
+.li-rail--glass .li-rail-user {
+  border-top: none;
+}
+.li-rail--glass.li-rail--expanded .li-rail-user {
+  border-top: 1px solid var(--li-glass-line);
+}
+.li-rail--glass .li-rail-user-btn:hover {
+  background: var(--li-glass-hover);
+}
+.li-rail--glass .li-rail-avatar {
+  background: rgba(27, 42, 74, 0.12);
+  color: var(--li-glass-fg-strong);
+}
+.li-rail--glass .li-rail-user-name {
+  color: var(--li-glass-fg-strong);
+}
+.li-rail--glass .li-rail-user-role {
+  color: rgba(27, 42, 74, 0.55);
 }
 
 /* ==========================================================================
